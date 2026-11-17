@@ -17,6 +17,18 @@ enum Jumper {
         }
     }
 
+    /// The app a session runs in. A Codex session that reports no terminal at
+    /// all comes from the Codex (ChatGPT) desktop app.
+    static func hostBundle(for session: Session) -> String? {
+        if let bundle = bundleId(for: session.terminal) { return bundle }
+        if session.tool == .codex, session.terminal.termProgram == nil, session.terminal.tty == nil {
+            return ["com.openai.codex", "com.openai.chat"].first {
+                NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
+            }
+        }
+        return nil
+    }
+
     /// Apps where a session is a shell tab, so the resume command is a useful fallback.
     static let terminalBundles: Set<String> = [
         "com.googlecode.iterm2", "com.apple.Terminal", "com.mitchellh.ghostty", "dev.warp.Warp-Stable",

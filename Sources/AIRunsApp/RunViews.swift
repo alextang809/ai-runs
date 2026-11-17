@@ -23,7 +23,7 @@ struct SessionRow: View {
     var body: some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 10) {
-                AppIcon(bundleId: Jumper.bundleId(for: session.terminal))
+                AppIcon(bundleId: Jumper.hostBundle(for: session))
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
@@ -74,7 +74,11 @@ struct SessionRow: View {
 /// Words shared by the row, the flyout and VoiceOver.
 enum RunText {
     static func place(_ session: Session) -> String {
-        let host = session.terminal.appName
+        var host = session.terminal.appName
+        if session.tool == .codex, session.terminal.bundleId == nil, session.terminal.termProgram == nil,
+           session.terminal.tty == nil {
+            host = "Codex"
+        }
         var parts: [String]
         if (session.tool == .claudeCode && host == "Claude") || (session.tool == .codex && host == "Codex") {
             parts = ["\(host) app"]
