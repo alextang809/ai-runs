@@ -115,6 +115,21 @@ final class AppModel: ObservableObject {
 
             // The Claude desktop app's sidebar name, when the session runs there.
             var toolTitle: String?
+            if session.tool == .codex,
+               let thread = CodexThreadIndex.thread(id: session.sessionId, database: CodexThreadIndex.database()) {
+                if thread.isInternal {
+                    // Codex's own helpers (naming, reviews, subagents) aren't the user's threads.
+                    store.ignore(id: session.id)
+                    saveSessions()
+                    continue
+                }
+                if thread.archived {
+                    store.dismiss(id: session.id, at: now)
+                    saveSessions()
+                    continue
+                }
+                toolTitle = thread.name
+            }
             if session.tool == .claudeCode {
                 if desktop == nil { desktop = ClaudeDesktopIndex.load(root: ClaudeDesktopIndex.root()) }
                 toolTitle = ClaudeDesktopIndex.session(forCLI: session.sessionId, in: desktop ?? [])?.title
@@ -237,6 +252,14 @@ final class AppModel: ObservableObject {
         store.resolve(id: sessionId)
         saveSessions()
         if let title { show("Resolved: \(title)") }
+    }
+
+    /// Takes a session off the list until the user messages it again.
+    func remove(sessionId: String) {
+        guard store.sessions[sessionId] != nil else { return }
+        store.dismiss(id: sessionId, at: Date())
+        saveSessions()
+        show("Removed. It comes back if you message it again.")
     }
 
     func rename(sessionId: String, to title: String) {

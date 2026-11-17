@@ -609,3 +609,69 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(stats.sessionsToday, 2)
     }
 }
+
+final class RemoveTests: XCTestCase {
+    private func ev(_ kind: EventKind, _ s: Double, drivenBy: String? = nil) -> AgentEvent {
+        AgentEvent(tool: .codex, kind: kind, sessionId: "x", at: Date(timeIntervalSince1970: s), drivenBy: drivenBy)
+    }
+
+    func testRemovedSessionStaysOutUntilUserPromptsIt() {
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0))
+        store.dismiss(id: "codex:x", at: Date(timeIntervalSince1970: 5))
+        store.apply(ev(.toolActivity, 6))
+        store.apply(ev(.turnEnd, 7))
+        store.apply(ev(.promptStart, 8, drivenBy: "coordinator"))
+        XCTAssertTrue(store.sessions.isEmpty)
+        store.apply(ev(.promptStart, 9))
+        XCTAssertEqual(store.sessions.count, 1)
+    }
+
+    func testRemovedSessionReturnsWhenItNeedsApproval() {
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0))
+        store.dismiss(id: "codex:x")
+        store.apply(ev(.needsApproval, 6))
+        XCTAssertEqual(store.sessions["codex:x"]?.state, .needsApproval)
+    }
+
+    func testIgnoredThreadsNeverShow() {
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0))
+        store.ignore(id: "codex:x")
+        store.apply(ev(.promptStart, 9))
+        XCTAssertTrue(store.sessions.isEmpty)
+        XCTAssertNil(store.history?["codex:x"])
+    }
+}
+
+#if canImport(SQLite3)
+import SQLite3
+
+final class CodexThreadIndexTests: XCTestCase {
+    func testReadsNameAndSource() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).sqlite")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        let sql = """
+        CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, title TEXT, thread_source TEXT, archived INTEGER);
+        INSERT INTO threads VALUES ('u1', 'Fix login', 'a long first prompt', 'user', 0);
+        INSERT INTO threads VALUES ('g1', NULL, 'This is an app-generated request', 'guardian_review', 0);
+        INSERT INTO threads VALUES ('old', '', 't', NULL, 1);
+        """
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(db)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let user = try XCTUnwrap(CodexThreadIndex.thread(id: "u1", database: url))
+        XCTAssertEqual(user.name, "Fix login")
+        XCTAssertFalse(user.isInternal)
+        XCTAssertTrue(try XCTUnwrap(CodexThreadIndex.thread(id: "g1", database: url)).isInternal)
+        let old = try XCTUnwrap(CodexThreadIndex.thread(id: "old", database: url))
+        XCTAssertNil(old.name)
+        XCTAssertTrue(old.archived)
+        XCTAssertFalse(old.isInternal)
+        XCTAssertNil(CodexThreadIndex.thread(id: "missing", database: url))
+    }
+}
+#endif

@@ -198,7 +198,13 @@ struct MenuColumn: View {
         VStack(spacing: 0) {
             ForEach(sessions) { session in
                 SessionRow(session: session, lifeline: model.store.lifeline(for: session.id, now: model.now),
-                           now: model.now, ui: ui) {
+                           now: model.now, ui: ui,
+                           rename: { actions.renameSession(session.id) },
+                           pin: { model.pin(sessionId: session.id) },
+                           remove: {
+                               ui.hover = nil
+                               model.remove(sessionId: session.id)
+                           }) {
                     actions.closePanel()
                     model.open(sessionId: session.id)
                 }
@@ -233,6 +239,7 @@ struct CardRow: View {
     let stale: Bool
     let now: Date
     @ObservedObject var ui: PanelUIState
+    let remove: (() -> Void)?
     let open: () -> Void
 
     private var key: PanelUIState.Target { .card(card.id) }
@@ -245,22 +252,30 @@ struct CardRow: View {
                     Text(card.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                     Text(card.next.isEmpty ? "No next step yet" : "Next: \(card.next)")
                         .font(.system(size: 11.5)).lineLimit(1)
-                        .foregroundStyle(highlighted ? Color.white.opacity(0.85) : Color.secondary)
+                        .foregroundStyle(Color.secondary)
                 }
                 Spacer(minLength: 8)
-                Text(TextUtils.age(now.timeIntervalSince(card.touchedAt)))
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(highlighted ? Color.white.opacity(0.85) : Color.secondary)
+                if highlighted, let remove {
+                    RemoveButton(label: "Remove \(card.title)", action: remove)
+                } else {
+                    Text(TextUtils.age(now.timeIntervalSince(card.touchedAt)))
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(Color.secondary)
+                }
             }
             .padding(.leading, 22)
             .padding(.trailing, 8)
             .frame(height: 44)
-            .foregroundStyle(highlighted ? Color.white : Color.primary)
-            .background(RoundedRectangle(cornerRadius: 6).fill(highlighted ? Color.accentColor : Color.clear))
+            .foregroundStyle(Color.primary)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
             .opacity(stale && !highlighted ? 0.55 : 1)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Open", action: open)
+            if let remove { Button("Remove", action: remove) }
+        }
         .onHover { inside in inside ? ui.hoverOn(key) : ui.hoverOff() }
         .reportFrame(key.key)
         .accessibilityLabel("\(card.title). \(card.next.isEmpty ? "" : "Next: \(card.next)")")
@@ -348,7 +363,7 @@ struct PinnedSection: View {
                     .onHover { if $0 { ui.hoverOff() } }
                 if !ui.collapsed.contains(group.name) {
                     ForEach(group.cards) { card in
-                        CardRow(card: card, stale: false, now: model.now, ui: ui) {
+                        CardRow(card: card, stale: false, now: model.now, ui: ui, remove: { model.archive(cardId: card.id) }) {
                             actions.closePanel()
                             model.open(card: card)
                         }
@@ -362,7 +377,7 @@ struct PinnedSection: View {
                     .onHover { if $0 { ui.hoverOff() } }
                 if !ui.collapsed.contains(PanelUIState.staleGroup) {
                     ForEach(stale) { card in
-                        CardRow(card: card, stale: true, now: model.now, ui: ui) {
+                        CardRow(card: card, stale: true, now: model.now, ui: ui, remove: { model.archive(cardId: card.id) }) {
                             actions.closePanel()
                             model.open(card: card)
                         }
@@ -570,12 +585,10 @@ struct SessionFlyout: View {
                 model.show("Copied “\(session.tool.resumeCommand(sessionId: session.sessionId))”.")
             })
         }
-        if session.state != .working || session.isQuiet(now: now) {
-            flyoutActions.append(FlyoutAction(title: "Resolve") {
-                ui.hover = nil
-                model.resolve(sessionId: session.id)
-            })
-        }
+        flyoutActions.append(FlyoutAction(title: "Remove from List") {
+            ui.hover = nil
+            model.remove(sessionId: session.id)
+        })
 
         return FlyoutBody(
             title: session.title,
@@ -617,7 +630,7 @@ struct CardFlyout: View {
             })
         }
         flyoutActions.append(FlyoutAction(title: "Edit…") { actions.editCard(card) })
-        flyoutActions.append(FlyoutAction(title: "Archive") {
+        flyoutActions.append(FlyoutAction(title: "Remove") {
             ui.hover = nil
             model.archive(cardId: card.id)
         })

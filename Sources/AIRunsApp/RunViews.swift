@@ -12,6 +12,9 @@ struct SessionRow: View {
     let lifeline: [ActivitySpan]
     let now: Date
     @ObservedObject var ui: PanelUIState
+    let rename: () -> Void
+    let pin: () -> Void
+    let remove: () -> Void
     let open: () -> Void
 
     private var key: PanelUIState.Target { .session(session.id) }
@@ -29,6 +32,9 @@ struct SessionRow: View {
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         StatePill(session: session, now: now)
+                        if highlighted {
+                            RemoveButton(label: "Remove \(session.title) from the list", action: remove)
+                        }
                     }
                     Text(RunText.place(session))
                         .font(.system(size: 11.5))
@@ -49,9 +55,17 @@ struct SessionRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Open", action: open)
+            Button("Rename…", action: rename)
+            Button("Pin to Board", action: pin)
+            Divider()
+            Button("Remove from List", action: remove)
+        }
         .onHover { inside in inside ? ui.hoverOn(key) : ui.hoverOff() }
         .reportFrame(key.key)
         .accessibilityElement(children: .ignore)
+        .accessibilityAction(named: "Remove from List", remove)
         .accessibilityLabel("\(session.title), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.liveText(session, now: now))")
         .accessibilityAddTraits(.isButton)
     }
@@ -423,5 +437,26 @@ struct LifelineLegend: View {
             RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 6)
             Text(label)
         }
+    }
+}
+
+/// A small grey × that appears on the hovered row.
+struct RemoveButton: View {
+    let label: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(hovering ? Color.primary : Color.secondary)
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(Color.primary.opacity(hovering ? 0.14 : 0.08)))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Remove from list")
+        .accessibilityLabel(label)
     }
 }

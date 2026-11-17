@@ -72,6 +72,12 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// Each session's lifeline (working / waiting / background spans), kept for a
     /// day even after the session is resolved, for the lifelines and the header stats.
     public internal(set) var history: [String: [ActivitySpan]]? = nil
+    /// Sessions the user removed. They stay out until the user sends them a
+    /// new prompt, even while the agent keeps sending events.
+    public private(set) var dismissed: Set<String>? = nil
+    /// The tools' own internal threads (Codex naming and review helpers).
+    /// Never shown.
+    public private(set) var ignored: Set<String>? = nil
 
     public func lastSeen(_ tool: AgentTool) -> Date? { toolLastSeen?[tool.rawValue] }
 
@@ -84,10 +90,19 @@ public struct SessionStore: Codable, Equatable, Sendable {
         seen[event.tool.rawValue] = max(seen[event.tool.rawValue] ?? event.at, event.at)
         toolLastSeen = seen
 
+        if ignored?.contains(key) == true { return }
         if event.kind == .sessionEnd {
             sessions[key] = nil
+            dismissed?.remove(key)
             record(nil, for: key, at: event.at)
             return
+        }
+        if dismissed?.contains(key) == true {
+            // Only the user talking to it again, or it asking the user for
+            // approval, brings a removed session back.
+            let userPrompt = event.kind == .promptStart && event.drivenBy == nil
+            guard userPrompt || event.kind == .needsApproval else { return }
+            dismissed?.remove(key)
         }
         if session == nil {
             // Any event creates the session, so sessions that started before
@@ -161,6 +176,25 @@ public struct SessionStore: Codable, Equatable, Sendable {
     public mutating func resolve(id: String, at: Date = Date()) {
         sessions[id] = nil
         record(nil, for: id, at: at)
+    }
+
+    /// Removes a session from the list until the user prompts it again.
+    public mutating func dismiss(id: String, at: Date = Date()) {
+        guard sessions[id] != nil else { return }
+        resolve(id: id, at: at)
+        var set = dismissed ?? []
+        set.insert(id)
+        dismissed = set
+    }
+
+    /// Hides a tool's internal thread for good, along with its history.
+    public mutating func ignore(id: String) {
+        sessions[id] = nil
+        history?[id] = nil
+        var set = ignored ?? []
+        set.insert(id)
+        if set.count > 2000 { set = Set(set.suffix(1000)) }
+        ignored = set
     }
 
     /// The user's own name for the session. Automatic names never replace it.
