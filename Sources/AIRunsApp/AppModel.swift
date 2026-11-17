@@ -74,6 +74,27 @@ final class AppModel: ObservableObject {
         }
         try? JSONFile.save(Cursor(offset: reader.offset), to: paths.cursor)
         now = Date()
+        nameUntitledSessions()
+    }
+
+    private var titleLookups: [String: Date] = [:]
+
+    /// Sessions that started before the hooks were installed have no first
+    /// prompt; read it from the transcript instead (at most once a minute each).
+    private func nameUntitledSessions() {
+        var updated = store
+        for session in store.sessions.values where session.hasGenericTitle {
+            guard let path = session.transcriptPath else { continue }
+            if let last = titleLookups[session.id], Date().timeIntervalSince(last) < 60 { continue }
+            titleLookups[session.id] = Date()
+            if let prompt = TranscriptReader.firstUserPrompt(at: URL(fileURLWithPath: path)) {
+                updated.rename(id: session.id, to: TextUtils.title(fromPrompt: prompt))
+            }
+        }
+        if updated != store {
+            store = updated
+            saveSessions()
+        }
     }
 
     private func saveSessions() { try? JSONFile.save(store, to: paths.sessions) }

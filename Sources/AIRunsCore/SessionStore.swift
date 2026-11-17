@@ -32,6 +32,11 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
 
     public static func key(tool: AgentTool, sessionId: String) -> String { "\(tool.rawValue):\(sessionId)" }
 
+    public static func genericTitle(for tool: AgentTool) -> String { "\(tool.displayName) session" }
+
+    /// True while the session still has the placeholder title.
+    public var hasGenericTitle: Bool { title == Session.genericTitle(for: tool) }
+
     /// A working session that has sent nothing for this long may have been
     /// interrupted (Ctrl-C, closed window) without a Stop event.
     public static let quietThreshold: TimeInterval = 30 * 60
@@ -56,10 +61,11 @@ public struct SessionStore: Codable, Equatable, Sendable {
             return
         }
         if session == nil {
-            // A tool activity on its own says nothing worth showing.
-            if event.kind == .toolActivity { return }
+            // Any event creates the session, so sessions that started before
+            // the hooks were installed still show up. The app replaces the
+            // generic title from the transcript when it can.
             let title = event.prompt.map { TextUtils.title(fromPrompt: $0) }
-                ?? "\(event.tool.displayName) session"
+                ?? Session.genericTitle(for: event.tool)
             session = Session(tool: event.tool, sessionId: event.sessionId, title: title, cwd: event.cwd,
                               state: .working, startedAt: event.at, turnStartedAt: event.at,
                               waitingSince: nil, lastEventAt: event.at, lastMessage: nil,

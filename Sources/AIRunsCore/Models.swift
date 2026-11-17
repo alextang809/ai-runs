@@ -47,6 +47,8 @@ public struct TerminalContext: Codable, Equatable, Sendable {
     /// Human name of the app hosting the session.
     public var appName: String {
         switch (bundleId ?? "", termProgram ?? "") {
+        case ("com.anthropic.claudefordesktop", _): return "Claude"
+        case ("com.openai.codex", _): return "Codex"
         case ("com.googlecode.iterm2", _), (_, "iTerm.app"): return "iTerm2"
         case ("com.apple.Terminal", _), (_, "Apple_Terminal"): return "Terminal"
         case ("com.todesktop.230313mzl4w4u92", _): return "Cursor"

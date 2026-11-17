@@ -87,11 +87,37 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
 
     // MARK: - Panel
 
-    @objc private func togglePanel(_ sender: Any?) {
+    @objc func togglePanel(_ sender: Any?) {
         if panel?.isVisible == true { closePanel() } else { openPanel() }
     }
 
-    private func openPanel() {
+    /// True when the menu bar is too full to show the icon, which on a
+    /// MacBook usually means it sits behind the camera notch.
+    var isIconHidden: Bool {
+        guard let window = statusItem.button?.window, let screen = window.screen ?? NSScreen.main else { return true }
+        if !window.occlusionState.contains(.visible) { return true }
+        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea, right.minX > left.maxX {
+            let notch = NSRect(x: left.maxX, y: min(left.minY, right.minY), width: right.minX - left.maxX,
+                               height: max(left.height, right.height))
+            if window.frame.intersects(notch) { return true }
+        }
+        return !screen.frame.intersects(window.frame)
+    }
+
+    func warnIfIconHidden() {
+        let key = "didWarnHiddenIcon"
+        guard isIconHidden, !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "The AI Runs icon is hidden"
+        alert.informativeText = "Your menu bar is full, so macOS hid the AI Runs icon (usually behind the camera notch). Press \(HotKey.displayName) or open AI Runs again from Applications to show the panel. Quitting a menu bar app you rarely use makes room for the icon."
+        alert.addButton(withTitle: "Show AI Runs Now")
+        alert.addButton(withTitle: "OK")
+        if alert.runModal() == .alertFirstButtonReturn { openPanel() }
+    }
+
+    func openPanel() {
         let front = NSWorkspace.shared.frontmostApplication
         model.frontAppAtOpen = front?.bundleIdentifier == Bundle.main.bundleIdentifier ? nil : front
         model.refresh()
@@ -99,12 +125,15 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
 
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        guard let button = statusItem.button, let buttonWindow = button.window else { return }
-        let buttonFrame = buttonWindow.frame
-        let screenFrame = (buttonWindow.screen ?? NSScreen.main)?.visibleFrame ?? .zero
-        let menuRight = min(buttonFrame.midX + PanelLayout.menuWidth / 2 + PanelLayout.outerPadding,
-                            screenFrame.maxX - 4)
-        anchorTopRight = NSPoint(x: menuRight, y: buttonFrame.minY - 2)
+        let screenFrame = (statusItem.button?.window?.screen ?? NSScreen.main)?.visibleFrame ?? .zero
+        if let buttonFrame = statusItem.button?.window?.frame, !isIconHidden {
+            let menuRight = min(buttonFrame.midX + PanelLayout.menuWidth / 2 + PanelLayout.outerPadding,
+                                screenFrame.maxX - 4)
+            anchorTopRight = NSPoint(x: menuRight, y: buttonFrame.minY - 2)
+        } else {
+            // No visible icon to hang from: open at the top-right of the screen.
+            anchorTopRight = NSPoint(x: screenFrame.maxX - 4, y: screenFrame.maxY - 2)
+        }
         placePanel()
         panel.makeKeyAndOrderFront(nil)
         installMonitors()
@@ -181,7 +210,8 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
     func showSettings() {
         closePanel()
         if settingsWindow == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model)))
+            let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(
+                model: model, iconHidden: { [weak self] in self?.isIconHidden ?? false })))
             window.title = "AI Runs Settings"
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false

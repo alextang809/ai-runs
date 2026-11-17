@@ -5,6 +5,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
+    let iconHidden: () -> Bool
+    @State private var hidden = false
     @State private var statuses: [AgentTool: HookInstaller.Status] = [:]
     @State private var error: String?
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -44,6 +46,17 @@ struct SettingsView: View {
 
             Divider()
 
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Open the panel from the menu bar icon or with \(HotKey.displayName) anywhere.")
+                    .font(.system(size: 12))
+                if hidden {
+                    Label("Your menu bar is full, so the icon is hidden (usually behind the camera notch). Use \(HotKey.displayName), or quit a menu bar app you rarely use.", systemImage: "eye.slash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             Toggle("Open AI Runs at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, enabled in
                     do {
@@ -70,6 +83,7 @@ struct SettingsView: View {
     }
 
     private func refresh() {
+        hidden = iconHidden()
         var result: [AgentTool: HookInstaller.Status] = [:]
         for tool in AgentTool.allCases { result[tool] = model.hookStatus(tool) }
         statuses = result

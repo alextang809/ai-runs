@@ -108,10 +108,14 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(store.sessions.isEmpty)
     }
 
-    func testToolActivityAloneCreatesNothing() {
+    func testToolActivityCreatesWorkingSessionForUnseenSession() throws {
+        // A session that started before the hooks were installed.
         var store = SessionStore()
         store.apply(event(.toolActivity, minutes: 0))
-        XCTAssertTrue(store.sessions.isEmpty)
+        let session = try XCTUnwrap(store.sessions["claude-code:s1"])
+        XCTAssertEqual(session.state, .working)
+        XCTAssertTrue(session.hasGenericTitle)
+        XCTAssertEqual(session.project, "web-app")
     }
 
     func testStopWithoutPromptCreatesSession() {
@@ -245,6 +249,42 @@ final class PinBoardTests: XCTestCase {
         XCTAssertTrue(text.contains("Pricing copy"))
         XCTAssertTrue(text.contains("Lead with the free tier."))
         XCTAssertTrue(text.contains("Next step: Pick a version"))
+    }
+}
+
+final class TranscriptReaderTests: XCTestCase {
+    private func write(_ lines: [[String: Any]]) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl")
+        let text = try lines.map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }
+            .joined(separator: "\n")
+        try Data(text.utf8).write(to: url)
+        return url
+    }
+
+    func testClaudeTranscriptSkipsMetaAndCommands() throws {
+        let url = try write([
+            ["type": "summary", "summary": "x"],
+            ["type": "user", "isMeta": true, "message": ["role": "user", "content": "Caveat: local commands"]],
+            ["type": "user", "message": ["role": "user", "content": "<command-name>/clear</command-name>"]],
+            ["type": "user", "message": ["role": "user", "content": [["type": "text", "text": "Add dark mode to settings"]]]],
+            ["type": "user", "message": ["role": "user", "content": "second prompt"]],
+        ])
+        XCTAssertEqual(TranscriptReader.firstUserPrompt(at: url), "Add dark mode to settings")
+    }
+
+    func testCodexRollout() throws {
+        let url = try write([
+            ["type": "session_meta", "payload": ["id": "x"]],
+            ["type": "response_item", "payload": ["type": "message", "role": "user",
+                                                  "content": [["type": "input_text", "text": "<environment_context>cwd</environment_context>"]]]],
+            ["type": "response_item", "payload": ["type": "message", "role": "user",
+                                                  "content": [["type": "input_text", "text": "Write tests for the parser"]]]],
+        ])
+        XCTAssertEqual(TranscriptReader.firstUserPrompt(at: url), "Write tests for the parser")
+    }
+
+    func testMissingFile() {
+        XCTAssertNil(TranscriptReader.firstUserPrompt(at: URL(fileURLWithPath: "/nonexistent/file.jsonl")))
     }
 }
 

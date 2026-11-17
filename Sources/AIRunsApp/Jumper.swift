@@ -17,6 +17,12 @@ enum Jumper {
         }
     }
 
+    /// Apps where a session is a shell tab, so the resume command is a useful fallback.
+    static let terminalBundles: Set<String> = [
+        "com.googlecode.iterm2", "com.apple.Terminal", "com.mitchellh.ghostty", "dev.warp.Warp-Stable",
+        "com.github.wez.wezterm", "net.kovidgoyal.kitty", "org.alacritty", "co.zeit.hyper",
+    ]
+
     static func open(session: Session, show: (String) -> Void) {
         focus(tool: session.tool, sessionId: session.sessionId, cwd: session.cwd,
               terminal: session.terminal, show: show)
@@ -49,6 +55,8 @@ enum Jumper {
         default:
             break
         }
+        // Sessions inside a desktop app (Claude, Codex): bringing the app back is enough.
+        if let bundle, !terminalBundles.contains(bundle), activate(bundleId: bundle) { return }
         let resume = tool.resumeCommand(sessionId: sessionId)
         if let bundle, activate(bundleId: bundle) {
             copy(resume)
