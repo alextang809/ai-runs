@@ -23,7 +23,7 @@ struct SettingsView: View {
             }
 
             ForEach(AgentTool.allCases, id: \.self) { tool in
-                HookRow(tool: tool, status: statuses[tool] ?? .toolNotFound,
+                HookRow(tool: tool, status: statuses[tool] ?? .toolNotFound, lastSeen: model.store.lastSeen(tool),
                         file: model.installer.configFile(for: tool).path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) {
                     run { try model.installHooks(tool) }
                 } remove: {
@@ -31,8 +31,8 @@ struct SettingsView: View {
                 }
             }
 
-            if statuses[.codex] == .installed {
-                Label("In Codex, run /hooks once and trust the new AI Runs hooks.", systemImage: "info.circle")
+            if statuses[.codex] == .installed, model.store.lastSeen(.codex) == nil {
+                Label("Codex asks you to approve new hooks (Review hooks → Allow all, or /hooks). Until then it sends nothing.", systemImage: "info.circle")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -111,6 +111,7 @@ struct SettingsView: View {
 private struct HookRow: View {
     let tool: AgentTool
     let status: HookInstaller.Status
+    let lastSeen: Date?
     let file: String
     let install: () -> Void
     let remove: () -> Void
@@ -120,14 +121,17 @@ private struct HookRow: View {
         case .toolNotFound: return "Not found — install \(tool.displayName) first"
         case .notInstalled: return "Not set up"
         case .partiallyInstalled: return "Partly set up — install again to repair"
-        case .installed: return "Set up in \(file)"
+        case .installed:
+            guard let lastSeen else { return "Set up in \(file) · no events yet" }
+            let ago = TextUtils.duration(Date().timeIntervalSince(lastSeen))
+            return "Set up in \(file) · last event \(ago == "now" ? "just now" : ago + " ago")"
         }
     }
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: status == .installed ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(status == .installed ? Color.green : Color.secondary)
+            Image(systemName: status != .installed ? "circle" : (lastSeen == nil ? "clock" : "checkmark.circle.fill"))
+                .foregroundStyle(status != .installed ? Color.secondary : (lastSeen == nil ? Color.orange : Color.green))
             VStack(alignment: .leading, spacing: 2) {
                 Text(tool.displayName).font(.system(size: 13, weight: .semibold))
                 Text(statusText).font(.system(size: 11.5)).foregroundStyle(.secondary)

@@ -94,31 +94,37 @@ final class AppModel: ObservableObject {
         suggestTitles()
     }
 
-    /// The reply each session was last named from, so names are refreshed
+    /// The reply each session was last checked at, so names are looked at
     /// once per finished turn rather than on every event.
-    private var namedFromReply: [String: String] = [:]
+    private var checkedAtReply: [String: String] = [:]
     private var naming: Set<String> = []
 
-    /// Keeps each session's name in step with the conversation, unless the
-    /// user renamed it: the tool's own title if it has one, otherwise a
-    /// suggestion from the on-device model, otherwise the first prompt.
+    /// Names each session once, so the name keeps matching what the user
+    /// remembers instead of chasing every reply:
+    /// 1. the user's own name (never replaced);
+    /// 2. the tool's own title, followed whenever the tool changes it;
+    /// 3. otherwise one name chosen from what was asked (on-device model,
+    ///    else the first request), kept from then on.
     private func suggestTitles() {
         for session in store.sessions.values where session.titleIsCustom != true {
             let reply = session.lastMessage ?? ""
-            if namedFromReply[session.id] == reply || naming.contains(session.id) { continue }
-            namedFromReply[session.id] = reply
+            if checkedAtReply[session.id] == reply || naming.contains(session.id) { continue }
+            checkedAtReply[session.id] = reply
             let transcript = session.transcriptPath.map { URL(fileURLWithPath: $0) }
 
             if let transcript, let toolTitle = TranscriptReader.toolTitle(at: transcript) {
-                if toolTitle != session.title {
-                    store.setSuggestedTitle(id: session.id, to: toolTitle)
+                if toolTitle != session.title || session.titleSettled != true {
+                    store.settleTitle(id: session.id, to: toolTitle)
                     saveSessions()
                 }
                 continue
             }
+            if session.titleSettled == true { continue }
 
             let first = session.firstPrompt ?? transcript.flatMap { TranscriptReader.firstUserPrompt(at: $0) }
-            let lastReply = session.lastMessage
+            // Only fall back to a reply when nobody typed anything (a session
+            // driven by another agent).
+            let lastReply = first == nil ? session.lastMessage : nil
             guard first != nil || lastReply != nil else { continue }
             let id = session.id
             naming.insert(id)
@@ -126,12 +132,10 @@ final class AppModel: ObservableObject {
                 let suggestion = await TitleModel.suggest(firstPrompt: first, lastReply: lastReply)
                 guard let self else { return }
                 self.naming.remove(id)
-                if let suggestion {
-                    self.store.setSuggestedTitle(id: id, to: suggestion)
-                } else if let first, self.store.sessions[id]?.hasGenericTitle == true {
-                    self.store.setSuggestedTitle(id: id, to: TextUtils.truncate(first, limit: 48))
+                if let name = suggestion ?? first.map({ TextUtils.truncate($0, limit: 48) }) {
+                    self.store.settleTitle(id: id, to: name)
+                    self.saveSessions()
                 }
-                self.saveSessions()
             }
         }
     }
@@ -170,6 +174,12 @@ final class AppModel: ObservableObject {
     }
 
     func hookStatus(_ tool: AgentTool) -> HookInstaller.Status { installer.status(for: tool) }
+
+    /// Tools whose hooks are set up but have never sent an event, usually
+    /// because the tool still asks the user to approve them.
+    var silentTools: [AgentTool] {
+        AgentTool.allCases.filter { installer.status(for: $0) == .installed && store.lastSeen($0) == nil }
+    }
 
     var needsHookSetup: Bool {
         AgentTool.allCases.contains {

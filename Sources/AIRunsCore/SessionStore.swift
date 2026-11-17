@@ -33,6 +33,15 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var firstPrompt: String?
     /// True once the user renamed the session; automatic names then leave it alone.
     public var titleIsCustom: Bool?
+    /// True once the automatic name was chosen; it then stays put instead of
+    /// following every reply, so it keeps matching what the user remembers.
+    public var titleSettled: Bool?
+    /// What it is doing right now, in words. Cleared when the turn ends.
+    public var activity: String?
+    /// Its own step list, when it keeps one.
+    public var progress: RunProgress?
+    /// Another agent that sends this session its prompts, e.g. "coordinator".
+    public var drivenBy: String?
 
     public var isInBackground: Bool { state == .working && (backgroundTasks ?? 0) > 0 }
 
@@ -57,12 +66,20 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
 /// All open sessions, driven by hook events. Pure value type so it is easy to test.
 public struct SessionStore: Codable, Equatable, Sendable {
     public private(set) var sessions: [String: Session] = [:]
+    /// When each tool last sent any event, keyed by `AgentTool.rawValue`.
+    /// Lets the app tell "nothing running" apart from "hooks not firing".
+    public private(set) var toolLastSeen: [String: Date]? = nil
+
+    public func lastSeen(_ tool: AgentTool) -> Date? { toolLastSeen?[tool.rawValue] }
 
     public init() {}
 
     public mutating func apply(_ event: AgentEvent) {
         let key = Session.key(tool: event.tool, sessionId: event.sessionId)
         var session = sessions[key]
+        var seen = toolLastSeen ?? [:]
+        seen[event.tool.rawValue] = max(seen[event.tool.rawValue] ?? event.at, event.at)
+        toolLastSeen = seen
 
         if event.kind == .sessionEnd {
             sessions[key] = nil
@@ -94,6 +111,8 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.waitingSince = nil
             current.approvalDetail = nil
             current.backgroundTasks = nil
+            current.activity = "Thinking"
+            if let driver = event.drivenBy { current.drivenBy = driver }
             if current.firstPrompt == nil, let prompt = event.prompt, let cleaned = TextUtils.cleanPrompt(prompt) {
                 current.firstPrompt = TextUtils.truncate(cleaned, limit: 600)
                 if current.hasGenericTitle || current.title == "Untitled session" {
@@ -105,6 +124,8 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.waitingSince = event.at
             current.approvalDetail = event.approvalDetail ?? current.approvalDetail
         case .toolActivity:
+            if let activity = event.activity { current.activity = activity }
+            if let progress = event.progress { current.progress = progress }
             if current.state == .needsApproval {
                 current.state = .working
                 current.waitingSince = nil
@@ -112,6 +133,8 @@ public struct SessionStore: Codable, Equatable, Sendable {
             }
         case .turnEnd:
             current.approvalDetail = nil
+            current.activity = nil
+            if current.progress?.isFinished == true { current.progress = nil }
             if let message = event.lastMessage, !message.isEmpty { current.lastMessage = message }
             if event.backgroundTasks > 0 {
                 // Still busy: it will resume on its own when the tasks finish.
@@ -147,6 +170,14 @@ public struct SessionStore: Codable, Equatable, Sendable {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, sessions[id] != nil, sessions[id]?.titleIsCustom != true else { return }
         sessions[id]?.title = TextUtils.truncate(trimmed, limit: 60)
+    }
+
+    /// The automatic name, chosen once. Ignored after the user renamed the session.
+    public mutating func settleTitle(id: String, to title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, sessions[id] != nil, sessions[id]?.titleIsCustom != true else { return }
+        sessions[id]?.title = TextUtils.truncate(trimmed, limit: 60)
+        sessions[id]?.titleSettled = true
     }
 
     /// Drops sessions nobody has touched for a long time (closed windows that

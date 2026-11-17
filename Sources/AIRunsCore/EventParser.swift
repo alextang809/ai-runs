@@ -75,6 +75,7 @@ public enum EventParser {
         case "UserPromptSubmit":
             event.kind = .promptStart
             event.prompt = payload["prompt"] as? String
+            event.drivenBy = TextUtils.relaySource(in: event.prompt)
         case "Stop":
             event.kind = .turnEnd
             event.lastMessage = payload["last_assistant_message"] as? String
@@ -89,6 +90,10 @@ public enum EventParser {
             event.approvalDetail = payload["message"] as? String
         case "PostToolUse":
             event.kind = .toolActivity
+            let toolName = payload["tool_name"] as? String
+            let input = payload["tool_input"] as? [String: Any]
+            event.activity = ActivityDescriber.describe(toolName: toolName, input: input)
+            event.progress = ActivityDescriber.progress(toolName: toolName, input: input)
         case "SessionEnd":
             event.kind = .sessionEnd
         default:

@@ -441,3 +441,96 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertThrowsError(try installer.install(tool: .claudeCode, helper: URL(fileURLWithPath: "/x/airuns-hook")))
     }
 }
+
+final class ActivityTests: XCTestCase {
+    func testShellCommandsInWords() {
+        XCTAssertEqual(ActivityDescriber.describe(command: "cd /x && xcodebuild -scheme App build"), "Building")
+        XCTAssertEqual(ActivityDescriber.describe(command: "xcodebuild -scheme App test"), "Running tests")
+        XCTAssertEqual(ActivityDescriber.describe(command: "swift test 2>&1 | tail"), "Running tests")
+        XCTAssertEqual(ActivityDescriber.describe(command: "cat tests/fixtures.json"), "Reading files")
+        XCTAssertEqual(ActivityDescriber.describe(command: "git commit -m x"), "Committing")
+        XCTAssertEqual(ActivityDescriber.describe(command: "rg TODO Sources"), "Searching the code")
+        XCTAssertEqual(ActivityDescriber.describe(command: "/usr/local/bin/ffmpeg -i a.mov"), "Running ffmpeg")
+    }
+
+    func testToolsInWords() {
+        XCTAssertEqual(ActivityDescriber.describe(toolName: "Edit", input: ["file_path": "/a/b/PanelViews.swift"]), "Editing PanelViews.swift")
+        XCTAssertEqual(ActivityDescriber.describe(toolName: "Read", input: [:]), "Reading files")
+        XCTAssertEqual(ActivityDescriber.describe(toolName: "mcp__claude-code-remote__send_message", input: nil), "Using claude-code-remote")
+        XCTAssertEqual(ActivityDescriber.describe(toolName: "shell", input: ["command": ["bash", "-lc", "npm test"]]), "Running tests")
+        XCTAssertEqual(ActivityDescriber.describe(toolName: "apply_patch", input: ["input": "*** Begin Patch\n*** Update File: src/app.ts\n"]), "Editing app.ts")
+    }
+
+    func testProgressFromTodoWriteAndPlan() {
+        let todos: [String: Any] = ["todos": [
+            ["content": "Read code", "activeForm": "Reading code", "status": "completed"],
+            ["content": "Build lens", "activeForm": "Building the lens", "status": "in_progress"],
+            ["content": "Test", "activeForm": "Testing", "status": "pending"],
+        ]]
+        XCTAssertEqual(ActivityDescriber.progress(toolName: "TodoWrite", input: todos),
+                       RunProgress(done: 1, total: 3, current: "Building the lens"))
+        let plan: [String: Any] = ["plan": [["step": "One", "status": "completed"], ["step": "Two", "status": "pending"]]]
+        XCTAssertEqual(ActivityDescriber.progress(toolName: "update_plan", input: plan)?.summary, "1/2 · Two")
+        XCTAssertNil(ActivityDescriber.progress(toolName: "Bash", input: ["command": "ls"]))
+    }
+
+    func testRelaySource() {
+        XCTAssertEqual(TextUtils.relaySource(in: "<relay from=\"coordinator\" session=\"s1\">do it</relay>"), "coordinator")
+        XCTAssertNil(TextUtils.relaySource(in: "fix the bug"))
+    }
+
+    private func event(_ kind: EventKind, at seconds: TimeInterval, tool: AgentTool = .claudeCode,
+                       activity: String? = nil, progress: RunProgress? = nil, prompt: String? = nil,
+                       drivenBy: String? = nil) -> AgentEvent {
+        AgentEvent(tool: tool, kind: kind, sessionId: "s1", at: Date(timeIntervalSince1970: seconds), prompt: prompt,
+                   activity: activity, progress: progress, drivenBy: drivenBy)
+    }
+
+    func testStoreTracksActivityProgressAndDriver() {
+        var store = SessionStore()
+        XCTAssertNil(store.lastSeen(.claudeCode))
+        store.apply(event(.promptStart, at: 0, prompt: "<relay from=\"coordinator\">x</relay>", drivenBy: "coordinator"))
+        var session = store.sessions.values.first!
+        XCTAssertEqual(session.activity, "Thinking")
+        XCTAssertEqual(session.drivenBy, "coordinator")
+        store.apply(event(.toolActivity, at: 5, activity: "Building", progress: RunProgress(done: 1, total: 2, current: "B")))
+        session = store.sessions.values.first!
+        XCTAssertEqual(session.activity, "Building")
+        XCTAssertEqual(session.progress?.summary, "1/2 · B")
+        store.apply(event(.turnEnd, at: 9))
+        session = store.sessions.values.first!
+        XCTAssertNil(session.activity)
+        XCTAssertNotNil(session.progress, "unfinished plans stay")
+        XCTAssertEqual(store.lastSeen(.claudeCode), Date(timeIntervalSince1970: 9))
+        XCTAssertNil(store.lastSeen(.codex))
+    }
+
+    func testSettledTitleRespectsRename() {
+        var store = SessionStore()
+        store.apply(event(.promptStart, at: 0, prompt: "fix the login bug"))
+        let id = store.sessions.keys.first!
+        store.settleTitle(id: id, to: "Login bug")
+        XCTAssertEqual(store.sessions[id]?.title, "Login bug")
+        XCTAssertEqual(store.sessions[id]?.titleSettled, true)
+        store.rename(id: id, to: "Mine")
+        store.settleTitle(id: id, to: "Other")
+        XCTAssertEqual(store.sessions[id]?.title, "Mine")
+    }
+
+    func testOldSessionsFileStillLoads() throws {
+        let json = """
+        {"sessions":{"claude-code:s1":{"tool":"claude-code","sessionId":"s1","title":"T","state":"working",
+        "startedAt":0,"turnStartedAt":0,"lastEventAt":0,"terminal":{}}}}
+        """
+        let store = try JSONDecoder().decode(SessionStore.self, from: Data(json.utf8))
+        XCTAssertEqual(store.sessions.count, 1)
+        XCTAssertNil(store.lastSeen(.claudeCode))
+    }
+
+    func testParserFillsActivity() {
+        let payload: [String: Any] = ["session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Bash",
+                                      "tool_input": ["command": "cd x && swift build"]]
+        let parsed = EventParser.parse(tool: .claudeCode, payload: payload, at: Date(), terminal: TerminalContext())
+        XCTAssertEqual(parsed?.activity, "Building")
+    }
+}

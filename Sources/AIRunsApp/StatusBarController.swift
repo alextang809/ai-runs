@@ -38,6 +38,9 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
     init(model: AppModel) {
         self.model = model
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // A stable name, so macOS and menu bar managers (Bartender, Ice)
+        // remember where the user put the icon across launches and updates.
+        statusItem.autosaveName = "AIRunsStatusItem"
         super.init()
         if let button = statusItem.button {
             button.image = Icons.statusImage(needsYou: false)

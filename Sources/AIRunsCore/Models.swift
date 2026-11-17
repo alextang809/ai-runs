@@ -90,11 +90,18 @@ public struct AgentEvent: Equatable, Sendable {
     /// Background tasks (e.g. a long test run) still running when the turn ended.
     /// The agent picks the conversation up again when they finish.
     public var backgroundTasks: Int
+    /// What the agent just did, in words ("Building", "Editing App.swift").
+    public var activity: String?
+    /// Its step list, when the tool call updated one.
+    public var progress: RunProgress?
+    /// Set when another agent sent the prompt (`<relay from="…">`).
+    public var drivenBy: String?
 
     public init(tool: AgentTool, kind: EventKind, sessionId: String, at: Date, prompt: String? = nil,
                 lastMessage: String? = nil, approvalDetail: String? = nil, cwd: String? = nil,
                 transcriptPath: String? = nil, terminal: TerminalContext = TerminalContext(),
-                backgroundTasks: Int = 0) {
+                backgroundTasks: Int = 0, activity: String? = nil, progress: RunProgress? = nil,
+                drivenBy: String? = nil) {
         self.tool = tool
         self.kind = kind
         self.sessionId = sessionId
@@ -106,5 +113,8 @@ public struct AgentEvent: Equatable, Sendable {
         self.transcriptPath = transcriptPath
         self.terminal = terminal
         self.backgroundTasks = backgroundTasks
+        self.activity = activity
+        self.progress = progress
+        self.drivenBy = drivenBy
     }
 }

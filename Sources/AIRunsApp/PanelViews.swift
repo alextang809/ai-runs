@@ -130,12 +130,28 @@ struct MenuColumn: View {
                 .font(.system(size: 12, weight: model.message == nil ? .regular : .semibold))
                 .foregroundStyle(model.message == nil ? Color.secondary : Color.accentColor)
                 .lineLimit(2)
+            if model.message == nil {
+                ForEach(model.silentTools, id: \.self) { tool in
+                    Text(silentHint(tool))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.waiting)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.top, 8)
         .padding(.bottom, 6)
         .contentShape(Rectangle())
         .onHover { if $0 { ui.hoverOff() } }
+    }
+
+    private func silentHint(_ tool: AgentTool) -> String {
+        switch tool {
+        case .codex: return "Codex hasn’t reported yet — approve the AI Runs hooks in Codex."
+        case .claudeCode: return "Claude Code hasn’t reported yet — start or continue a session."
+        }
     }
 
     private var summary: String {
@@ -253,13 +269,23 @@ struct SessionRow: View {
         session.project.isEmpty ? session.tool.displayName : "\(session.tool.displayName) · \(session.project)"
     }
 
+    /// What it is doing now, ahead of where it runs: "2/8 · Build the lens · Swiss-Journal".
+    private var detail: String {
+        let place = session.project.isEmpty ? session.tool.displayName : session.project
+        if session.state == .working, !session.isQuiet(now: now) {
+            if let progress = session.progress { return "\(progress.summary) · \(place)" }
+            if let activity = session.activity { return "\(activity) · \(place)" }
+        }
+        return subtitle
+    }
+
     var body: some View {
         Button(action: open) {
             HStack(spacing: 8) {
                 StatusDot(state: session.state)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(session.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                    Text(subtitle).font(.system(size: 11.5)).lineLimit(1)
+                    Text(detail).font(.system(size: 11.5)).lineLimit(1)
                         .foregroundStyle(highlighted ? Color.white.opacity(0.85) : Color.secondary)
                 }
                 Spacer(minLength: 8)
@@ -284,7 +310,7 @@ struct SessionRow: View {
         .buttonStyle(.plain)
         .onHover { inside in inside ? ui.hoverOn(key) : ui.hoverOff() }
         .reportFrame(key.key)
-        .accessibilityLabel("\(session.title), \(subtitle), \(stateWord), \(time). Open")
+        .accessibilityLabel("\(session.title), \(detail), \(stateWord), \(time). Open")
     }
 }
 
@@ -599,7 +625,17 @@ struct SessionFlyout: View {
             }
         }
 
-        var rows: [(String, String)] = [("Started", Self.clock.string(from: session.startedAt))]
+        var rows: [(String, String)] = []
+        if session.state == .working, let progress = session.progress {
+            rows.append(("Steps", progress.summary))
+        }
+        if session.state == .working, let activity = session.activity {
+            rows.append(("Now", activity))
+        }
+        if let driver = session.drivenBy {
+            rows.append(("Prompted by", driver))
+        }
+        rows.append(("Started", Self.clock.string(from: session.startedAt)))
         // Only when AI Runs saw the turn start; otherwise the number means nothing.
         if session.state.needsUser, let since = session.waitingSince, since.timeIntervalSince(session.turnStartedAt) >= 60 {
             rows.append(("Last turn took", TextUtils.duration(since.timeIntervalSince(session.turnStartedAt))))
