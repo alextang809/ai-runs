@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+      - name: Package app
+        run: |
+          chmod +x Scripts/package_app.sh
+          ./Scripts/package_app.sh
+          ditto -c -k --keepParent "build/AI Runs.app" build/AI-Runs.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AI-Runs
+          path: build/AI-Runs.zip

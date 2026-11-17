@@ -1,0 +1,82 @@
+import Foundation
+
+public enum TextUtils {
+    /// A short title from the first prompt of a session: pasted blocks and
+    /// code removed, whitespace collapsed, cut at a word near `limit`.
+    public static func title(fromPrompt prompt: String, limit: Int = 48) -> String {
+        var text = prompt
+        text = text.replacingOccurrences(of: #"(?s)<pasted_content[^>]*>.*?</pasted_content[^>]*>"#,
+                                         with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?s)```.*?```"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return "Untitled session" }
+        return truncate(text, limit: limit)
+    }
+
+    /// The last question in a reply, used as the suggested next step.
+    /// Returns nil when the reply asks nothing.
+    public static func lastQuestion(in text: String?, limit: Int = 120) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        let sentences = splitSentences(text)
+        guard let question = sentences.last(where: { $0.contains("?") || $0.contains("？") }) else { return nil }
+        return truncate(question, limit: limit)
+    }
+
+    /// The last line of a reply worth showing as a preview.
+    public static func preview(of text: String?, limit: Int = 220) -> String? {
+        guard let text else { return nil }
+        let collapsed = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !collapsed.isEmpty else { return nil }
+        return truncate(collapsed, limit: limit)
+    }
+
+    public static func projectName(fromPath path: String?) -> String {
+        guard let path, !path.isEmpty else { return "" }
+        return URL(fileURLWithPath: path).lastPathComponent
+    }
+
+    /// "now", "4m", "1h 05m", "2d 3h".
+    public static func duration(_ seconds: TimeInterval) -> String {
+        let minutes = Int(max(0, seconds) / 60)
+        if minutes < 1 { return "now" }
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        if hours < 24 { return String(format: "%dh %02dm", hours, minutes % 60) }
+        return "\(hours / 24)d \(hours % 24)h"
+    }
+
+    /// "now", "5h", "3d" — coarser, for card ages.
+    public static func age(_ seconds: TimeInterval) -> String {
+        let hours = Int(max(0, seconds) / 3600)
+        if hours < 1 { return "now" }
+        if hours < 24 { return "\(hours)h" }
+        return "\(hours / 24)d"
+    }
+
+    public static func truncate(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let cut = text.prefix(limit)
+        if let space = cut.lastIndex(of: " "), cut.distance(from: cut.startIndex, to: space) > limit / 2 {
+            return String(cut[..<space]) + "…"
+        }
+        return String(cut) + "…"
+    }
+
+    static func splitSentences(_ text: String) -> [String] {
+        var sentences: [String] = []
+        var current = ""
+        for character in text {
+            current.append(character)
+            if ".?!。？！\n".contains(character) {
+                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { sentences.append(trimmed) }
+                current = ""
+            }
+        }
+        let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { sentences.append(trimmed) }
+        return sentences
+    }
+}

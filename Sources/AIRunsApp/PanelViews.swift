@@ -1,0 +1,666 @@
+import AIRunsCore
+import AppKit
+import SwiftUI
+
+enum PanelLayout {
+    static let menuWidth: CGFloat = 340
+    static let flyoutWidth: CGFloat = 284
+    static let gap: CGFloat = 8
+    static let outerPadding: CGFloat = 10
+}
+
+enum Palette {
+    static let waiting = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(red: 1.0, green: 0.66, blue: 0.3, alpha: 1)
+            : NSColor(red: 0.64, green: 0.31, blue: 0.0, alpha: 1)
+    })
+    static let waitingFill = Color(red: 0.91, green: 0.54, blue: 0.05)
+    static let working = Color.accentColor
+}
+
+struct RowFramePreference: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+private extension View {
+    func reportFrame(_ key: String) -> some View {
+        background(GeometryReader { proxy in
+            Color.clear.preference(key: RowFramePreference.self, value: [key: proxy.frame(in: .named("panel"))])
+        })
+    }
+}
+
+// MARK: - Root
+
+struct PanelRootView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var ui: PanelUIState
+    let actions: PanelActions
+
+    var body: some View {
+        HStack(alignment: .top, spacing: PanelLayout.gap) {
+            flyoutColumn
+                .frame(width: PanelLayout.flyoutWidth, alignment: .topTrailing)
+            MenuColumn(model: model, ui: ui, actions: actions)
+                .frame(width: PanelLayout.menuWidth)
+        }
+        .padding(PanelLayout.outerPadding)
+        .coordinateSpace(name: "panel")
+        .onPreferenceChange(RowFramePreference.self) { frames in
+            if ui.rowFrames != frames { ui.rowFrames = frames }
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder private var flyoutColumn: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.clear.frame(width: PanelLayout.flyoutWidth, height: 1)
+            if let target = ui.hover, let frame = ui.rowFrames[target.key] {
+                flyout(for: target)
+                    .padding(.top, max(0, frame.minY - PanelLayout.outerPadding - 6))
+                    .onHover { inside in inside ? ui.keepHover() : ui.hoverOff() }
+            }
+        }
+    }
+
+    @ViewBuilder private func flyout(for target: PanelUIState.Target) -> some View {
+        switch target {
+        case .session(let id):
+            if let session = model.store.sessions[id] {
+                SessionFlyout(session: session, now: model.now, model: model, ui: ui, actions: actions)
+            }
+        case .card(let id):
+            if let card = model.board.card(id: id) {
+                CardFlyout(card: card, stale: model.board.isStale(card, now: model.now), now: model.now,
+                           model: model, ui: ui, actions: actions)
+            }
+        }
+    }
+}
+
+/// The menu-like card under the menu bar icon.
+struct PanelSurface<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        content
+            .background(VisualEffectBackground(material: .menu))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
+            .shadow(color: .black.opacity(0.22), radius: 14, y: 6)
+    }
+}
+
+// MARK: - Menu column
+
+struct MenuColumn: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var ui: PanelUIState
+    let actions: PanelActions
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                SeparatorLine()
+                activeSection
+                SeparatorLine()
+                PinnedSection(model: model, ui: ui, actions: actions)
+                SeparatorLine()
+                bottomMenu
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("AI Runs").font(.system(size: 16, weight: .bold))
+                Spacer()
+            }
+            Text(model.message ?? summary)
+                .font(.system(size: 12, weight: model.message == nil ? .regular : .semibold))
+                .foregroundStyle(model.message == nil ? Color.secondary : Color.accentColor)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        .contentShape(Rectangle())
+        .onHover { if $0 { ui.hoverOff() } }
+    }
+
+    private var summary: String {
+        let needs = model.store.needsUserCount
+        let working = model.store.workingCount
+        if needs == 0 && working == 0 { return "Nothing running" }
+        return "\(needs) need you · \(working) working"
+    }
+
+    @ViewBuilder private var activeSection: some View {
+        let sessions = model.store.ordered()
+        VStack(alignment: .leading, spacing: 0) {
+            if sessions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(model.needsHookSetup
+                         ? "Set up hooks so Claude Code and Codex sessions show up here."
+                         : "Nothing running. Start a session in Claude Code or Codex and it shows up here.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if model.needsHookSetup {
+                        Button("Set Up Hooks…") { actions.showSettings() }
+                            .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            } else {
+                ForEach(sessions) { session in
+                    SessionRow(session: session, now: model.now, ui: ui) {
+                        actions.closePanel()
+                        model.open(sessionId: session.id)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+    }
+
+    private var bottomMenu: some View {
+        VStack(spacing: 0) {
+            MenuRow(title: "Pin Front AI Window") { model.pinFrontWindow() }
+            MenuRow(title: ui.boardVisible ? "Hide Pinned Board" : "Show Pinned Board on Screen") { actions.toggleBoard() }
+            MenuRow(title: "Hooks & Settings…") { actions.showSettings() }
+            MenuRow(title: "Quit AI Runs", shortcut: "⌘Q") { NSApp.terminate(nil) }
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .onHover { if $0 { ui.hoverOff() } }
+    }
+}
+
+struct SeparatorLine: View {
+    var body: some View {
+        Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1).padding(.horizontal, 12).padding(.vertical, 3)
+    }
+}
+
+// MARK: - Rows
+
+struct StatusDot: View {
+    let state: SessionState
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            switch state {
+            case .working:
+                Circle().fill(Palette.working).frame(width: 9, height: 9)
+                Circle().stroke(Palette.working.opacity(pulse ? 0 : 0.5), lineWidth: 2)
+                    .frame(width: pulse ? 17 : 9, height: pulse ? 17 : 9)
+            case .yourTurn:
+                Circle().fill(Palette.waitingFill).frame(width: 9, height: 9)
+            case .needsApproval:
+                Circle().strokeBorder(Palette.waitingFill, lineWidth: 2.5).frame(width: 9, height: 9)
+            }
+        }
+        .frame(width: 17, height: 17)
+        .onAppear {
+            guard state == .working else { return }
+            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { pulse = true }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+struct SessionRow: View {
+    let session: Session
+    let now: Date
+    @ObservedObject var ui: PanelUIState
+    let open: () -> Void
+
+    private var key: PanelUIState.Target { .session(session.id) }
+    private var highlighted: Bool { ui.hover == key }
+
+    private var stateWord: String {
+        switch session.state {
+        case .needsApproval: return "Needs approval"
+        case .yourTurn: return "Your turn"
+        case .working: return session.isQuiet(now: now) ? "No update" : "Working"
+        }
+    }
+
+    private var time: String {
+        if session.state.needsUser {
+            return "waiting " + TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? session.lastEventAt))
+        }
+        return TextUtils.duration(now.timeIntervalSince(session.turnStartedAt))
+    }
+
+    private var subtitle: String {
+        session.project.isEmpty ? session.tool.displayName : "\(session.tool.displayName) · \(session.project)"
+    }
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                StatusDot(state: session.state)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(session.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Text(subtitle).font(.system(size: 11.5)).lineLimit(1)
+                        .foregroundStyle(highlighted ? Color.white.opacity(0.85) : Color.secondary)
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(stateWord)
+                        .font(.system(size: 11, weight: session.state.needsUser ? .semibold : .regular))
+                        .foregroundStyle(highlighted ? Color.white.opacity(0.9)
+                                         : (session.state.needsUser ? Palette.waiting : Color.secondary))
+                    Text(time)
+                        .font(.system(size: session.state.needsUser ? 13 : 12,
+                                      weight: session.state.needsUser ? .bold : .regular).monospacedDigit())
+                        .foregroundStyle(highlighted ? Color.white
+                                         : (session.state.needsUser ? Palette.waiting : Color.secondary))
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 44)
+            .foregroundStyle(highlighted ? Color.white : Color.primary)
+            .background(RoundedRectangle(cornerRadius: 6).fill(highlighted ? Color.accentColor : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in inside ? ui.hoverOn(key) : ui.hoverOff() }
+        .reportFrame(key.key)
+        .accessibilityLabel("\(session.title), \(subtitle), \(stateWord), \(time). Open")
+    }
+}
+
+struct CardRow: View {
+    let card: PinCard
+    let stale: Bool
+    let now: Date
+    @ObservedObject var ui: PanelUIState
+    let open: () -> Void
+
+    private var key: PanelUIState.Target { .card(card.id) }
+    private var highlighted: Bool { ui.hover == key }
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(card.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Text(card.next.isEmpty ? "No next step yet" : "Next: \(card.next)")
+                        .font(.system(size: 11.5)).lineLimit(1)
+                        .foregroundStyle(highlighted ? Color.white.opacity(0.85) : Color.secondary)
+                }
+                Spacer(minLength: 8)
+                Text(TextUtils.age(now.timeIntervalSince(card.touchedAt)))
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(highlighted ? Color.white.opacity(0.85) : Color.secondary)
+            }
+            .padding(.leading, 22)
+            .padding(.trailing, 8)
+            .frame(height: 44)
+            .foregroundStyle(highlighted ? Color.white : Color.primary)
+            .background(RoundedRectangle(cornerRadius: 6).fill(highlighted ? Color.accentColor : Color.clear))
+            .opacity(stale && !highlighted ? 0.55 : 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in inside ? ui.hoverOn(key) : ui.hoverOff() }
+        .reportFrame(key.key)
+        .accessibilityLabel("\(card.title). \(card.next.isEmpty ? "" : "Next: \(card.next)")")
+    }
+}
+
+struct MenuRow: View {
+    let title: String
+    var shortcut: String = ""
+    var tint: Color? = nil
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Text(title).font(.system(size: 13.5))
+                Spacer()
+                if !shortcut.isEmpty {
+                    Text(shortcut).font(.system(size: 12))
+                        .foregroundStyle(hovering ? Color.white.opacity(0.85) : Color.secondary)
+                }
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 26)
+            .foregroundStyle(hovering ? Color.white : (tint ?? Color.primary))
+            .background(RoundedRectangle(cornerRadius: 5).fill(hovering ? Color.accentColor : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+// MARK: - Pinned section
+
+struct PinnedSection: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var ui: PanelUIState
+    let actions: PanelActions
+
+    var body: some View {
+        let groups = model.board.groups(now: model.now)
+        let stale = model.board.staleCards(now: model.now)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 2) {
+                Text("Pinned").font(.system(size: 13, weight: .bold))
+                Spacer()
+                Button {
+                    ui.addingNote.toggle()
+                } label: {
+                    Label("Note", systemImage: "plus").font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color.accentColor)
+                .help("Write a quick note")
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 28)
+            .onHover { if $0 { ui.hoverOff() } }
+
+            if ui.addingNote {
+                HStack(spacing: 6) {
+                    TextField("What are you keeping track of?", text: $ui.draft)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(addNote)
+                    Button("Add", action: addNote).controlSize(.small)
+                }
+                .padding(.horizontal, 9)
+                .padding(.bottom, 6)
+            }
+
+            if groups.isEmpty && stale.isEmpty && !ui.addingNote {
+                Text("Nothing pinned yet. Pin a session from its details, or use “Pin Front AI Window” below.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 9)
+                    .padding(.bottom, 6)
+            }
+
+            ForEach(groups, id: \.name) { group in
+                GroupHeader(name: group.name, count: group.cards.count,
+                            collapsed: ui.collapsed.contains(group.name)) { ui.toggle(group: group.name) }
+                    .onHover { if $0 { ui.hoverOff() } }
+                if !ui.collapsed.contains(group.name) {
+                    ForEach(group.cards) { card in
+                        CardRow(card: card, stale: false, now: model.now, ui: ui) {
+                            actions.closePanel()
+                            model.open(card: card)
+                        }
+                    }
+                }
+            }
+
+            if !stale.isEmpty {
+                GroupHeader(name: "Maybe done · untouched 3+ days", count: stale.count,
+                            collapsed: ui.collapsed.contains(PanelUIState.staleGroup)) { ui.toggle(group: PanelUIState.staleGroup) }
+                    .onHover { if $0 { ui.hoverOff() } }
+                if !ui.collapsed.contains(PanelUIState.staleGroup) {
+                    ForEach(stale) { card in
+                        CardRow(card: card, stale: true, now: model.now, ui: ui) {
+                            actions.closePanel()
+                            model.open(card: card)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+    }
+
+    private func addNote() {
+        model.addNote(title: ui.draft)
+        ui.draft = ""
+        ui.addingNote = false
+    }
+}
+
+struct GroupHeader: View {
+    let name: String
+    let count: Int
+    let collapsed: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(collapsed ? 0 : 90))
+                Text(name).font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text("\(count)").font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            .foregroundStyle(Color.secondary)
+            .padding(.horizontal, 9)
+            .frame(height: 26)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(name), \(count) cards, \(collapsed ? "collapsed" : "expanded")")
+    }
+}
+
+// MARK: - Flyouts
+
+struct FlyoutAction: Identifiable {
+    let id = UUID()
+    let title: String
+    var shortcut: String = ""
+    let run: () -> Void
+}
+
+struct FlyoutSurface<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        content
+            .frame(width: PanelLayout.flyoutWidth, alignment: .leading)
+            .background(VisualEffectBackground(material: .menu))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
+            .shadow(color: .black.opacity(0.2), radius: 12, y: 5)
+    }
+}
+
+struct FlyoutBody: View {
+    let title: String
+    let subtitle: String
+    var chip: (text: String, waiting: Bool)? = nil
+    var rows: [(String, String)] = []
+    var noteLabel: String? = nil
+    var note: String? = nil
+    var quoteLabel: String? = nil
+    var quote: String? = nil
+    let actions: [FlyoutAction]
+
+    var body: some View {
+        FlyoutSurface {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                    Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary)
+                    if let chip {
+                        Text(chip.text)
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .padding(.horizontal, 8).padding(.vertical, 2)
+                            .background(Capsule().fill(chip.waiting ? Palette.waitingFill.opacity(0.18) : Color.accentColor.opacity(0.15)))
+                            .foregroundStyle(chip.waiting ? Palette.waiting : Color.accentColor)
+                            .padding(.top, 4)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
+
+                if !rows.isEmpty {
+                    VStack(spacing: 4) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(row.0).foregroundStyle(.secondary)
+                                Spacer(minLength: 12)
+                                Text(row.1).multilineTextAlignment(.trailing)
+                            }
+                            .font(.system(size: 12))
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.bottom, 8)
+                }
+
+                if let note {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let noteLabel { Text(noteLabel).font(.system(size: 11)).foregroundStyle(.secondary) }
+                        Text(note).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 14).padding(.bottom, 8)
+                }
+
+                if let quote, !quote.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        if let quoteLabel { Text(quoteLabel).font(.system(size: 11)).foregroundStyle(.secondary) }
+                        Text(quote).font(.system(size: 12)).lineLimit(8).fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
+                    .padding(.horizontal, 14).padding(.bottom, 10)
+                }
+
+                SeparatorLine()
+                VStack(spacing: 0) {
+                    ForEach(actions) { action in
+                        MenuRow(title: action.title, shortcut: action.shortcut, action: action.run)
+                    }
+                }
+                .padding(.horizontal, 5).padding(.bottom, 5)
+            }
+        }
+    }
+}
+
+struct SessionFlyout: View {
+    let session: Session
+    let now: Date
+    @ObservedObject var model: AppModel
+    @ObservedObject var ui: PanelUIState
+    let actions: PanelActions
+
+    private static let clock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter
+    }()
+
+    var body: some View {
+        let appName = session.terminal.appName
+        var subtitle = session.tool.displayName
+        if !session.project.isEmpty { subtitle += " · \(session.project)" }
+        subtitle += " · \(appName)"
+
+        let chip: (text: String, waiting: Bool)
+        switch session.state {
+        case .needsApproval:
+            chip = ("Needs approval · waiting \(TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now)))", true)
+        case .yourTurn:
+            chip = ("Your turn · waiting \(TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now)))", true)
+        case .working:
+            chip = (session.isQuiet(now: now) ? "No update for a while — it may have stopped"
+                    : "Working · \(TextUtils.duration(now.timeIntervalSince(session.turnStartedAt)))", false)
+        }
+
+        var rows: [(String, String)] = [("Started", Self.clock.string(from: session.startedAt))]
+        if session.state.needsUser, let since = session.waitingSince {
+            rows.append(("Last turn took", TextUtils.duration(since.timeIntervalSince(session.turnStartedAt))))
+        }
+
+        var flyoutActions = [
+            FlyoutAction(title: "Open in \(appName)", shortcut: "↩") {
+                actions.closePanel()
+                model.open(sessionId: session.id)
+            },
+            FlyoutAction(title: "Pin to Board") { model.pin(sessionId: session.id) },
+            FlyoutAction(title: "Rename…") { actions.renameSession(session.id) },
+        ]
+        if session.state != .working || session.isQuiet(now: now) {
+            flyoutActions.append(FlyoutAction(title: "Resolve") {
+                ui.hover = nil
+                model.resolve(sessionId: session.id)
+            })
+        }
+
+        return FlyoutBody(
+            title: session.title,
+            subtitle: subtitle,
+            chip: chip,
+            rows: rows,
+            noteLabel: session.approvalDetail == nil ? nil : "Wants to run",
+            note: session.approvalDetail,
+            quoteLabel: "Last reply",
+            quote: TextUtils.preview(of: session.lastMessage, limit: 400),
+            actions: flyoutActions
+        )
+    }
+}
+
+struct CardFlyout: View {
+    let card: PinCard
+    let stale: Bool
+    let now: Date
+    @ObservedObject var model: AppModel
+    @ObservedObject var ui: PanelUIState
+    let actions: PanelActions
+
+    var body: some View {
+        var subtitle = card.link.map { "Linked to \($0.label)" } ?? "Note · \(card.group)"
+        if stale { subtitle += " · untouched \(TextUtils.age(now.timeIntervalSince(card.touchedAt)))" }
+
+        var flyoutActions: [FlyoutAction] = []
+        if stale {
+            flyoutActions.append(FlyoutAction(title: "Still Working on It") { model.keep(cardId: card.id) })
+        } else if card.link != nil {
+            flyoutActions.append(FlyoutAction(title: "Open", shortcut: "↩") {
+                actions.closePanel()
+                model.open(card: card)
+            })
+            flyoutActions.append(FlyoutAction(title: "Continue in a New Chat") {
+                actions.closePanel()
+                model.continueInNewChat(card: card)
+            })
+        }
+        flyoutActions.append(FlyoutAction(title: "Edit…") { actions.editCard(card) })
+        flyoutActions.append(FlyoutAction(title: "Archive") {
+            ui.hover = nil
+            model.archive(cardId: card.id)
+        })
+
+        return FlyoutBody(
+            title: card.title,
+            subtitle: subtitle,
+            noteLabel: card.nextIsSuggested ? "Next step · suggested from the last reply" : "Next step",
+            note: card.next.isEmpty ? "None yet — use Edit to add one." : card.next,
+            quoteLabel: "Saved from the reply",
+            quote: card.excerpt,
+            actions: flyoutActions
+        )
+    }
+}
