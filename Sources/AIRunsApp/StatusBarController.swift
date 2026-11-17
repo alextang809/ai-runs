@@ -40,7 +40,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         if let button = statusItem.button {
-            button.image = Icons.statusImage()
+            button.image = Icons.statusImage(needsYou: false)
             button.imagePosition = .imageLeading
             button.target = self
             button.action = #selector(togglePanel(_:))
@@ -68,6 +68,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
 
     private func updateButton(needsYou: Int) {
         guard let button = statusItem.button else { return }
+        button.image = Icons.statusImage(needsYou: needsYou > 0)
         if needsYou > 0 {
             button.attributedTitle = NSAttributedString(
                 string: " \(needsYou)",
@@ -379,17 +380,36 @@ struct ToastView: View {
 }
 
 enum Icons {
-    /// Three bars of different heights: several AI threads at a glance.
-    static func statusImage() -> NSImage {
-        let image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { _ in
-            NSColor.black.setFill()
-            let bars: [(CGFloat, CGFloat)] = [(2, 8), (6.7, 11), (11.4, 6)]
-            for (x, height) in bars {
-                NSBezierPath(roundedRect: NSRect(x: x, y: 3, width: 2.6, height: height), xRadius: 1.3, yRadius: 1.3).fill()
+    /// The app's mark in miniature: three lifelines from a sequence diagram,
+    /// each with an activation bar. When a run needs you, the last bar turns
+    /// orange; otherwise the image is a template so it follows the menu bar.
+    static func statusImage(needsYou: Bool) -> NSImage {
+        let size = NSSize(width: 18, height: 16)
+        let image = NSImage(size: size, flipped: false) { _ in
+            let ink = needsYou ? NSColor.labelColor : NSColor.black
+            let xs: [CGFloat] = [3.5, 9, 14.5]
+
+            ink.withAlphaComponent(0.45).setStroke()
+            for x in xs {
+                let line = NSBezierPath()
+                line.move(to: NSPoint(x: x, y: 0.5))
+                line.line(to: NSPoint(x: x, y: 15.5))
+                line.lineWidth = 1
+                line.setLineDash([1.6, 1.4], count: 2, phase: 0)
+                line.stroke()
+            }
+
+            // (bottom, height) of each activation bar, top-left to bottom-right.
+            let bars: [(CGFloat, CGFloat)] = [(8, 7.5), (3.5, 8.5), (0.5, 6)]
+            for (index, (x, bar)) in zip(xs, bars).enumerated() {
+                let isLast = index == xs.count - 1
+                (needsYou && isLast ? NSColor.systemOrange : ink).setFill()
+                NSBezierPath(roundedRect: NSRect(x: x - 1.6, y: bar.0, width: 3.2, height: bar.1),
+                             xRadius: 1, yRadius: 1).fill()
             }
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = !needsYou
         return image
     }
 }

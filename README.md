@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/icon.png" width="128" alt="AI Runs icon"></p>
+
 # AI Runs
 
 A small macOS menu bar app for people who run several AI sessions at once.
