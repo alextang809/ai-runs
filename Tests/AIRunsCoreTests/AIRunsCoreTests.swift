@@ -212,6 +212,19 @@ final class TextUtilsTests: XCTestCase {
         XCTAssertEqual(store.sessions["claude-code:s"]?.title, "Add export to PDF")
     }
 
+    func testUserRenameIsNotOverwrittenBySuggestions() {
+        var store = SessionStore()
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        store.apply(AgentEvent(tool: .codex, kind: .promptStart, sessionId: "s", at: t, prompt: "<wake reason=\"mention\"> fix flaky test"))
+        XCTAssertEqual(store.sessions["codex:s"]?.title, "fix flaky test")
+        XCTAssertEqual(store.sessions["codex:s"]?.firstPrompt, "fix flaky test")
+        store.setSuggestedTitle(id: "codex:s", to: "Flaky test fix")
+        XCTAssertEqual(store.sessions["codex:s"]?.title, "Flaky test fix")
+        store.rename(id: "codex:s", to: "Mine")
+        store.setSuggestedTitle(id: "codex:s", to: "Something else")
+        XCTAssertEqual(store.sessions["codex:s"]?.title, "Mine")
+    }
+
     func testLastQuestion() {
         XCTAssertEqual(TextUtils.lastQuestion(in: "Done. I updated 6 files. Want me to add tests next?"),
                        "Want me to add tests next?")
@@ -317,6 +330,15 @@ final class TranscriptReaderTests: XCTestCase {
                                                   "content": [["type": "input_text", "text": "Write tests for the parser"]]]],
         ])
         XCTAssertEqual(TranscriptReader.firstUserPrompt(at: url), "Write tests for the parser")
+    }
+
+    func testToolTitleTakesTheLatestSummary() throws {
+        let url = try write([
+            ["type": "summary", "summary": "Old name"],
+            ["type": "user", "message": ["role": "user", "content": "hi"]],
+            ["type": "summary", "summary": "Login refactor"],
+        ])
+        XCTAssertEqual(TranscriptReader.toolTitle(at: url), "Login refactor")
     }
 
     func testMissingFile() {

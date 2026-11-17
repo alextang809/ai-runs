@@ -91,26 +91,48 @@ final class AppModel: ObservableObject {
         }
         try? JSONFile.save(Cursor(offset: reader.offset), to: paths.cursor)
         now = Date()
-        nameUntitledSessions()
+        suggestTitles()
     }
 
-    private var titleLookups: [String: Date] = [:]
+    /// The reply each session was last named from, so names are refreshed
+    /// once per finished turn rather than on every event.
+    private var namedFromReply: [String: String] = [:]
+    private var naming: Set<String> = []
 
-    /// Sessions that started before the hooks were installed have no first
-    /// prompt; read it from the transcript instead (at most once a minute each).
-    private func nameUntitledSessions() {
-        var updated = store
-        for session in store.sessions.values where session.hasGenericTitle {
-            guard let path = session.transcriptPath else { continue }
-            if let last = titleLookups[session.id], Date().timeIntervalSince(last) < 60 { continue }
-            titleLookups[session.id] = Date()
-            if let prompt = TranscriptReader.firstUserPrompt(at: URL(fileURLWithPath: path)) {
-                updated.rename(id: session.id, to: TextUtils.title(fromPrompt: prompt))
+    /// Keeps each session's name in step with the conversation, unless the
+    /// user renamed it: the tool's own title if it has one, otherwise a
+    /// suggestion from the on-device model, otherwise the first prompt.
+    private func suggestTitles() {
+        for session in store.sessions.values where session.titleIsCustom != true {
+            let reply = session.lastMessage ?? ""
+            if namedFromReply[session.id] == reply || naming.contains(session.id) { continue }
+            namedFromReply[session.id] = reply
+            let transcript = session.transcriptPath.map { URL(fileURLWithPath: $0) }
+
+            if let transcript, let toolTitle = TranscriptReader.toolTitle(at: transcript) {
+                if toolTitle != session.title {
+                    store.setSuggestedTitle(id: session.id, to: toolTitle)
+                    saveSessions()
+                }
+                continue
             }
-        }
-        if updated != store {
-            store = updated
-            saveSessions()
+
+            let first = session.firstPrompt ?? transcript.flatMap { TranscriptReader.firstUserPrompt(at: $0) }
+            let lastReply = session.lastMessage
+            guard first != nil || lastReply != nil else { continue }
+            let id = session.id
+            naming.insert(id)
+            Task { @MainActor [weak self] in
+                let suggestion = await TitleModel.suggest(firstPrompt: first, lastReply: lastReply)
+                guard let self else { return }
+                self.naming.remove(id)
+                if let suggestion {
+                    self.store.setSuggestedTitle(id: id, to: suggestion)
+                } else if let first, self.store.sessions[id]?.hasGenericTitle == true {
+                    self.store.setSuggestedTitle(id: id, to: TextUtils.truncate(first, limit: 48))
+                }
+                self.saveSessions()
+            }
         }
     }
 

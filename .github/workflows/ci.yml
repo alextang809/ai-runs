@@ -6,7 +6,12 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-26 also compiles the on-device naming (FoundationModels).
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Swift version
@@ -22,5 +27,5 @@ jobs:
           ditto -c -k --keepParent "build/AI Runs.app" build/AI-Runs.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: AI-Runs
+          name: AI-Runs-${{ matrix.os }}
           path: build/AI-Runs.zip

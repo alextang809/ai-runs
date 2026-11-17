@@ -29,6 +29,10 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var terminal: TerminalContext
     /// Set while the agent waits on its own background tasks; it continues by itself.
     public var backgroundTasks: Int?
+    /// The first thing the user typed (tags removed), for naming the session.
+    public var firstPrompt: String?
+    /// True once the user renamed the session; automatic names then leave it alone.
+    public var titleIsCustom: Bool?
 
     public var isInBackground: Bool { state == .working && (backgroundTasks ?? 0) > 0 }
 
@@ -68,13 +72,13 @@ public struct SessionStore: Codable, Equatable, Sendable {
             // Any event creates the session, so sessions that started before
             // the hooks were installed still show up. The app replaces the
             // generic title from the transcript when it can.
-            let title = event.prompt.map { TextUtils.title(fromPrompt: $0) }
+            let title = event.prompt.flatMap { TextUtils.cleanPrompt($0) }.map { TextUtils.truncate($0, limit: 48) }
                 ?? Session.genericTitle(for: event.tool)
             session = Session(tool: event.tool, sessionId: event.sessionId, title: title, cwd: event.cwd,
                               state: .working, startedAt: event.at, turnStartedAt: event.at,
                               waitingSince: nil, lastEventAt: event.at, lastMessage: nil,
                               approvalDetail: nil, transcriptPath: event.transcriptPath,
-                              terminal: event.terminal, backgroundTasks: nil)
+                              terminal: event.terminal, backgroundTasks: nil, firstPrompt: nil, titleIsCustom: nil)
         }
         guard var current = session else { return }
 
@@ -90,8 +94,11 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.waitingSince = nil
             current.approvalDetail = nil
             current.backgroundTasks = nil
-            if current.hasGenericTitle, let prompt = event.prompt, let title = TextUtils.cleanPrompt(prompt) {
-                current.title = TextUtils.truncate(title, limit: 48)
+            if current.firstPrompt == nil, let prompt = event.prompt, let cleaned = TextUtils.cleanPrompt(prompt) {
+                current.firstPrompt = TextUtils.truncate(cleaned, limit: 600)
+                if current.hasGenericTitle || current.title == "Untitled session" {
+                    current.title = TextUtils.truncate(cleaned, limit: 48)
+                }
             }
         case .needsApproval:
             current.state = .needsApproval
@@ -127,10 +134,19 @@ public struct SessionStore: Codable, Equatable, Sendable {
         sessions[id] = nil
     }
 
+    /// The user's own name for the session. Automatic names never replace it.
     public mutating func rename(id: String, to title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         sessions[id]?.title = trimmed
+        sessions[id]?.titleIsCustom = true
+    }
+
+    /// A suggested name, applied only while the user has not renamed the session.
+    public mutating func setSuggestedTitle(id: String, to title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, sessions[id] != nil, sessions[id]?.titleIsCustom != true else { return }
+        sessions[id]?.title = TextUtils.truncate(trimmed, limit: 60)
     }
 
     /// Drops sessions nobody has touched for a long time (closed windows that
