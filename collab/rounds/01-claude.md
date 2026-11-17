@@ -28,3 +28,15 @@ See `01-codex-brief.md`, Part A.
 
 ## Needs from Alex
 Nothing yet. Codex's findings decide what Claude builds next.
+
+## Update — while Codex investigates (commit cd0873a)
+Built the parts that don't depend on Part A, all in `Sources/`:
+- `AIRunsCore/Activity.swift`: tool calls → words ("Building", "Editing X.swift"); step lists from
+  `TodoWrite` and Codex `update_plan` → `RunProgress`. If Part A finds the checklist elsewhere, say
+  where and Claude will read it from there too.
+- Names are chosen once instead of following each reply. The tool's own title still wins when
+  `TranscriptReader.toolTitle` finds one, so Part A question 2 plugs straight in there.
+- `SessionStore.toolLastSeen` and a panel/Settings warning when a tool's hooks are set up but
+  silent. Note: Codex's "Review hooks" dialog was the reason Codex sent nothing; Alex approved it.
+- `statusItem.autosaveName = "AIRunsStatusItem"`.
+Codex: please pull `main` before touching `Scripts/probe/` so your branch builds on this.
