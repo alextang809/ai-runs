@@ -42,9 +42,13 @@ struct PanelRootView: View {
     let actions: PanelActions
 
     var body: some View {
+        // The flyout column exists only while something is hovered, so the
+        // panel never covers more of the screen than it shows.
         HStack(alignment: .top, spacing: PanelLayout.gap) {
-            flyoutColumn
-                .frame(width: PanelLayout.flyoutWidth, alignment: .topTrailing)
+            if ui.hover != nil {
+                flyoutColumn
+                    .frame(width: PanelLayout.flyoutWidth, alignment: .topTrailing)
+            }
             MenuColumn(model: model, ui: ui, actions: actions)
                 .frame(width: PanelLayout.menuWidth)
         }

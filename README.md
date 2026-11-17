@@ -71,6 +71,16 @@ Run the tests with `swift test`.
 - `Sources/AIRunsApp` — the menu bar app (AppKit + SwiftUI).
 - `Scripts/package_app.sh` — builds `AI Runs.app`.
 
+## Known limitations
+
+- Jumping to the exact tab works for Terminal and iTerm2. VS Code and Cursor
+  open the project folder; other terminals are brought to the front and the
+  `claude --resume` / `codex resume` command is copied to the clipboard.
+- GitHub Copilot in VS Code can load hooks from `~/.claude/settings.json`, so
+  its agent sessions may appear as Claude Code sessions.
+- Desktop chat apps (ChatGPT, Claude) don't report progress; pin them with
+  Pin Front AI Window and track them on the board.
+
 ## Roadmap
 
 - Remaining usage for each tool
