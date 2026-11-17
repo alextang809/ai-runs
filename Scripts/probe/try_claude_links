@@ -1,0 +1,26 @@
+#!/bin/zsh
+# Finds out whether this Claude Desktop opens an existing Code session from a
+# claude:// link. Uses your most recently active Code session; prints its
+# name only on this Mac. If one works, AI Runs is told to use it.
+dir="$HOME/Library/Application Support/Claude/claude-code-sessions"
+file=$(ls -t "$dir"/*/*/local_*.json 2>/dev/null | head -1)
+[[ -z $file ]] && { echo "No Claude Desktop Code sessions found."; exit 1; }
+id=$(plutil -extract sessionId raw -o - "$file")
+cli=$(plutil -extract cliSessionId raw -o - "$file" 2>/dev/null)
+title=$(plutil -extract title raw -o - "$file" 2>/dev/null)
+echo "Test session: $title"
+echo "Before each try, click a DIFFERENT thread in Claude, so a jump is visible."
+templates=("claude://code/{id}" "claude://claude.ai/code/{id}" "claude://code/session/{id}" "claude://code/{cli}" "claude://session/{cli}")
+for template in $templates; do
+  url=${template//\{id\}/$id}
+  url=${url//\{cli\}/$cli}
+  read "?Press Return to try $template "
+  open "$url"
+  read "answer?Did Claude open “$title”? [y/N] "
+  if [[ $answer == [yY]* ]]; then
+    defaults write io.github.alextang809.airuns claudeSessionLink "$template"
+    echo "Works: $template — AI Runs will use it from now on."
+    exit 0
+  fi
+done
+echo "None worked. AI Runs will select the thread in Claude's sidebar instead (needs Accessibility)."

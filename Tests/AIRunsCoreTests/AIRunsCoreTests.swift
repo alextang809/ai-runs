@@ -534,3 +534,31 @@ final class ActivityTests: XCTestCase {
         XCTAssertEqual(parsed?.activity, "Building")
     }
 }
+
+final class ClaudeDesktopIndexTests: XCTestCase {
+    func testParsesOnlyWhatItNeedsAndJoinsOnCLIId() throws {
+        let object: [String: Any] = ["sessionId": "local_abc", "cliSessionId": "84e0", "title": " Lens work ",
+                                     "isArchived": false, "lastActivityAt": 1_700_000_000_000.0,
+                                     "prompt": "private"]
+        let session = try XCTUnwrap(ClaudeDesktopIndex.parse(object: object))
+        XCTAssertEqual(session.title, "Lens work")
+        XCTAssertEqual(session.lastActivityAt, Date(timeIntervalSince1970: 1_700_000_000))
+        XCTAssertEqual(ClaudeDesktopIndex.session(forCLI: "84e0", in: [session])?.sessionId, "local_abc")
+        XCTAssertNil(ClaudeDesktopIndex.session(forCLI: "other", in: [session]))
+        XCTAssertNil(ClaudeDesktopIndex.parse(object: ["title": "no id"]))
+    }
+
+    func testLoadsFromDiskAndFillsLinks() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dir = root.appendingPathComponent("x/y", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let json = #"{"sessionId":"local_1","cliSessionId":"c1","title":"T"}"#
+        try Data(json.utf8).write(to: dir.appendingPathComponent("local_1.json"))
+        try Data("{}".utf8).write(to: dir.appendingPathComponent("other.json"))
+        let sessions = ClaudeDesktopIndex.load(root: root)
+        XCTAssertEqual(sessions.map(\.sessionId), ["local_1"])
+        XCTAssertEqual(ClaudeDesktopIndex.link(template: "claude://code/{id}?c={cli}", session: sessions[0])?.absoluteString,
+                       "claude://code/local_1?c=c1")
+        try? FileManager.default.removeItem(at: root)
+    }
+}

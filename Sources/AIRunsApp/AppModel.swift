@@ -106,13 +106,22 @@ final class AppModel: ObservableObject {
     /// 3. otherwise one name chosen from what was asked (on-device model,
     ///    else the first request), kept from then on.
     private func suggestTitles() {
+        var desktop: [ClaudeDesktopSession]?
         for session in store.sessions.values where session.titleIsCustom != true {
             let reply = session.lastMessage ?? ""
             if checkedAtReply[session.id] == reply || naming.contains(session.id) { continue }
             checkedAtReply[session.id] = reply
             let transcript = session.transcriptPath.map { URL(fileURLWithPath: $0) }
 
-            if let transcript, let toolTitle = TranscriptReader.toolTitle(at: transcript) {
+            // The Claude desktop app's sidebar name, when the session runs there.
+            var toolTitle: String?
+            if session.tool == .claudeCode {
+                if desktop == nil { desktop = ClaudeDesktopIndex.load(root: ClaudeDesktopIndex.root()) }
+                toolTitle = ClaudeDesktopIndex.session(forCLI: session.sessionId, in: desktop ?? [])?.title
+            }
+            if toolTitle == nil, let transcript { toolTitle = TranscriptReader.toolTitle(at: transcript) }
+
+            if let toolTitle {
                 if toolTitle != session.title || session.titleSettled != true {
                     store.settleTitle(id: session.id, to: toolTitle)
                     saveSessions()

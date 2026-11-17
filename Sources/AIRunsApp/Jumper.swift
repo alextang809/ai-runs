@@ -23,12 +23,12 @@ enum Jumper {
         "com.github.wez.wezterm", "net.kovidgoyal.kitty", "org.alacritty", "co.zeit.hyper",
     ]
 
-    static func open(session: Session, show: (String) -> Void) {
+    static func open(session: Session, show: @escaping (String) -> Void) {
         focus(tool: session.tool, sessionId: session.sessionId, cwd: session.cwd,
-              terminal: session.terminal, show: show)
+              terminal: session.terminal, title: session.title, show: show)
     }
 
-    static func open(link: PinLink, show: (String) -> Void) {
+    static func open(link: PinLink, show: @escaping (String) -> Void) {
         switch link {
         case .url(let string):
             guard let url = URL(string: string) else { return }
@@ -36,12 +36,12 @@ enum Jumper {
         case .app(let bundleId, let name):
             if !activate(bundleId: bundleId) { show("Couldn’t open \(name).") }
         case .session(let tool, let sessionId, let cwd, let terminal):
-            focus(tool: tool, sessionId: sessionId, cwd: cwd, terminal: terminal, show: show)
+            focus(tool: tool, sessionId: sessionId, cwd: cwd, terminal: terminal, title: nil, show: show)
         }
     }
 
     private static func focus(tool: AgentTool, sessionId: String, cwd: String?, terminal: TerminalContext,
-                              show: (String) -> Void) {
+                              title: String?, show: @escaping (String) -> Void) {
         let bundle = bundleId(for: terminal)
         let bundleName = bundle ?? ""
         switch bundleName {
@@ -55,7 +55,19 @@ enum Jumper {
         default:
             break
         }
-        // Sessions inside a desktop app (Claude, Codex): bringing the app back is enough.
+        // Desktop apps: open the exact thread when the app has a link for it.
+        let inTerminal = bundle.map { terminalBundles.contains($0) } ?? false
+        if tool == .codex, !inTerminal, openCodexThread(sessionId) { return }
+        if tool == .claudeCode, bundleName == "com.anthropic.claudefordesktop" {
+            let desktop = ClaudeDesktopIndex.session(forCLI: sessionId,
+                                                     in: ClaudeDesktopIndex.load(root: ClaudeDesktopIndex.root()))
+            if let desktop, openClaudeSession(desktop) { return }
+            if activate(bundleId: bundleName) {
+                selectInSidebar(name: desktop?.title ?? title, bundleId: bundleName, appName: "Claude", show: show)
+                return
+            }
+        }
+        // Otherwise bringing the app back is the best we can do.
         if let bundle, !terminalBundles.contains(bundle), activate(bundleId: bundle) { return }
         let resume = tool.resumeCommand(sessionId: sessionId)
         if let bundle, activate(bundleId: bundle) {
@@ -65,6 +77,63 @@ enum Jumper {
         }
         copy(resume)
         show("Copied “\(resume)”. Paste it in a terminal to reopen the session.")
+    }
+
+    /// `codex://threads/<id>` opens a thread in the Codex (ChatGPT) desktop app.
+    private static func openCodexThread(_ threadId: String) -> Bool {
+        guard let url = URL(string: "codex://threads/\(threadId)"),
+              NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { return false }
+        return NSWorkspace.shared.open(url)
+    }
+
+    /// Claude Desktop has no documented link to an existing Code session yet.
+    /// When one is known to work on this Mac it is stored as a template, e.g.
+    /// `defaults write io.github.alextang809.airuns claudeSessionLink 'claude://code/{id}'`
+    /// (`{id}` = desktop ID, `{cli}` = Claude Code session ID).
+    static let claudeLinkKey = "claudeSessionLink"
+
+    private static func openClaudeSession(_ session: ClaudeDesktopSession) -> Bool {
+        guard let template = UserDefaults.standard.string(forKey: claudeLinkKey), !template.isEmpty,
+              let url = ClaudeDesktopIndex.link(template: template, session: session),
+              NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { return false }
+        return NSWorkspace.shared.open(url)
+    }
+
+    private static let askedAccessibilityKey = "askedAccessibilityForSidebar"
+
+    /// The app is in front but has no link to the thread: press the thread's
+    /// name in its sidebar. If that can't be done, say where it is and put the
+    /// name on the clipboard, so the user is never left guessing.
+    private static func selectInSidebar(name: String?, bundleId: String, appName: String,
+                                        show: @escaping (String) -> Void) {
+        guard let name, !name.isEmpty else { return }
+        func fallBack() {
+            copy(name)
+            show("\(appName) is open. Look for “\(TextUtils.truncate(name, limit: 40))” in its sidebar (name copied).")
+        }
+        guard SidebarClicker.isTrusted else {
+            if !UserDefaults.standard.bool(forKey: askedAccessibilityKey) {
+                UserDefaults.standard.set(true, forKey: askedAccessibilityKey)
+                show("To open the exact \(appName) thread next time, allow AI Runs under Accessibility.")
+                SidebarClicker.requestTrust()
+                copy(name)
+            } else {
+                fallBack()
+            }
+            return
+        }
+        // Give the app a moment to come forward before reading its window.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            MainActor.assumeIsolated {
+                guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first else {
+                    fallBack()
+                    return
+                }
+                SidebarClicker.click(title: name, in: app) { pressed in
+                    MainActor.assumeIsolated { if !pressed { fallBack() } }
+                }
+            }
+        }
     }
 
     static func activate(bundleId: String) -> Bool {
