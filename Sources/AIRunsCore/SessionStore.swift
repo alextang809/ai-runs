@@ -69,6 +69,9 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// When each tool last sent any event, keyed by `AgentTool.rawValue`.
     /// Lets the app tell "nothing running" apart from "hooks not firing".
     public private(set) var toolLastSeen: [String: Date]? = nil
+    /// Each session's lifeline (working / waiting / background spans), kept for a
+    /// day even after the session is resolved, for the lifelines and the header stats.
+    public internal(set) var history: [String: [ActivitySpan]]? = nil
 
     public func lastSeen(_ tool: AgentTool) -> Date? { toolLastSeen?[tool.rawValue] }
 
@@ -83,6 +86,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
 
         if event.kind == .sessionEnd {
             sessions[key] = nil
+            record(nil, for: key, at: event.at)
             return
         }
         if session == nil {
@@ -150,11 +154,13 @@ public struct SessionStore: Codable, Equatable, Sendable {
             break
         }
         sessions[key] = current
+        record(SpanKind(current), for: key, at: event.at)
     }
 
     /// The user is done with this session; it leaves the panel until the next prompt.
-    public mutating func resolve(id: String) {
+    public mutating func resolve(id: String, at: Date = Date()) {
         sessions[id] = nil
+        record(nil, for: id, at: at)
     }
 
     /// The user's own name for the session. Automatic names never replace it.
@@ -183,7 +189,13 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// Drops sessions nobody has touched for a long time (closed windows that
     /// never sent SessionEnd).
     public mutating func pruneStale(now: Date, olderThan age: TimeInterval = 24 * 3600) {
+        let gone = sessions.filter { now.timeIntervalSince($0.value.lastEventAt) >= age }.map(\.key)
         sessions = sessions.filter { now.timeIntervalSince($0.value.lastEventAt) < age }
+        for key in gone { record(nil, for: key, at: now) }
+        if var all = history {
+            all = all.filter { _, spans in spans.contains { $0.end(or: now) > now.addingTimeInterval(-24 * 3600) } }
+            history = all.isEmpty ? nil : all
+        }
     }
 
     /// Sessions that need the user first, longest-waiting first; then working

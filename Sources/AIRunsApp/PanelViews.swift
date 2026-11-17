@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 
 enum PanelLayout {
-    static let menuWidth: CGFloat = 340
+    static let menuWidth: CGFloat = 384
     static let flyoutWidth: CGFloat = 284
     static let gap: CGFloat = 8
     static let outerPadding: CGFloat = 10
@@ -16,7 +16,10 @@ enum Palette {
             : NSColor(red: 0.64, green: 0.31, blue: 0.0, alpha: 1)
     })
     static let waitingFill = Color(red: 0.91, green: 0.54, blue: 0.05)
-    static let working = Color.accentColor
+    /// The only two colours in the panel: blue for work, orange for "needs you".
+    /// Everything else is grey.
+    static let working = Color(nsColor: .systemBlue)
+    static let quiet = Color.secondary
 }
 
 struct RowFramePreference: PreferenceKey {
@@ -26,7 +29,7 @@ struct RowFramePreference: PreferenceKey {
     }
 }
 
-private extension View {
+extension View {
     func reportFrame(_ key: String) -> some View {
         background(GeometryReader { proxy in
             Color.clear.preference(key: RowFramePreference.self, value: [key: proxy.frame(in: .named("panel"))])
@@ -121,28 +124,30 @@ struct MenuColumn: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
-                Text("AI Runs").font(.system(size: 16, weight: .bold))
+                Text("AI Runs").font(.system(size: 15, weight: .bold))
                 Spacer()
-            }
-            Text(model.message ?? summary)
-                .font(.system(size: 12, weight: model.message == nil ? .regular : .semibold))
-                .foregroundStyle(model.message == nil ? Color.secondary : Color.accentColor)
-                .lineLimit(2)
-            if model.message == nil {
-                ForEach(model.silentTools, id: \.self) { tool in
-                    Text(silentHint(tool))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Palette.waiting)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                if let message = model.message {
+                    Text(message)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Palette.working)
+                        .lineLimit(1)
                 }
+            }
+            HeaderDashboard(needs: model.store.needsUserCount, working: model.store.workingCount,
+                            stats: model.store.stats(now: model.now))
+            ForEach(model.silentTools, id: \.self) { tool in
+                Text(silentHint(tool))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.waiting)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
+        .padding(.top, 9)
+        .padding(.bottom, 8)
         .contentShape(Rectangle())
         .onHover { if $0 { ui.hoverOff() } }
     }
@@ -152,13 +157,6 @@ struct MenuColumn: View {
         case .codex: return "Codex hasn’t reported yet — approve the AI Runs hooks in Codex."
         case .claudeCode: return "Claude Code hasn’t reported yet — start or continue a session."
         }
-    }
-
-    private var summary: String {
-        let needs = model.store.needsUserCount
-        let working = model.store.workingCount
-        if needs == 0 && working == 0 { return "Nothing running" }
-        return "\(needs) need you · \(working) working"
     }
 
     @ViewBuilder private var activeSection: some View {
@@ -180,16 +178,33 @@ struct MenuColumn: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
             } else {
-                ForEach(sessions) { session in
-                    SessionRow(session: session, now: model.now, ui: ui) {
-                        actions.closePanel()
-                        model.open(sessionId: session.id)
-                    }
+                let needs = sessions.filter { $0.state.needsUser }
+                let working = sessions.filter { !$0.state.needsUser }
+                if !needs.isEmpty {
+                    SectionLabel(title: "Needs you", count: needs.count)
+                    rows(needs)
+                }
+                if !working.isEmpty {
+                    SectionLabel(title: "Working", count: working.count)
+                    rows(working)
+                }
+                LifelineLegend()
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func rows(_ sessions: [Session]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(sessions) { session in
+                SessionRow(session: session, lifeline: model.store.lifeline(for: session.id, now: model.now),
+                           now: model.now, ui: ui) {
+                    actions.closePanel()
+                    model.open(sessionId: session.id)
                 }
             }
         }
         .padding(.horizontal, 5)
-        .padding(.vertical, 3)
     }
 
     private var bottomMenu: some View {
@@ -212,107 +227,6 @@ struct SeparatorLine: View {
 }
 
 // MARK: - Rows
-
-struct StatusDot: View {
-    let state: SessionState
-    @State private var pulse = false
-
-    var body: some View {
-        ZStack {
-            switch state {
-            case .working:
-                Circle().fill(Palette.working).frame(width: 9, height: 9)
-                Circle().stroke(Palette.working.opacity(pulse ? 0 : 0.5), lineWidth: 2)
-                    .frame(width: pulse ? 17 : 9, height: pulse ? 17 : 9)
-            case .yourTurn:
-                Circle().fill(Palette.waitingFill).frame(width: 9, height: 9)
-            case .needsApproval:
-                Circle().strokeBorder(Palette.waitingFill, lineWidth: 2.5).frame(width: 9, height: 9)
-            }
-        }
-        .frame(width: 17, height: 17)
-        .onAppear {
-            guard state == .working else { return }
-            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { pulse = true }
-        }
-        .accessibilityHidden(true)
-    }
-}
-
-struct SessionRow: View {
-    let session: Session
-    let now: Date
-    @ObservedObject var ui: PanelUIState
-    let open: () -> Void
-
-    private var key: PanelUIState.Target { .session(session.id) }
-    private var highlighted: Bool { ui.hover == key }
-
-    private var stateWord: String {
-        switch session.state {
-        case .needsApproval: return "Needs approval"
-        case .yourTurn: return "Your turn"
-        case .working:
-            if session.isInBackground { return "In background" }
-            return session.isQuiet(now: now) ? "No update" : "Working"
-        }
-    }
-
-    private var time: String {
-        if session.state.needsUser {
-            return "waiting " + TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? session.lastEventAt))
-        }
-        return TextUtils.duration(now.timeIntervalSince(session.turnStartedAt))
-    }
-
-    private var subtitle: String {
-        session.project.isEmpty ? session.tool.displayName : "\(session.tool.displayName) · \(session.project)"
-    }
-
-    /// What it is doing now, ahead of where it runs: "2/8 · Build the lens · Swiss-Journal".
-    private var detail: String {
-        let place = session.project.isEmpty ? session.tool.displayName : session.project
-        if session.state == .working, !session.isQuiet(now: now) {
-            if let progress = session.progress { return "\(progress.summary) · \(place)" }
-            if let activity = session.activity { return "\(activity) · \(place)" }
-        }
-        return subtitle
-    }
-
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 8) {
-                StatusDot(state: session.state)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(session.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                    Text(detail).font(.system(size: 11.5)).lineLimit(1)
-                        .foregroundStyle(highlighted ? Color.white.opacity(0.85) : Color.secondary)
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(stateWord)
-                        .font(.system(size: 11, weight: session.state.needsUser ? .semibold : .regular))
-                        .foregroundStyle(highlighted ? Color.white.opacity(0.9)
-                                         : (session.state.needsUser ? Palette.waiting : Color.secondary))
-                    Text(time)
-                        .font(.system(size: session.state.needsUser ? 13 : 12,
-                                      weight: session.state.needsUser ? .bold : .regular).monospacedDigit())
-                        .foregroundStyle(highlighted ? Color.white
-                                         : (session.state.needsUser ? Palette.waiting : Color.secondary))
-                }
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 44)
-            .foregroundStyle(highlighted ? Color.white : Color.primary)
-            .background(RoundedRectangle(cornerRadius: 6).fill(highlighted ? Color.accentColor : Color.clear))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { inside in inside ? ui.hoverOn(key) : ui.hoverOff() }
-        .reportFrame(key.key)
-        .accessibilityLabel("\(session.title), \(detail), \(stateWord), \(time). Open")
-    }
-}
 
 struct CardRow: View {
     let card: PinCard

@@ -562,3 +562,50 @@ final class ClaudeDesktopIndexTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 }
+
+final class TimelineTests: XCTestCase {
+    private func t(_ minutes: Double) -> Date { Date(timeIntervalSince1970: 1_800_000_000 + minutes * 60) }
+    private func ev(_ kind: EventKind, _ minutes: Double, tasks: Int = 0) -> AgentEvent {
+        AgentEvent(tool: .claudeCode, kind: kind, sessionId: "s1", at: t(minutes), backgroundTasks: tasks)
+    }
+
+    func testLifelineFollowsStateChanges() {
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0))
+        store.apply(ev(.toolActivity, 5))
+        store.apply(ev(.turnEnd, 10))
+        store.apply(ev(.promptStart, 14))
+        store.apply(ev(.turnEnd, 20, tasks: 1))
+        let spans = store.lifeline(for: "claude-code:s1", now: t(25))
+        XCTAssertEqual(spans.map(\.kind), [.working, .waiting, .working, .background])
+        XCTAssertEqual(spans[0].end, t(10))
+        XCTAssertEqual(spans[1].end, t(14))
+        XCTAssertNil(spans[3].end)
+    }
+
+    func testResolveClosesLifelineButKeepsHistory() {
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0))
+        store.apply(ev(.turnEnd, 10))
+        store.resolve(id: "claude-code:s1", at: t(13))
+        XCTAssertTrue(store.sessions.isEmpty)
+        XCTAssertEqual(store.history?["claude-code:s1"]?.last?.end, t(13))
+    }
+
+    func testStats() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let history: [String: [ActivitySpan]] = [
+            "a": [ActivitySpan(kind: .working, start: t(0), end: t(30)),
+                  ActivitySpan(kind: .waiting, start: t(30), end: t(34)),
+                  ActivitySpan(kind: .working, start: t(34))],
+            "b": [ActivitySpan(kind: .waiting, start: t(50), end: t(52))],
+        ]
+        let stats = ActivityStats.compute(history: history, now: t(60), window: 3600, bucketCount: 4, calendar: calendar)
+        XCTAssertEqual(stats.buckets.count, 4)
+        XCTAssertEqual(stats.buckets.map(\.working).reduce(0, +), 56, accuracy: 0.01)
+        XCTAssertEqual(stats.buckets.map(\.waiting).reduce(0, +), 6, accuracy: 0.01)
+        XCTAssertEqual(stats.averageReply ?? 0, 180, accuracy: 0.01)
+        XCTAssertEqual(stats.sessionsToday, 2)
+    }
+}
