@@ -7,7 +7,7 @@ back into Always Hidden. Find out why, with evidence. Read-only except where not
 1. **Identity change.** Builds before `cd0873a` had no `autosaveName` (macOS called it `Item-0`);
    newer builds use `AIRunsStatusItem`. Each change looks like a brand-new item, and Bartender puts
    new items wherever its "new menu bar items" setting says.
-2. **Image churn.** Until commit `(this round)` the app replaced the status item's image on every
+2. **Image churn.** Until commit `aadfb35` the app replaced the status item's image on every
    store update (about once a second while a session works), and switches between a template image
    and an orange one when something needs Alex. Bartender on macOS 26 matches items partly by what
    they look like; churn may make it lose the match.
