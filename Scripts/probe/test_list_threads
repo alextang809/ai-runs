@@ -1,0 +1,73 @@
+#!/bin/zsh
+set -eu
+probe="${0:A:h}/list_threads"
+fixture=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/airuns-probe-test.XXXXXX")
+trap '/bin/rm -rf -- "$fixture"' EXIT
+metadata="$fixture/Library/Application Support/Claude/claude-code-sessions/account/org"
+/bin/mkdir -p "$metadata" "$fixture/.codex"
+cat > "$metadata/local_one.json" <<'JSON'
+{"title":"Native Claude title","cliSessionId":"private-id","cwd":"/private/project","lastActivityAt":1794931200000,"prompt":"NEVER PRINT THIS","isArchived":false}
+JSON
+cat > "$metadata/local_null.json" <<'JSON'
+{"title":"Null timestamp","lastActivityAt":null,"isArchived":false}
+JSON
+cat > "$metadata/local_missing.json" <<'JSON'
+{"title":"Missing timestamp","isArchived":false}
+JSON
+cat > "$metadata/local_archived.json" <<'JSON'
+{"title":"ARCHIVED CLAUDE","isArchived":true}
+JSON
+/usr/bin/sqlite3 "$fixture/.codex/state_5.sqlite" <<'SQL'
+CREATE TABLE threads(id TEXT,name TEXT,title TEXT,cwd TEXT,updated_at INTEGER,archived INTEGER,thread_source TEXT,source TEXT);
+INSERT INTO threads VALUES('secret-id','Native Codex name','STALE TITLE','/private/codex',1794931200,0,'user','vscode');
+INSERT INTO threads VALUES('a','ARCHIVED CODEX','','',1,1,'user','cli');
+INSERT INTO threads VALUES('b','SUBAGENT','','',1,0,'subagent','cli');
+INSERT INTO threads VALUES('c','GUARDIAN','','',1,0,'guardian_review','cli');
+INSERT INTO threads VALUES('d','LEGACY SUBAGENT','','',1,0,NULL,'{"subagent":{"other":"guardian"}}');
+INSERT INTO threads VALUES('e',NULL,'Fallback title','',1,0,'user','cli');
+SQL
+before=$(/usr/bin/cksum "$fixture/.codex/state_5.sqlite")
+"$probe" --home "$fixture" > "$fixture/output"
+"$probe" --home "$fixture" --redact > "$fixture/redacted"
+/usr/bin/osascript -l JavaScript - "$fixture/output" "$fixture/redacted" <<'JXA'
+ObjC.import('Foundation');
+function read(path) { return ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null)); }
+function check(test, message) { if (!test) throw Error(message); }
+function run(args) {
+ const raw = read(args[0]);
+ const rows = raw.trim().split('\n').filter(Boolean).map(JSON.parse);
+ check(rows.length === 5, 'archive and subagent filters');
+ check(rows.some(r => r.name === 'Native Claude title'), 'Claude native title');
+ check(rows.some(r => r.name === 'Native Codex name'), 'Codex name precedes stale title');
+ check(rows.some(r => r.name === 'Untitled'), 'Codex missing native name stays untitled');
+ check(rows.every(r => r.state === 'unknown'), 'quiet metadata never proves idle');
+ check(rows.every(r => r.state_source === 'inventory'), 'state provenance');
+ check(rows.filter(r => /^(Null|Missing) timestamp$/.test(r.name)).every(r => r.last_activity === null), 'null and missing timestamps remain unknown');
+ check(rows.filter(r => !/^(Null|Missing) timestamp$/.test(r.name)).every(r => typeof r.last_activity === 'string'), 'populated timestamps normalize');
+ check(!/NEVER PRINT|private-id|secret-id|STALE TITLE|Fallback title/.test(raw), 'no conversation or IDs');
+ const redacted = read(args[1]);
+ check(!/Native|Fallback|private\/|secret-id/.test(redacted), 'redact names and projects');
+ check(redacted.trim().split('\n').every(l => JSON.parse(l).name === '[redacted]'), 'redacted rows');
+ return 'metadata and privacy assertions passed';
+}
+JXA
+# Missing inventory is empty and does not create a database.
+/bin/mkdir -p "$fixture/empty"
+"$probe" --home "$fixture/empty" > "$fixture/missing"
+[[ ! -s "$fixture/missing" && ! -e "$fixture/empty/.codex/state_5.sqlite" ]]
+# A malformed metadata file is skipped with a content-free diagnostic.
+print -r -- '{PRIVATE BROKEN CONTENT' > "$metadata/local_broken.json"
+"$probe" --home "$fixture" > "$fixture/after-broken" 2> "$fixture/errors"
+[[ "$(<"$fixture/errors")" == *'claude: unreadable metadata skipped'* ]]
+[[ "$(<"$fixture/errors")" != *'PRIVATE'* ]]
+# Unexpected schemas fail safely, without modifying the source database.
+[[ "$(/usr/bin/cksum "$fixture/.codex/state_5.sqlite")" == "$before" ]]
+/bin/mkdir -p "$fixture/broken/.codex"
+print -r -- 'PRIVATE BROKEN DATABASE' > "$fixture/broken/.codex/state_5.sqlite"
+"$probe" --home "$fixture/broken" > "$fixture/broken-out" 2> "$fixture/broken-err"
+[[ ! -s "$fixture/broken-out" ]]
+[[ "$(<"$fixture/broken-err")" == *'codex: inventory unavailable'* ]]
+[[ "$(<"$fixture/broken-err")" != *'PRIVATE'* ]]
+if "$probe" --home > /dev/null 2> /dev/null; then exit 1; fi
+if "$probe" --unexpected > /dev/null 2> /dev/null; then exit 1; fi
+print 'All probe tests passed.'
