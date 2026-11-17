@@ -83,6 +83,21 @@ Run the tests with `swift test`.
 - Desktop chat apps (ChatGPT, Claude) don't report progress; pin them with
   Pin Front AI Window and track them on the board.
 
+## Clicking a session
+
+One click takes you back to where the session lives, in the app you use for it.
+You never have to paste a command.
+
+| The session runs in | Click does |
+|---|---|
+| Terminal or iTerm2 | Selects its tab. If the tab was closed, reopens the session in a new tab, in its folder. |
+| VS Code, Cursor | Opens the project window. |
+| Codex app | Opens the exact thread (`codex://threads/<id>`). |
+| Claude app | Brings Claude forward and selects the thread by its sidebar name (asks once for Accessibility). Otherwise it tells you the thread's name and copies it. |
+| claude.ai, chatgpt.com | Pin the browser tab with Pin Front AI Window; the card opens that page. Automatic tracking needs the planned browser extension. |
+
+Terminal users also get **Copy Resume Command** in the session's details.
+
 ## Roadmap
 
 - Remaining usage for each tool

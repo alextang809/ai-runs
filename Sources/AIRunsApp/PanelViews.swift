@@ -649,6 +649,13 @@ struct SessionFlyout: View {
             FlyoutAction(title: "Pin to Board") { model.pin(sessionId: session.id) },
             FlyoutAction(title: "Rename…") { actions.renameSession(session.id) },
         ]
+        // Only for sessions that live in a terminal; desktop and web users never need a command.
+        if let bundle = Jumper.bundleId(for: session.terminal), Jumper.terminalBundles.contains(bundle) {
+            flyoutActions.append(FlyoutAction(title: "Copy Resume Command") {
+                Jumper.copyResumeCommand(for: session)
+                model.show("Copied “\(session.tool.resumeCommand(sessionId: session.sessionId))”.")
+            })
+        }
         if session.state != .working || session.isQuiet(now: now) {
             flyoutActions.append(FlyoutAction(title: "Resolve") {
                 ui.hover = nil

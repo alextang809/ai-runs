@@ -25,7 +25,7 @@ enum Jumper {
 
     static func open(session: Session, show: @escaping (String) -> Void) {
         focus(tool: session.tool, sessionId: session.sessionId, cwd: session.cwd,
-              terminal: session.terminal, title: session.title, show: show)
+              terminal: session.terminal, title: session.title, isWorking: session.state == .working, show: show)
     }
 
     static func open(link: PinLink, show: @escaping (String) -> Void) {
@@ -36,12 +36,12 @@ enum Jumper {
         case .app(let bundleId, let name):
             if !activate(bundleId: bundleId) { show("Couldn’t open \(name).") }
         case .session(let tool, let sessionId, let cwd, let terminal):
-            focus(tool: tool, sessionId: sessionId, cwd: cwd, terminal: terminal, title: nil, show: show)
+            focus(tool: tool, sessionId: sessionId, cwd: cwd, terminal: terminal, title: nil, isWorking: false, show: show)
         }
     }
 
     private static func focus(tool: AgentTool, sessionId: String, cwd: String?, terminal: TerminalContext,
-                              title: String?, show: @escaping (String) -> Void) {
+                              title: String?, isWorking: Bool, show: @escaping (String) -> Void) {
         let bundle = bundleId(for: terminal)
         let bundleName = bundle ?? ""
         switch bundleName {
@@ -68,15 +68,62 @@ enum Jumper {
             }
         }
         // Otherwise bringing the app back is the best we can do.
-        if let bundle, !terminalBundles.contains(bundle), activate(bundleId: bundle) { return }
-        let resume = tool.resumeCommand(sessionId: sessionId)
-        if let bundle, activate(bundleId: bundle) {
-            copy(resume)
-            show("Opened \(terminal.appName). Couldn’t find the exact tab, so “\(resume)” is on your clipboard.")
+        if let bundle, !inTerminal, activate(bundleId: bundle) { return }
+
+        // A terminal session whose tab we couldn't find. Never hand the user a
+        // command to paste: reopen the session in a new tab of the same
+        // terminal, in its folder. Not while it may still be running in a tab
+        // we failed to match, which would start a second copy.
+        let terminalName = terminal.appName
+        if isWorking {
+            if let bundle { _ = activate(bundleId: bundle) }
+            show("It’s still running in \(terminalName), but AI Runs couldn’t find the tab.")
             return
         }
-        copy(resume)
-        show("Copied “\(resume)”. Paste it in a terminal to reopen the session.")
+        if reopenInTerminal(bundle: bundle, command: tool.resumeCommand(sessionId: sessionId), cwd: cwd) {
+            show("The original tab was closed, so the session reopened in a new tab.")
+            return
+        }
+        if tool == .codex, openCodexThread(sessionId) {
+            show("The terminal tab was closed, so the thread opened in Codex.")
+            return
+        }
+        show("Couldn’t reopen this session. Use “Copy Resume Command” in its details.")
+    }
+
+    /// Opens a new tab running `command` in `cwd`: iTerm2 when the session came
+    /// from iTerm2, otherwise Terminal (Ghostty, Warp and others can't be scripted).
+    private static func reopenInTerminal(bundle: String?, command: String, cwd: String?) -> Bool {
+        var line = command
+        if let cwd, !cwd.isEmpty {
+            line = "cd '\(cwd.replacingOccurrences(of: "'", with: "'\\''"))' && \(command)"
+        }
+        let text = escaped(line)
+        if bundle == "com.googlecode.iterm2" {
+            return runScript("""
+            tell application id "com.googlecode.iterm2"
+                activate
+                if (count of windows) is 0 then
+                    create window with default profile
+                else
+                    tell current window to create tab with default profile
+                end if
+                tell current session of current window to write text "\(text)"
+            end tell
+            return true
+            """)
+        }
+        return runScript("""
+        tell application id "com.apple.Terminal"
+            activate
+            do script "\(text)"
+        end tell
+        return true
+        """)
+    }
+
+    static func copyResumeCommand(for session: Session) {
+        copy(session.tool.resumeCommand(sessionId: session.sessionId))
     }
 
     /// `codex://threads/<id>` opens a thread in the Codex (ChatGPT) desktop app.
