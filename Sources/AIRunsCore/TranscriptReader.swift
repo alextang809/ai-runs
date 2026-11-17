@@ -25,8 +25,9 @@ public enum TranscriptReader {
         else { return nil }
         if let text = message["content"] as? String { return usable(text) }
         if let parts = message["content"] as? [[String: Any]] {
-            let text = parts.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined(separator: " ")
-            return usable(text)
+            return parts.filter { $0["type"] as? String == "text" }
+                .compactMap { $0["text"] as? String }
+                .lazy.compactMap(usable).first
         }
         return nil
     }
@@ -38,14 +39,11 @@ public enum TranscriptReader {
               payload["role"] as? String == "user",
               let parts = payload["content"] as? [[String: Any]]
         else { return nil }
-        let text = parts.compactMap { $0["text"] as? String }.joined(separator: " ")
-        return usable(text)
+        return parts.compactMap { $0["text"] as? String }.lazy.compactMap(usable).first
     }
 
-    /// Skips injected context and slash-command bookkeeping, which start with a tag.
+    /// Strips injected context and slash-command bookkeeping (tagged blocks).
     private static func usable(_ text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.hasPrefix("<"), !trimmed.hasPrefix("Caveat:") else { return nil }
-        return trimmed
+        TextUtils.cleanPrompt(text)
     }
 }

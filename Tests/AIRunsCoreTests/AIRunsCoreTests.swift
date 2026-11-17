@@ -37,6 +37,22 @@ final class EventParserTests: XCTestCase {
         XCTAssertEqual(event.lastMessage, "Done. Want tests too?")
     }
 
+    func testStopWithRunningBackgroundTaskKeepsWorking() throws {
+        let data = line(tool: "claude-code", payload: [
+            "session_id": "a", "hook_event_name": "Stop", "last_assistant_message": "Tests still running.",
+            "background_tasks": [["id": "b1", "status": "running", "type": "shell"],
+                                 ["id": "b2", "status": "completed", "type": "shell"]],
+        ])
+        let event = try XCTUnwrap(EventParser.parse(line: data))
+        XCTAssertEqual(event.backgroundTasks, 1)
+        var store = SessionStore()
+        store.apply(event)
+        let session = try XCTUnwrap(store.sessions["claude-code:a"])
+        XCTAssertEqual(session.state, .working)
+        XCTAssertTrue(session.isInBackground)
+        XCTAssertEqual(store.needsUserCount, 0)
+    }
+
     func testPermissionRequestUsesCommand() throws {
         let data = line(tool: "codex", payload: ["session_id": "s1", "hook_event_name": "PermissionRequest",
                                                  "tool_name": "Bash", "tool_input": ["command": "prisma migrate deploy"]])
@@ -177,6 +193,25 @@ final class TextUtilsTests: XCTestCase {
         XCTAssertLessThanOrEqual(TextUtils.title(fromPrompt: long).count, 49)
     }
 
+    func testCleanPromptRemovesInjectedTags() {
+        XCTAssertEqual(TextUtils.cleanPrompt("<system-reminder>ctx</system-reminder>\n<ide_opened_file path=\"a\">x</ide_opened_file> Fix the login bug"),
+                       "Fix the login bug")
+        XCTAssertNil(TextUtils.cleanPrompt("<task-notification><status>done</status></task-notification>"))
+        XCTAssertEqual(TextUtils.title(fromPrompt: "<command-name>/clear</command-name>"), "Untitled session")
+    }
+
+    func testGenericTitleIsReplacedByLaterPrompt() throws {
+        var store = SessionStore()
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        store.apply(AgentEvent(tool: .claudeCode, kind: .turnEnd, sessionId: "s", at: t))
+        store.apply(AgentEvent(tool: .claudeCode, kind: .promptStart, sessionId: "s", at: t, prompt: "<x>noise</x>"))
+        XCTAssertEqual(store.sessions["claude-code:s"]?.title, "Claude Code session")
+        store.apply(AgentEvent(tool: .claudeCode, kind: .promptStart, sessionId: "s", at: t, prompt: "Add export to PDF"))
+        XCTAssertEqual(store.sessions["claude-code:s"]?.title, "Add export to PDF")
+        store.apply(AgentEvent(tool: .claudeCode, kind: .promptStart, sessionId: "s", at: t, prompt: "something else"))
+        XCTAssertEqual(store.sessions["claude-code:s"]?.title, "Add export to PDF")
+    }
+
     func testLastQuestion() {
         XCTAssertEqual(TextUtils.lastQuestion(in: "Done. I updated 6 files. Want me to add tests next?"),
                        "Want me to add tests next?")
@@ -266,7 +301,8 @@ final class TranscriptReaderTests: XCTestCase {
             ["type": "summary", "summary": "x"],
             ["type": "user", "isMeta": true, "message": ["role": "user", "content": "Caveat: local commands"]],
             ["type": "user", "message": ["role": "user", "content": "<command-name>/clear</command-name>"]],
-            ["type": "user", "message": ["role": "user", "content": [["type": "text", "text": "Add dark mode to settings"]]]],
+            ["type": "user", "message": ["role": "user", "content": [["type": "text", "text": "<ide_selection>code</ide_selection>"],
+                                                                     ["type": "text", "text": "Add dark mode to settings"]]]],
             ["type": "user", "message": ["role": "user", "content": "second prompt"]],
         ])
         XCTAssertEqual(TranscriptReader.firstUserPrompt(at: url), "Add dark mode to settings")

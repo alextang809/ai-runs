@@ -236,7 +236,9 @@ struct SessionRow: View {
         switch session.state {
         case .needsApproval: return "Needs approval"
         case .yourTurn: return "Your turn"
-        case .working: return session.isQuiet(now: now) ? "No update" : "Working"
+        case .working:
+            if session.isInBackground { return "In background" }
+            return session.isQuiet(now: now) ? "No update" : "Working"
         }
     }
 
@@ -588,12 +590,18 @@ struct SessionFlyout: View {
         case .yourTurn:
             chip = ("Your turn · waiting \(TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now)))", true)
         case .working:
-            chip = (session.isQuiet(now: now) ? "No update for a while — it may have stopped"
-                    : "Working · \(TextUtils.duration(now.timeIntervalSince(session.turnStartedAt)))", false)
+            if session.isInBackground {
+                let tasks = session.backgroundTasks ?? 1
+                chip = ("Waiting on \(tasks) background task\(tasks == 1 ? "" : "s") · continues by itself", false)
+            } else {
+                chip = (session.isQuiet(now: now) ? "No update for a while — it may have stopped"
+                        : "Working · \(TextUtils.duration(now.timeIntervalSince(session.turnStartedAt)))", false)
+            }
         }
 
         var rows: [(String, String)] = [("Started", Self.clock.string(from: session.startedAt))]
-        if session.state.needsUser, let since = session.waitingSince {
+        // Only when AI Runs saw the turn start; otherwise the number means nothing.
+        if session.state.needsUser, let since = session.waitingSince, since.timeIntervalSince(session.turnStartedAt) >= 60 {
             rows.append(("Last turn took", TextUtils.duration(since.timeIntervalSince(session.turnStartedAt))))
         }
 

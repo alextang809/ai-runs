@@ -87,10 +87,14 @@ public struct AgentEvent: Equatable, Sendable {
     public var cwd: String?
     public var transcriptPath: String?
     public var terminal: TerminalContext
+    /// Background tasks (e.g. a long test run) still running when the turn ended.
+    /// The agent picks the conversation up again when they finish.
+    public var backgroundTasks: Int
 
     public init(tool: AgentTool, kind: EventKind, sessionId: String, at: Date, prompt: String? = nil,
                 lastMessage: String? = nil, approvalDetail: String? = nil, cwd: String? = nil,
-                transcriptPath: String? = nil, terminal: TerminalContext = TerminalContext()) {
+                transcriptPath: String? = nil, terminal: TerminalContext = TerminalContext(),
+                backgroundTasks: Int = 0) {
         self.tool = tool
         self.kind = kind
         self.sessionId = sessionId
@@ -101,5 +105,6 @@ public struct AgentEvent: Equatable, Sendable {
         self.cwd = cwd
         self.transcriptPath = transcriptPath
         self.terminal = terminal
+        self.backgroundTasks = backgroundTasks
     }
 }

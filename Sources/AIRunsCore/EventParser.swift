@@ -78,6 +78,8 @@ public enum EventParser {
         case "Stop":
             event.kind = .turnEnd
             event.lastMessage = payload["last_assistant_message"] as? String
+            let tasks = payload["background_tasks"] as? [[String: Any]] ?? []
+            event.backgroundTasks = tasks.filter { ($0["status"] as? String).map { $0 == "running" || $0 == "pending" } ?? true }.count
         case "PermissionRequest":
             event.kind = .needsApproval
             event.approvalDetail = approvalDetail(from: payload)

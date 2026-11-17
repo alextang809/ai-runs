@@ -24,6 +24,12 @@ final class AppModel: ObservableObject {
 
     private struct Cursor: Codable { var offset: UInt64 }
 
+    /// The last app the user was in that "Pin Front AI Window" can pin
+    /// (a browser, an AI app, a terminal or editor). Opening the panel through
+    /// Bartender or the menu bar can leave Finder or Bartender in front.
+    private var lastPinnableApp: NSRunningApplication?
+    private var activationObserver: NSObjectProtocol?
+
     init() {
         try? paths.ensureRoot()
         let cursor = JSONFile.load(Cursor.self, from: paths.cursor)
@@ -31,6 +37,17 @@ final class AppModel: ObservableObject {
         store = JSONFile.load(SessionStore.self, from: paths.sessions) ?? SessionStore()
         board = JSONFile.load(PinBoard.self, from: paths.pins) ?? PinBoard()
         installHelper()
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            MainActor.assumeIsolated {
+                if FrontWindowCapture.isPinnable(app) { self?.lastPinnableApp = app }
+            }
+        }
+        if let front = NSWorkspace.shared.frontmostApplication, FrontWindowCapture.isPinnable(front) {
+            lastPinnableApp = front
+        }
     }
 
     func start() {
@@ -275,10 +292,9 @@ final class AppModel: ObservableObject {
     // MARK: - Pin Front AI Window
 
     func pinFrontWindow() {
-        guard let app = frontAppAtOpen ?? NSWorkspace.shared.frontmostApplication,
-              app.bundleIdentifier != Bundle.main.bundleIdentifier
-        else {
-            show("Click into an AI window first, then pin it.")
+        let candidate = frontAppAtOpen.flatMap { FrontWindowCapture.isPinnable($0) ? $0 : nil } ?? lastPinnableApp
+        guard let app = candidate, !app.isTerminated else {
+            show("Open the AI chat, browser tab or terminal you want to pin, then use Pin Front AI Window.")
             return
         }
         // A terminal or editor running a tracked session: pin that session.

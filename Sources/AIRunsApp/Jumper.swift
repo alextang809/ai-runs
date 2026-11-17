@@ -153,6 +153,22 @@ enum FrontWindowCapture {
     private static let chromium = ["com.google.Chrome", "com.google.Chrome.canary", "company.thebrowser.Browser",
                                    "com.brave.Browser", "com.microsoft.edgemac", "com.vivaldi.Vivaldi"]
 
+    /// Desktop apps for AI chats.
+    static let aiApps: Set<String> = [
+        "com.anthropic.claudefordesktop", "com.openai.chat", "com.openai.codex", "ai.perplexity.mac",
+        "com.google.GeminiMacOS", "com.microsoft.copilot-mac",
+    ]
+    static let editors: Set<String> = [
+        "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92", "com.vscodium",
+        "dev.zed.Zed",
+    ]
+
+    static func isPinnable(_ app: NSRunningApplication) -> Bool {
+        guard let bundle = app.bundleIdentifier, bundle != Bundle.main.bundleIdentifier else { return false }
+        return safari.contains(bundle) || chromium.contains(bundle) || aiApps.contains(bundle)
+            || editors.contains(bundle) || Jumper.terminalBundles.contains(bundle)
+    }
+
     static func capture(app: NSRunningApplication) -> Captured? {
         guard let bundle = app.bundleIdentifier else { return nil }
         let name = app.localizedName ?? bundle

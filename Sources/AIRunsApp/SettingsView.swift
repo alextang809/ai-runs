@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var statuses: [AgentTool: HookInstaller.Status] = [:]
     @State private var error: String?
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var showInDock = AppSettings.showInDock
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -66,6 +67,13 @@ struct SettingsView: View {
                         launchAtLogin = SMAppService.mainApp.status == .enabled
                     }
                 }
+
+            Toggle("Also show AI Runs in the Dock", isOn: $showInDock)
+                .onChange(of: showInDock) { _, enabled in AppSettings.showInDock = enabled }
+            Text("Useful when the menu bar is full: click the Dock icon to open the panel.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .padding(.top, -10)
 
             HStack {
                 Text("Everything stays on this Mac in ~/.airuns.")

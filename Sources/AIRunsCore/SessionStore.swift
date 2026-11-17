@@ -27,6 +27,10 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var approvalDetail: String?
     public var transcriptPath: String?
     public var terminal: TerminalContext
+    /// Set while the agent waits on its own background tasks; it continues by itself.
+    public var backgroundTasks: Int?
+
+    public var isInBackground: Bool { state == .working && (backgroundTasks ?? 0) > 0 }
 
     public var project: String { TextUtils.projectName(fromPath: cwd) }
 
@@ -70,7 +74,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
                               state: .working, startedAt: event.at, turnStartedAt: event.at,
                               waitingSince: nil, lastEventAt: event.at, lastMessage: nil,
                               approvalDetail: nil, transcriptPath: event.transcriptPath,
-                              terminal: event.terminal)
+                              terminal: event.terminal, backgroundTasks: nil)
         }
         guard var current = session else { return }
 
@@ -85,6 +89,10 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.turnStartedAt = event.at
             current.waitingSince = nil
             current.approvalDetail = nil
+            current.backgroundTasks = nil
+            if current.hasGenericTitle, let prompt = event.prompt, let title = TextUtils.cleanPrompt(prompt) {
+                current.title = TextUtils.truncate(title, limit: 48)
+            }
         case .needsApproval:
             current.state = .needsApproval
             current.waitingSince = event.at
@@ -96,10 +104,18 @@ public struct SessionStore: Codable, Equatable, Sendable {
                 current.approvalDetail = nil
             }
         case .turnEnd:
-            current.state = .yourTurn
-            current.waitingSince = event.at
             current.approvalDetail = nil
             if let message = event.lastMessage, !message.isEmpty { current.lastMessage = message }
+            if event.backgroundTasks > 0 {
+                // Still busy: it will resume on its own when the tasks finish.
+                current.state = .working
+                current.waitingSince = nil
+                current.backgroundTasks = event.backgroundTasks
+            } else {
+                current.state = .yourTurn
+                current.waitingSince = event.at
+                current.backgroundTasks = nil
+            }
         case .sessionEnd:
             break
         }

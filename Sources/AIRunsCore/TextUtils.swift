@@ -4,14 +4,23 @@ public enum TextUtils {
     /// A short title from the first prompt of a session: pasted blocks and
     /// code removed, whitespace collapsed, cut at a word near `limit`.
     public static func title(fromPrompt prompt: String, limit: Int = 48) -> String {
+        guard let text = cleanPrompt(prompt) else { return "Untitled session" }
+        return truncate(text, limit: limit)
+    }
+
+    /// What the user actually typed: tagged blocks the tools insert
+    /// (`<system-reminder>…</system-reminder>`, pasted content, IDE context),
+    /// code blocks and extra whitespace removed. Nil when nothing is left.
+    public static func cleanPrompt(_ prompt: String) -> String? {
         var text = prompt
-        text = text.replacingOccurrences(of: #"(?s)<pasted_content[^>]*>.*?</pasted_content[^>]*>"#,
+        text = text.replacingOccurrences(of: #"(?s)<([A-Za-z][\w-]*)(\s[^>]*)?>.*?</\1[^>]*>"#,
                                          with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"<[A-Za-z][\w-]*(\s[^>]*)?/?>"#, with: " ", options: .regularExpression)
         text = text.replacingOccurrences(of: #"(?s)```.*?```"#, with: " ", options: .regularExpression)
         text = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.isEmpty { return "Untitled session" }
-        return truncate(text, limit: limit)
+        if text.isEmpty || text.hasPrefix("Caveat:") { return nil }
+        return text
     }
 
     /// The last question in a reply, used as the suggested next step.
