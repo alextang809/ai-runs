@@ -43,7 +43,6 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
         statusItem.autosaveName = "AIRunsStatusItem"
         super.init()
         if let button = statusItem.button {
-            button.image = Icons.statusImage(needsYou: false)
             button.imagePosition = .imageLeading
             button.target = self
             button.action = #selector(togglePanel(_:))
@@ -69,9 +68,16 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
         updateButton(needsYou: model.store.needsUserCount)
     }
 
+    /// The count the button currently shows, so the item is only touched when
+    /// it actually changes. Menu bar managers such as Bartender re-identify an
+    /// item whose image keeps being replaced, and may treat it as a new item.
+    private var shownCount: Int?
+
     private func updateButton(needsYou: Int) {
-        guard let button = statusItem.button else { return }
-        button.image = Icons.statusImage(needsYou: needsYou > 0)
+        guard let button = statusItem.button, needsYou != shownCount else { return }
+        let stateChanged = (needsYou > 0) != ((shownCount ?? 0) > 0) || shownCount == nil
+        shownCount = needsYou
+        if stateChanged { button.image = Icons.statusImage(needsYou: needsYou > 0) }
         if needsYou > 0 {
             button.attributedTitle = NSAttributedString(
                 string: " \(needsYou)",
