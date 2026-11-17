@@ -1,0 +1,4 @@
+#!/bin/zsh
+# Local metadata only. Default output includes native titles and project paths.
+# Use --redact before sharing output; never commit output from a real home.
+exec /usr/bin/osascript -l JavaScript "${0:A:h}/list_threads.js" "$@"
