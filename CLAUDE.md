@@ -107,6 +107,9 @@ never saw active get no row.
   `airuns-hook`; each config file is backed up once as `*.airuns-backup`.
   Codex hook changes need the user's approval again, so don't change them lightly.
 
+- "Ignore for Now" on a run that waits on you (not on APPROVE): the row stays,
+  in an Ignored section, without counting or reminding, until the run moves on.
+
 ## Privacy
 
 The repo is public. Never commit conversation text, thread titles, prompts,
