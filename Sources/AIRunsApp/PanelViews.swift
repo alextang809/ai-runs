@@ -201,6 +201,7 @@ struct MenuColumn: View {
                 let needs = sessions.filter { $0.needsUser }
                 let working = sessions.filter { $0.state == .working }
                 let done = sessions.filter { $0.isDone }
+                let ignored = sessions.filter { $0.isIgnored }
                 if !needs.isEmpty {
                     SectionLabel(title: "Needs you", count: needs.count)
                     rows(needs, overlap: overlap)
@@ -212,6 +213,10 @@ struct MenuColumn: View {
                 if !done.isEmpty {
                     SectionLabel(title: "Done", count: done.count)
                     rows(done, overlap: overlap)
+                }
+                if !ignored.isEmpty {
+                    SectionLabel(title: "Ignored", count: ignored.count)
+                    rows(ignored, overlap: overlap)
                 }
                 LifelineLegend()
             }
@@ -229,13 +234,20 @@ struct MenuColumn: View {
                            remove: {
                                ui.hover = nil
                                model.remove(sessionId: session.id)
-                           }) {
+                           },
+                           ignore: ignoreAction(for: session)) {
                     actions.closePanel()
                     model.open(sessionId: session.id)
                 }
             }
         }
         .padding(.horizontal, 5)
+    }
+
+    private func ignoreAction(for session: Session) -> (() -> Void)? {
+        guard RunText.canIgnore(session) else { return nil }
+        let id = session.id, ignored = session.isIgnored
+        return { model.setIgnored(sessionId: id, !ignored) }
     }
 
     private var bottomMenu: some View {
@@ -567,7 +579,9 @@ struct SessionFlyout: View {
 
         let tint = Palette.tool(session.tool)
         let chip: (text: String, color: Color?)
-        if let native = session.native {
+        if session.isIgnored {
+            chip = ("Ignored · waiting \(TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now)))", nil)
+        } else if let native = session.native {
             // Known only from Claude's Threads list: say so, and when.
             let seen = "s" + RunText.seen(native, now: now).dropFirst()
             if native.stale == true {
@@ -636,6 +650,11 @@ struct SessionFlyout: View {
             FlyoutAction(title: "Pin to Board") { model.pin(sessionId: session.id) },
             FlyoutAction(title: "Rename…") { actions.renameSession(session.id) },
         ]
+        if RunText.canIgnore(session) {
+            flyoutActions.insert(FlyoutAction(title: RunText.ignoreTitle(session)) {
+                model.setIgnored(sessionId: session.id, !session.isIgnored)
+            }, at: 1)
+        }
         // Only for sessions that live in a terminal; desktop and web users never need a command.
         if let bundle = Jumper.bundleId(for: session.terminal), Jumper.terminalBundles.contains(bundle) {
             flyoutActions.append(FlyoutAction(title: "Copy Resume Command") {

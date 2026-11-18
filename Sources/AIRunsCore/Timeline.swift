@@ -32,7 +32,8 @@ extension SpanKind {
     init(_ session: Session) {
         switch session.state {
         case .needsApproval: self = .waiting
-        case .yourTurn: self = session.isDone ? .background : .waiting
+        // An ignored wait is not time the user kept an agent waiting.
+        case .yourTurn: self = session.isDone || session.isIgnored ? .background : .waiting
         case .working: self = session.isInBackground ? .background : .working
         }
     }

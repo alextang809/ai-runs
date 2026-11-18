@@ -342,7 +342,7 @@ struct FloatingCard: View {
 
     @ViewBuilder private var runs: some View {
         let sessions = model.store.ordered()
-        let active = sessions.filter { !$0.isDone && !($0.state == .working && $0.isInBackground) }
+        let active = sessions.filter { !$0.isDone && !$0.isIgnored && !($0.state == .working && $0.isInBackground) }
         let quiet = sessions.count - active.count
         if active.isEmpty {
             Text(sessions.isEmpty ? "Nothing running." : "Nothing needs you; nothing is working right now.")

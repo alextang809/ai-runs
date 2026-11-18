@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
         installHelper()
         upgradeHooks()
         Notifier.shared.open = { [weak self] id in self?.open(sessionId: id) }
+        Notifier.shared.ignore = { [weak self] id in self?.setIgnored(sessionId: id, true) }
         Notifier.shared.update(sessions: Array(store.sessions.values))
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -386,6 +387,15 @@ final class AppModel: ObservableObject {
     func rename(sessionId: String, to title: String) {
         store.rename(id: sessionId, to: title)
         saveSessions()
+    }
+
+    /// "Ignore for Now" / "Stop Ignoring" on a run that waits on the user.
+    func setIgnored(sessionId: String, _ ignored: Bool) {
+        store.setIgnored(id: sessionId, ignored, at: Date())
+        saveSessions()
+        if ignored, store.sessions[sessionId]?.isIgnored == true {
+            show("Ignored. It comes back when it asks something new.")
+        }
     }
 
     func pin(sessionId: String) {

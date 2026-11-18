@@ -63,12 +63,19 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// Set while the row's state comes from Claude's own Threads list rather
     /// than from hooks (a thread working in the cloud).
     public var native: NativeSighting?
+    /// Set by "Ignore for Now"; see `isIgnored`.
+    public var ignored: Bool?
 
     public var isInBackground: Bool { state == .working && ((backgroundTasks ?? 0) > 0 || (scheduled ?? 0) > 0) }
     /// Finished its work: shown, but not counted as needing the user.
     public var isDone: Bool { state == .yourTurn && outcome == .done }
     /// Waiting on the user: approval, a question, or a reply AI Runs can't classify.
-    public var needsUser: Bool { state.needsUser && !isDone }
+    public var needsUser: Bool { waitsOnUser && !isIgnored }
+    /// The same, whether or not the user chose to ignore it.
+    public var waitsOnUser: Bool { state.needsUser && !isDone }
+    /// The user said "I know" to this wait: it stays in sight but no longer
+    /// counts or reminds. Ends by itself when the run moves on.
+    public var isIgnored: Bool { ignored == true && state == .yourTurn && !isDone }
 
     public var project: String { TextUtils.projectName(fromPath: cwd) }
 
@@ -222,6 +229,8 @@ public struct SessionStore: Codable, Equatable, Sendable {
         // A hook knows more than a look at Claude's window.
         current.lastHookAt = event.at
         current.native = nil
+        // Whatever it reports next is a new moment.
+        current.ignored = nil
         if let cwd = event.cwd { current.cwd = cwd }
         if let path = event.transcriptPath { current.transcriptPath = path }
         if event.terminal != TerminalContext() { current.terminal = event.terminal }
@@ -441,6 +450,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
         row.native = NativeSighting(state: state, seenAt: at)
         row.lastEventAt = max(row.lastEventAt, at)
         guard changed else { return }
+        row.ignored = nil
         row.state = wanted.state
         row.outcome = wanted.outcome
         row.outcomeSource = nil
@@ -465,7 +475,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// Removes a session from the list until the user prompts it again.
     public mutating func dismiss(id: String, at: Date = Date()) {
         guard let session = sessions[id] else { return }
-        if session.thread != nil, session.needsUser {
+        if session.thread != nil, session.waitsOnUser {
             var waiting = dismissedWaiting ?? []
             waiting.insert(id)
             dismissedWaiting = waiting
@@ -519,6 +529,15 @@ public struct SessionStore: Codable, Equatable, Sendable {
         ignored = set
     }
 
+    /// "Ignore for Now" and "Stop Ignoring". Only a question or a reply can be
+    /// ignored: an approval request blocks the agent until it is answered.
+    public mutating func setIgnored(id: String, _ ignored: Bool, at: Date = Date()) {
+        guard var session = sessions[id], session.state == .yourTurn, session.waitsOnUser else { return }
+        session.ignored = ignored ? true : nil
+        sessions[id] = session
+        record(SpanKind(session), for: id, at: at)
+    }
+
     /// The user's own name for the session. Automatic names never replace it.
     public mutating func rename(id: String, to title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -566,9 +585,9 @@ public struct SessionStore: Codable, Equatable, Sendable {
             case .needsApproval: return 0
             case .yourTurn:
                 switch session.outcome {
-                case .needsInput: return 1
+                case .needsInput: return session.isIgnored ? 5 : 1
                 case .done: return 4
-                default: return 2
+                default: return session.isIgnored ? 5 : 2
                 }
             case .working: return 3
             }
@@ -578,7 +597,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
             if a.needsUser {
                 return (a.waitingSince ?? a.lastEventAt) < (b.waitingSince ?? b.lastEventAt)
             }
-            if a.isDone { return (a.waitingSince ?? a.lastEventAt) > (b.waitingSince ?? b.lastEventAt) }
+            if a.isDone || a.isIgnored { return (a.waitingSince ?? a.lastEventAt) > (b.waitingSince ?? b.lastEventAt) }
             return a.turnStartedAt > b.turnStartedAt
         }
     }

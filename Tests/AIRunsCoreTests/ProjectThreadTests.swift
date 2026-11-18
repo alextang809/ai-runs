@@ -435,3 +435,65 @@ final class NativeThreadStoreTests: XCTestCase {
         XCTAssertEqual(board.cards.count, 1)
     }
 }
+
+final class IgnoreTests: XCTestCase {
+    private func at(_ seconds: TimeInterval) -> Date { Date(timeIntervalSince1970: 1_800_000_000 + seconds) }
+    private func hook(_ kind: EventKind, _ seconds: TimeInterval, question: String? = nil) -> AgentEvent {
+        var event = AgentEvent(tool: .claudeCode, kind: kind, sessionId: "s", at: at(seconds), transcriptPath: "/x/s.jsonl")
+        event.question = question
+        return event
+    }
+    private let id = "claude-code:s"
+
+    func testIgnoringAQuestionStopsCountingUntilItAsksAgain() {
+        var store = SessionStore()
+        store.apply(hook(.promptStart, 0))
+        store.apply(hook(.question, 5, question: "Postgres or SQLite?"))
+        XCTAssertEqual(store.needsUserCount, 1)
+
+        store.setIgnored(id: id, true, at: at(10))
+        XCTAssertEqual(store.sessions[id]?.isIgnored, true)
+        XCTAssertEqual(store.needsUserCount, 0)
+        XCTAssertNil(store.sessions[id]?.alertKind(now: at(10)), "no banner and no reminder while ignored")
+        XCTAssertEqual(store.sessions[id]?.approvalDetail, "Postgres or SQLite?", "the question stays in sight")
+        XCTAssertEqual(store.lifeline(for: id, now: at(11)).last?.kind, .background)
+
+        store.setIgnored(id: id, false, at: at(12))
+        XCTAssertEqual(store.needsUserCount, 1)
+
+        // A new question is a new moment.
+        store.setIgnored(id: id, true, at: at(13))
+        store.apply(hook(.toolActivity, 20))
+        store.apply(hook(.question, 25, question: "Run the migration now?"))
+        XCTAssertEqual(store.sessions[id]?.isIgnored, false)
+        XCTAssertEqual(store.needsUserCount, 1)
+    }
+
+    func testApprovalsAndWorkingRunsCannotBeIgnored() {
+        var store = SessionStore()
+        store.apply(hook(.promptStart, 0))
+        store.setIgnored(id: id, true)
+        XCTAssertNil(store.sessions[id]?.ignored)
+        store.apply(hook(.needsApproval, 5))
+        store.setIgnored(id: id, true)
+        XCTAssertNil(store.sessions[id]?.ignored)
+        XCTAssertEqual(store.needsUserCount, 1)
+    }
+
+    func testIgnoringAThreadClaudeSaysIsWaiting() {
+        var store = SessionStore()
+        let thread = ProjectThread(projectId: "chan_example123", threadId: "cmsg_root0001")
+        let key = Session.key(tool: .claudeCode, thread: thread)
+        store.observe([ThreadSighting(thread: thread, title: "Privacy audit", state: .waitingOnYou)], at: at(0))
+        store.setIgnored(id: key, true, at: at(5))
+        // Seen waiting again: still the same wait.
+        store.observe([ThreadSighting(thread: thread, state: .waitingOnYou)], at: at(10))
+        XCTAssertEqual(store.sessions[key]?.isIgnored, true)
+        XCTAssertEqual(store.needsUserCount, 0)
+        // It worked and waits again: a new wait.
+        store.observe([ThreadSighting(thread: thread, state: .working)], at: at(20))
+        store.observe([ThreadSighting(thread: thread, state: .waitingOnYou)], at: at(30))
+        XCTAssertEqual(store.sessions[key]?.isIgnored, false)
+        XCTAssertEqual(store.needsUserCount, 1)
+    }
+}

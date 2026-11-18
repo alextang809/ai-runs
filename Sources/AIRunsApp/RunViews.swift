@@ -17,6 +17,8 @@ struct SessionRow: View {
     let rename: () -> Void
     let pin: () -> Void
     let remove: () -> Void
+    /// "Ignore for Now" or "Stop Ignoring"; nil when this run can't be ignored.
+    var ignore: (() -> Void)? = nil
     let open: () -> Void
 
     private var key: PanelUIState.Target { .session(session.id) }
@@ -73,6 +75,7 @@ struct SessionRow: View {
         }
         .contextMenu {
             Button("Open", action: open)
+            if let ignore { Button(RunText.ignoreTitle(session), action: ignore) }
             Button("Rename…", action: rename)
             Button("Pin to Board", action: pin)
             Divider()
@@ -123,7 +126,12 @@ enum RunText {
         return age < 60 ? "Seen in Claude just now" : "Seen in Claude \(TextUtils.duration(age)) ago"
     }
 
+    /// A question or a reply can be ignored; an approval request can't.
+    static func canIgnore(_ session: Session) -> Bool { session.state == .yourTurn && session.waitsOnUser }
+    static func ignoreTitle(_ session: Session) -> String { session.isIgnored ? "Stop Ignoring" : "Ignore for Now" }
+
     static func stateWord(_ session: Session, now: Date) -> String {
+        if session.isIgnored { return "IGNORED" }
         // A thread known only from Claude's Threads list keeps Claude's own word.
         if let native = session.native { return native.stale == true ? "LAST SEEN" : native.state.word }
         switch session.state {
@@ -183,6 +191,7 @@ struct StatePill: View {
         let stale = session.native?.stale == true
         let style: (fill: Color, text: Color, outline: Bool) = {
             if stale { return (.clear, .secondary, false) }
+            if session.isIgnored { return (Color.primary.opacity(0.07), .secondary, false) }
             switch session.state {
             case .needsApproval: return (tint, Palette.onTool(session.tool), false)
             case .yourTurn:
