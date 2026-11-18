@@ -56,7 +56,7 @@ macOS may ask for these permissions later, each once:
 | When | Permission | Why |
 |---|---|---|
 | You first click a Terminal or iTerm2 session | Automation | To bring the right tab to the front |
-| You first click a Claude app session | Accessibility | To select that thread in Claude's sidebar |
+| You first click a Claude app session, or turn on Claude project threads | Accessibility | To select that thread in Claude's sidebar, and to read Claude's Threads list |
 | A session first needs you | Notifications | A banner when a session asks for approval or input (turn kinds on or off in Settings) |
 
 ### ChatGPT and Claude in the browser (optional)
@@ -119,13 +119,33 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 | VS Code, Cursor | Opens the project window |
 | Codex app | Opens that exact thread |
 | Claude app | Brings Claude forward and selects the thread in its sidebar |
+| A Claude project thread | Opens that exact thread in the Claude app |
 | chatgpt.com, claude.ai (with the extension) | Selects that tab in your browser, or reopens the chat there |
+
+**Claude project threads** (new, not yet tested on a real Mac)
+
+- A thread in a Claude project gets **one row**, labelled "Claude project". Local
+  Claude Code sessions that work for that thread don't get rows of their own; the
+  newest one tells the row what it's doing.
+- Threads that work only in the cloud send AI Runs nothing. While Claude's
+  **Threads** list is on screen, AI Runs reads it through Accessibility (read-only,
+  only the Claude app) and shows those threads with Claude's own words:
+  **WORKING**, **WAITING ON YOU**, **READY FOR REVIEW**, **IDLE**. The row says
+  "Seen in Claude 3m ago"; after 10 minutes without seeing the thread it says
+  **LAST SEEN** instead of a state (Waiting on you is kept).
+- Turn this off in Settings → **Claude project threads** ("Show threads from
+  Claude's Threads list").
 
 **Other things you can do**
 
 - **Remove** a session: hover and click **×**, or right-click → Remove from List.
   **Undo** (⌘Z) for a few seconds. It comes back when you message it again, or
   when it asks for approval.
+- **Ignore for Now:** a session waiting for your input or reply (not APPROVE)
+  can be set aside from its hover card, right-click menu, notification (**Ignore**)
+  or the floating window. It moves to an **Ignored** group, isn't counted and
+  doesn't remind you, and comes back by itself when it does something new.
+  **Stop Ignoring** undoes it.
 - **Rename**, **Pin to Board** and more: right-click a row, or hover it for details.
 - **Floating window:** click **Show Floating Window** at the bottom of the panel. A small capsule stays on
   top of every app, Space and full-screen window, showing how many sessions need
@@ -177,8 +197,9 @@ Open an [issue](https://github.com/alextang809/ai-runs/issues) or just message m
 
 ## Known limitations
 
-- Web chats need the browser extension, and Safari isn't supported yet. Cloud
-  agents (Codex cloud, Claude Code on the web) aren't tracked.
+- Web chats need the browser extension, and Safari isn't supported yet. Codex cloud
+  isn't tracked, and Claude cloud threads only show up while Claude's Threads
+  list is on screen.
 - ChatGPT and Claude change their pages often; if the extension stops noticing
   replies, tell me.
 - Ghostty, Warp and other terminals can't be scripted, so a click brings the app

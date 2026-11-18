@@ -47,7 +47,7 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 | 什么时候 | 权限 | 用途 |
 |---|---|---|
 | 第一次点终端（Terminal 或 iTerm2）里的会话 | 自动化 | 把对应的标签页切到前面 |
-| 第一次点 Claude 桌面版里的会话 | 辅助功能 | 在 Claude 侧边栏里选中那个线程 |
+| 第一次点 Claude 桌面版里的会话，或打开 Claude project threads | 辅助功能 | 在 Claude 侧边栏里选中那个线程，并读取 Claude 的 Threads 列表 |
 | 第一次有会话等你 | 通知 | 有会话等你批准或回答时弹出横幅（在设置里选哪些情况要通知） |
 
 ### 浏览器里的 ChatGPT 和 Claude（可选）
@@ -100,11 +100,19 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 | VS Code、Cursor | 打开那个项目的窗口 |
 | Codex 桌面版 | 直接打开那个线程 |
 | Claude 桌面版 | 把 Claude 带到前台，并在侧边栏里选中那个线程 |
+| Claude 项目里的 thread | 在 Claude 桌面版里直接打开那个 thread |
 | chatgpt.com、claude.ai（装了插件） | 切到浏览器里那个标签页；标签页关了就在那个浏览器里重新打开 |
+
+**Claude 项目 thread**（新功能，还没在真 Mac 上验证过）
+
+- Claude 项目里的每个 thread 只占**一行**，标着 "Claude project"。替这个 thread 干活的本地 Claude Code 会话不再单独占行，由最新的那个告诉这一行它在做什么。
+- 只在云端跑的 thread 不会给 AI Runs 发任何东西。当 Claude 的 **Threads** 列表显示在屏幕上时，AI Runs 通过辅助功能读取它（只读，只读 Claude 这个 App），用 Claude 自己的词显示状态：**WORKING**、**WAITING ON YOU**、**READY FOR REVIEW**、**IDLE**。这一行会写"Seen in Claude 3m ago"；超过 10 分钟没再看到这个 thread，就显示 **LAST SEEN**，不再显示状态（Waiting on you 会保留）。
+- 可以在设置的 **Claude project threads** 里关掉（"Show threads from Claude's Threads list"）。
 
 **其他功能**
 
 - **移除会话：**鼠标移上去点 **×**，或者右键 → Remove from List。之后几秒内可以点 **Undo**（⌘Z）撤销。移除后，只有你在那个会话里再发消息，或者它请求你批准时，它才会回来。
+- **Ignore for Now（先不管）：**在等你回答或回复的会话（APPROVE 不行）可以先放一边：在悬停卡片、右键菜单、通知（**Ignore**）或悬浮窗里都能点。它会移到 **Ignored** 分组，不计数、不提醒，等它有新动静时自己回来。点 **Stop Ignoring** 撤销。
 - **改名、置顶到钉板**等：右键某一行，或者把鼠标停在上面看详情。
 - **悬浮窗：**在面板最下面点 **Show Floating Window**。一个小胶囊会停在所有 App、所有桌面、全屏窗口的上面，显示有几个会话在等你。点一下展开，能看到会话列表和钉板；可以拖到任何地方，靠近屏幕边缘会自动吸附。在设置里可以让它在有会话等你时自动展开。
 - **钉板：**在悬浮窗的 Pinned 标签里，按项目分组，记下不想丢的线程和随手的笔记。往里拖文字或链接就会生成卡片。
@@ -140,7 +148,7 @@ AI Runs 只读写你 Mac 上的文件：
 
 ## 已知限制
 
-- 网页对话需要装浏览器插件，暂不支持 Safari。云端 agent（Codex cloud、网页版 Claude Code）还没法跟踪。
+- 网页对话需要装浏览器插件，暂不支持 Safari。Codex cloud 还没法跟踪；Claude 的云端 thread 只有在 Claude 的 Threads 列表显示在屏幕上时才能看到。
 - ChatGPT 和 Claude 的网页经常改版。如果插件突然认不出回复了，请告诉我。
 - Ghostty、Warp 等终端不支持脚本控制，点一下只能把那个 App 带到前台，选不中具体的标签页。
 - 现在的版本是临时签名，每次更新后 macOS 可能会要你重新打开一次辅助功能权限。
