@@ -50,12 +50,13 @@ AI Runs opens its settings on first launch.
    AI Runs hooks — click **Allow all**. Until you do, Codex sends nothing.
 3. Start or continue any session. It appears in the menu bar within a second.
 
-macOS may ask for two permissions later, each once:
+macOS may ask for these permissions later, each once:
 
 | When | Permission | Why |
 |---|---|---|
 | You first click a Terminal or iTerm2 session | Automation | To bring the right tab to the front |
 | You first click a Claude app session | Accessibility | To select that thread in Claude's sidebar |
+| A session first needs you | Notifications | A banner when a session asks for approval or input (turn kinds on or off in Settings) |
 
 ## Can't see the icon?
 
