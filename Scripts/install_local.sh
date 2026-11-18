@@ -6,7 +6,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-./Scripts/package_app.sh
+IDENTITY="${SIGN_IDENTITY:-AI Runs Local Signing}"
+if ! identities="$(security find-identity -p codesigning 2>/dev/null)"; then
+    echo "Could not inspect signing identities. The installed app was left unchanged." >&2
+    exit 1
+fi
+if ! grep -qF "\"$IDENTITY\"" <<< "$identities"; then
+    echo "Signing identity \"$IDENTITY\" is unavailable. Run ./Scripts/make_signing_identity.sh before installing." >&2
+    exit 1
+fi
+
+SIGN_IDENTITY="$IDENTITY" REQUIRE_SIGN_IDENTITY=1 ./Scripts/package_app.sh
+codesign --verify --deep --strict "build/AI Runs.app"
 
 osascript -e 'quit app "AI Runs"' >/dev/null 2>&1 || true
 pkill -x AIRuns >/dev/null 2>&1 || true

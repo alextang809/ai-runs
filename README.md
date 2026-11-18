@@ -213,8 +213,8 @@ Open an [issue](https://github.com/alextang809/ai-runs/issues) or just message m
   replies, tell me.
 - Ghostty, Warp and other terminals can't be scripted, so a click brings the app
   forward but can't pick the tab.
-- The build is ad-hoc signed, so after each update macOS may ask for the
-  Accessibility permission again.
+- Downloaded ad-hoc builds may need Accessibility again after updates. Local
+  builds can reuse a signing identity with the setup below.
 - Usage limits per tool aren't shown yet.
 
 ## Build from source
@@ -224,11 +224,18 @@ Requires macOS 14 or later and Xcode 16.3 or later (Swift 6.1 or later).
 ```sh
 git clone https://github.com/alextang809/ai-runs.git
 cd ai-runs
-./Scripts/package_app.sh
-open "build/AI Runs.app"
+./Scripts/make_signing_identity.sh
+./Scripts/install_local.sh
 ```
 
-Run the tests with `swift test`.
+If macOS asks to let `codesign` use the local key, enter your login keychain
+password in the macOS dialog and choose **Always Allow**. The setup script
+checks signing before installation and never reads that password. Allow
+Accessibility once in AI Runs settings. Later builds reuse the same identity;
+keep one app copy in `/Applications/AI Runs.app`.
+
+Run `swift test` and `bash Tests/Scripts/local_signing.test.sh` for the core
+and signing-script tests.
 
 - `Sources/AIRunsCore` — event parsing, the session state machine, outcome
   detection, the pinned board and the hook installer. No UI; unit tested.

@@ -63,11 +63,11 @@ never saw active get no row.
 ## Build, test, release
 
 - Swift package, macOS 14+, swift-tools 5.10. `swift test`; `./Scripts/package_app.sh`
-  builds `build/AI Runs.app` (ad-hoc signed, bundle ID `io.github.alextang809.airuns`,
+  builds `build/AI Runs.app` (local identity when available, otherwise ad hoc; bundle ID `io.github.alextang809.airuns`,
   `LSUIElement`), copying `Resources/AppIcon.icns` and `BrowserExtension/`.
 - Cloud sessions have **no Swift toolchain**. Push and let CI compile:
   GitHub Actions on macOS 15 (Swift 6.1) and macOS 26 (Swift 6.3) run
-  `swift test` and the extension test on every push. Read failures from the job
+  `swift test`, signing-script tests and the extension test on every push. Read failures from the job
   logs. Write Swift that compiles under strict concurrency on both.
 - Release: bump `VERSION` and `BrowserExtension/manifest.json`, then push a tag
   `vX.Y.Z`; `.github/workflows/release.yml` builds and attaches `AI-Runs.zip`.
@@ -78,11 +78,14 @@ never saw active get no row.
   worktree `~/ai-runs-build` (`git fetch && git checkout --detach origin/main &&
   ./Scripts/install_local.sh`). Keep one copy only, `/Applications/AI Runs.app`:
   several copies with the same bundle ID confuse macOS permissions.
-- Signing: `./Scripts/make_signing_identity.sh` (once per Mac) creates a
-  self-signed "AI Runs Local Signing" identity; `package_app.sh` uses it when
-  present, so Accessibility survives rebuilds. Without it builds are ad hoc and
-  macOS drops the permission after each rebuild while System Settings still
-  shows it ticked.
+- Signing: `./Scripts/make_signing_identity.sh` creates or reuses the self-signed
+  "AI Runs Local Signing" identity and signs a temporary probe to check key access.
+  If macOS asks, enter the login keychain password in its dialog and choose
+  **Always Allow** for `codesign`. The script never reads that password. Keep
+  the same identity; do not recreate it merely because it is self-signed.
+  `install_local.sh` requires this identity and validates the built signature
+  before stopping the installed app. Default `package_app.sh` still supports
+  ad-hoc packaging for CI; those builds can lose Accessibility after updates.
 
 ## Design rules
 

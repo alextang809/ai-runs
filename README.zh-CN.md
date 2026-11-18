@@ -170,11 +170,13 @@ AI Runs 只读写你 Mac 上的文件：
 ```sh
 git clone https://github.com/alextang809/ai-runs.git
 cd ai-runs
-./Scripts/package_app.sh
-open "build/AI Runs.app"
+./Scripts/make_signing_identity.sh
+./Scripts/install_local.sh
 ```
 
-用 `swift test` 运行测试。
+如果 macOS 询问是否允许 `codesign` 使用本机密钥，请在系统对话框里输入登录钥匙串密码，并选择 **Always Allow（始终允许）**。脚本会先检查签名是否可用，不会读取密码。随后在 AI Runs 设置中授予一次辅助功能权限。后续构建复用同一签名身份，只保留 `/Applications/AI Runs.app` 这一份应用。
+
+用 `swift test` 和 `bash Tests/Scripts/local_signing.test.sh` 运行核心和签名脚本测试。
 
 - `Sources/AIRunsCore`：事件解析、会话状态机、判断做完还是要你输入、钉板和 hook 安装。没有界面，有单元测试。
 - `Sources/airuns-hook`：hook 调用的小工具。
