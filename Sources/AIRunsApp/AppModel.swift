@@ -73,9 +73,7 @@ final class AppModel: ObservableObject {
     // MARK: - Claude's Threads list
 
     private var threadsTimer: Timer?
-    private var readingThreads = false
-    /// Set by a refresh the user asked for: the next read says what it found.
-    private var announceNextRead = false
+    private var threadReads = ThreadReadQueue()
 
     /// Whether Claude's Threads list can be read, and what the last look found.
     enum ThreadsStatus: Equatable {
@@ -89,27 +87,42 @@ final class AppModel: ObservableObject {
 
     /// Looks at the Claude app's window for project threads, which is the only
     /// way to see the ones that work in the cloud.
-    private func readClaudeThreads(budget: Int = ClaudeThreadsReader.regularBudget) {
+    private func readClaudeThreads(request: ThreadReadQueue.Request = .regular) {
+        let wasIdle = threadReads.active == nil
+        threadReads = threadReads.requesting(request)
+        if wasIdle, let active = threadReads.active { startThreadRead(active) }
+    }
+
+    private func startThreadRead(_ request: ThreadReadQueue.Request) {
         let pid: pid_t
         switch ClaudeThreadsReader.availability() {
-        case .off: finishThreadsRead(.off)
+        case .off: completeThreadRead(.off)
             return
-        case .claudeNotRunning: finishThreadsRead(.claudeNotRunning)
+        case .claudeNotRunning: completeThreadRead(.claudeNotRunning)
             return
-        case .needsPermission: finishThreadsRead(.needsPermission)
+        case .needsPermission: completeThreadRead(.needsPermission)
             return
         case .ready(let id): pid = id
         }
-        guard !readingThreads else { return }
-        readingThreads = true
+        let budget = request == .refresh ? ClaudeThreadsReader.refreshBudget : ClaudeThreadsReader.regularBudget
         ClaudeThreadsReader.read(pid: pid, budget: budget) { [weak self] reading in
-            MainActor.assumeIsolated { self?.apply(reading) }
+            MainActor.assumeIsolated {
+                self?.completeThreadRead(.read(found: reading.sightings.count, complete: reading.complete), reading: reading)
+            }
         }
     }
 
+    private func completeThreadRead(_ status: ThreadsStatus, reading: ClaudeThreadsReader.Reading? = nil) {
+        let announce = threadReads.shouldAnnounce
+        threadReads = threadReads.completing()
+        if threadsStatus != status { threadsStatus = status }
+        if announce { show(Self.refreshText(status)) }
+        if let reading { apply(reading) }
+        // Store updates can be empty or unchanged; queued refreshes still run.
+        if let next = threadReads.active { startThreadRead(next) }
+    }
+
     private func apply(_ reading: ClaudeThreadsReader.Reading) {
-        readingThreads = false
-        finishThreadsRead(.read(found: reading.sightings.count, complete: reading.complete))
         guard !reading.sightings.isEmpty else { return }
         var updated = store
         updated.observe(reading.sightings, at: Date())
@@ -117,13 +130,6 @@ final class AppModel: ObservableObject {
         store = updated
         now = Date()
         saveSessions()
-    }
-
-    private func finishThreadsRead(_ status: ThreadsStatus) {
-        if threadsStatus != status { threadsStatus = status }
-        guard announceNextRead else { return }
-        announceNextRead = false
-        show(Self.refreshText(status))
     }
 
     /// What a refresh the user asked for says, in a few words.
@@ -148,8 +154,7 @@ final class AppModel: ObservableObject {
     /// right now, reading more of Claude's window than the regular look does.
     func refreshNow() {
         refresh()
-        announceNextRead = true
-        readClaudeThreads(budget: ClaudeThreadsReader.refreshBudget)
+        readClaudeThreads(request: .refresh)
     }
 
     /// Asks macOS for Accessibility (shows its prompt), then looks again.
