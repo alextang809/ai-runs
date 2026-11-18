@@ -50,6 +50,16 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 | 第一次点 Claude 桌面版里的会话 | 辅助功能 | 在 Claude 侧边栏里选中那个线程 |
 | 第一次有会话等你 | 通知 | 有会话等你批准或回答时弹出横幅（在设置里选哪些情况要通知） |
 
+### 浏览器里的 ChatGPT 和 Claude（可选）
+
+如果你在 chatgpt.com 或 claude.ai 上聊天，AI Runs 也能跟踪这些对话。支持 Chrome、Arc、Brave、Edge、Vivaldi，暂不支持 Safari。
+
+1. 在 AI Runs 设置的 **Browser** 区，先点 **Connect Browsers**，再点 **Show Extension Folder**。
+2. 在浏览器里打开 `chrome://extensions`（Arc、Brave、Edge 分别是 `arc://`、`brave://`、`edge://extensions`），打开右上角的 **开发者模式**，点 **加载已解压的扩展程序**，选刚才那个文件夹。
+3. 刷新 ChatGPT 和 Claude 的标签页。点浏览器工具栏上的 AI Runs 图标，显示"Connected"就说明连上了。
+
+之后每个对话在生成时都会出现在列表里，带着它的标题。回复写好了会通知你，点一下就切回那个标签页。
+
 ## 菜单栏里找不到图标？
 
 图标是三根小竖条：<img src="docs/icon.png" width="14">。如果看不到：
@@ -89,6 +99,7 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 | VS Code、Cursor | 打开那个项目的窗口 |
 | Codex 桌面版 | 直接打开那个线程 |
 | Claude 桌面版 | 把 Claude 带到前台，并在侧边栏里选中那个线程 |
+| chatgpt.com、claude.ai（装了插件） | 切到浏览器里那个标签页；标签页关了就在那个浏览器里重新打开 |
 
 **其他功能**
 
@@ -97,7 +108,7 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 - **悬浮窗：**菜单里点 **Show Floating Window**。一个小胶囊会停在所有 App、所有桌面、全屏窗口的上面，显示有几个会话在等你。点一下展开，能看到会话列表和钉板；可以拖到任何地方，靠近屏幕边缘会自动吸附。在设置里可以让它在有会话等你时自动展开。
 - **钉板：**在悬浮窗的 Pinned 标签里，按项目分组，记下不想丢的线程和随手的笔记。往里拖文字或链接就会生成卡片。
 - **通知：**有会话等你批准或回答时弹出横幅，可以直接点 Open 跳过去，或点 Snooze 稍后提醒。在设置里选择哪些情况要通知。
-- **Pin Front AI Window：**把你刚才在用的浏览器标签页或 App 钉住。claude.ai、chatgpt.com 上的网页对话暂时没法自动跟踪，可以用这个功能。
+- **Pin Front AI Window：**把你刚才在用的浏览器标签页或 App 钉住。
 
 ## 隐私
 
@@ -105,6 +116,7 @@ AI Runs 只读写你 Mac 上的文件：
 
 - 它会在 `~/.claude/settings.json` 和 `~/.codex/hooks.json` 里**添加 hook**。只动命令里含有 `airuns-hook` 的条目，每个文件第一次改动前会备份成 `*.airuns-backup`。每个 hook 只是往 `~/.airuns/events.jsonl` 里追加一行记录。
 - 它会从 Claude 桌面版的会话列表、Codex 的 `~/.codex/state_5.sqlite` 里**读取线程名字**（只读）。
+- 可选的**浏览器插件**只读取 chatgpt.com 和 claude.ai 的页面：对话地址和标题、是否在生成、你的最后一条消息和回复的结尾。这些信息通过浏览器的 native messaging 交给本机的 AI Runs。插件没有别的权限，也不联网。
 - 在 macOS 26 上，它可能会用**苹果的本机模型**给会话起名、判断回复，模型在你的 Mac 上运行。
 
 它不会发起任何网络请求。
@@ -121,13 +133,14 @@ AI Runs 只读写你 Mac 上的文件：
 
 ## 卸载
 
-1. 打开 AI Runs 的设置，分别在 Claude Code 和 Codex 那一行点 **Remove**。
+1. 打开 AI Runs 的设置，分别在 Claude Code 和 Codex 那一行点 **Remove**。装了浏览器插件的话，在浏览器的扩展程序页面把它移除。
 2. 退出 AI Runs，把它从「应用程序」拖到废纸篓。
 3. 删除它的数据：`rm -rf ~/.airuns`
 
 ## 已知限制
 
-- 网页上的会话（claude.ai、chatgpt.com、云端 agent）还没法自动跟踪，可以用 Pin Front AI Window 钉住。
+- 网页对话需要装浏览器插件，暂不支持 Safari。云端 agent（Codex cloud、网页版 Claude Code）还没法跟踪。
+- ChatGPT 和 Claude 的网页经常改版。如果插件突然认不出回复了，请告诉我。
 - Ghostty、Warp 等终端不支持脚本控制，点一下只能把那个 App 带到前台，选不中具体的标签页。
 - 现在的版本是临时签名，每次更新后 macOS 可能会要你重新打开一次辅助功能权限。
 - 还不能显示各个工具的剩余用量。

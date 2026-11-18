@@ -71,7 +71,12 @@ public enum EventParser {
                                cwd: payload["cwd"] as? String,
                                transcriptPath: payload["transcript_path"] as? String,
                                terminal: terminal)
+        event.toolTitle = (payload["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if event.toolTitle?.isEmpty == true { event.toolTitle = nil }
+        event.url = payload["url"] as? String
         switch eventName {
+        case "TitleUpdate":
+            event.kind = .titleUpdate
         case "UserPromptSubmit":
             event.kind = .promptStart
             event.prompt = payload["prompt"] as? String

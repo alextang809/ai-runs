@@ -58,6 +58,22 @@ macOS may ask for these permissions later, each once:
 | You first click a Claude app session | Accessibility | To select that thread in Claude's sidebar |
 | A session first needs you | Notifications | A banner when a session asks for approval or input (turn kinds on or off in Settings) |
 
+### ChatGPT and Claude in the browser (optional)
+
+If you chat on chatgpt.com or claude.ai, AI Runs can follow those too (Chrome,
+Arc, Brave, Edge, Vivaldi; not Safari yet):
+
+1. In AI Runs settings, under **Browser**, click **Connect Browsers**, then
+   **Show Extension Folder**.
+2. In your browser open `chrome://extensions` (or `arc://`, `brave://`,
+   `edge://extensions`), turn on **Developer mode**, click **Load unpacked** and
+   choose that folder.
+3. Reload your ChatGPT and Claude tabs. Click the AI Runs icon in the browser
+   toolbar to check it says "Connected".
+
+Each conversation then shows up while it's writing, with its title; you get a
+notification when the reply is ready, and a click brings back that exact tab.
+
 ## Can't see the icon?
 
 The icon is three small bars: <img src="docs/icon.png" width="14">. If you don't see it:
@@ -99,6 +115,7 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 | VS Code, Cursor | Opens the project window |
 | Codex app | Opens that exact thread |
 | Claude app | Brings Claude forward and selects the thread in its sidebar |
+| chatgpt.com, claude.ai (with the extension) | Selects that tab in your browser, or reopens the chat there |
 
 **Other things you can do**
 
@@ -114,8 +131,7 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
   make cards.
 - **Notifications:** a banner when a session asks for approval or input, with
   Open and Snooze. Choose which moments in Settings.
-- **Pin Front AI Window:** pins the browser tab or app you were just in (for
-  claude.ai or chatgpt.com chats, which AI Runs can't track automatically yet).
+- **Pin Front AI Window:** pins the browser tab or app you were just in.
 
 ## Privacy
 
@@ -126,6 +142,10 @@ AI Runs only reads and writes files on your Mac:
   as `*.airuns-backup`). Each hook appends one line to `~/.airuns/events.jsonl`.
 - It **reads thread names** from the Claude app's session list and from Codex's
   `~/.codex/state_5.sqlite` (read-only).
+- The optional **browser extension** reads only chatgpt.com and claude.ai pages:
+  the conversation's address and title, whether it is writing, your last message
+  and the end of the reply. It hands them to AI Runs on this Mac through the
+  browser's native messaging; it has no other permissions and no network access.
 - On macOS 26 it may ask **Apple's on-device model** to name a session or judge
   a reply. That runs on your Mac.
 
@@ -144,13 +164,16 @@ Open an [issue](https://github.com/alextang809/ai-runs/issues) or just message m
 ## Uninstall
 
 1. Open AI Runs settings and click **Remove** for Claude Code and for Codex.
+   If you added the browser extension, remove it in your browser's extensions page.
 2. Quit AI Runs and drag it from Applications to the Trash.
 3. Delete its data: `rm -rf ~/.airuns`
 
 ## Known limitations
 
-- Sessions on the web (claude.ai, chatgpt.com, cloud agents) aren't tracked yet;
-  pin them with Pin Front AI Window.
+- Web chats need the browser extension, and Safari isn't supported yet. Cloud
+  agents (Codex cloud, Claude Code on the web) aren't tracked.
+- ChatGPT and Claude change their pages often; if the extension stops noticing
+  replies, tell me.
 - Ghostty, Warp and other terminals can't be scripted, so a click brings the app
   forward but can't pick the tab.
 - The build is ad-hoc signed, so after each update macOS may ask for the

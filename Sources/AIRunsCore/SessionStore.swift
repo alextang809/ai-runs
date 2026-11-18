@@ -33,6 +33,8 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var outcomeSource: OutcomeSource?
     /// Wake-ups it scheduled for itself; it continues on its own.
     public var scheduled: Int?
+    /// The page of a web chat, to bring its tab back.
+    public var webURL: String?
     /// Set while the agent waits on its own background tasks; it continues by itself.
     public var backgroundTasks: Int?
     /// The first thing the user typed (tags removed), for naming the session.
@@ -101,6 +103,17 @@ public struct SessionStore: Codable, Equatable, Sendable {
         toolLastSeen = seen
 
         if ignored?.contains(key) == true { return }
+        if event.kind == .titleUpdate {
+            // Only for chats AI Runs already follows; opening a page isn't a session.
+            guard var session = sessions[key] else { return }
+            if let url = event.url { session.webURL = url }
+            if let title = event.toolTitle, session.titleIsCustom != true {
+                session.title = TextUtils.truncate(title, limit: 60)
+                session.titleSettled = true
+            }
+            sessions[key] = session
+            return
+        }
         if sessions[key] == nil, Self.isToolHelper(event) {
             ignore(id: key)
             return
@@ -137,6 +150,11 @@ public struct SessionStore: Codable, Equatable, Sendable {
         if let path = event.transcriptPath { current.transcriptPath = path }
         if event.terminal != TerminalContext() { current.terminal = event.terminal }
 
+        if let url = event.url { current.webURL = url }
+        if let title = event.toolTitle, current.titleIsCustom != true {
+            current.title = TextUtils.truncate(title, limit: 60)
+            current.titleSettled = true
+        }
         switch event.kind {
         case .promptStart:
             current.state = .working
@@ -147,7 +165,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.scheduled = nil
             current.outcome = nil
             current.outcomeSource = nil
-            current.activity = "Thinking"
+            current.activity = event.tool.isWeb ? "Writing a reply" : "Thinking"
             if let driver = event.drivenBy { current.drivenBy = driver }
             if current.firstPrompt == nil, let prompt = event.prompt, let cleaned = TextUtils.cleanPrompt(prompt) {
                 current.firstPrompt = TextUtils.truncate(cleaned, limit: 600)
@@ -200,7 +218,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
                 if outcome == .needsInput { current.approvalDetail = TurnClassifier.lastQuestion(in: event.lastMessage) }
             }
             if current.progress?.isFinished == true { current.progress = nil }
-        case .sessionEnd:
+        case .sessionEnd, .titleUpdate:
             break
         }
         sessions[key] = current

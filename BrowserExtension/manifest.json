@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "AI Runs",
+  "version": "0.2.0",
+  "description": "Shows your ChatGPT and Claude chats in the AI Runs menu bar app: which are still writing, which are done, and a notification when a reply is ready.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoxzUDkyKSdvFRk0+gc77D9OerKpnt71in19KkSI9ru3OpiLfdemXj+bW6s2dhE860S7ZzuQpi3mxT89RofUv9pvMa75OG+2nfeiHBcWS+3sLrq/xvzWLu96DUecv+8W3ZRK4MiEdBS4HV1ZnG6SdQnsa+AGYyCw6Kapt1+Fc2gu919s1xIBinqDhcG3f0oz/IjedlLrLdmLAOe5GebNBkYKeXQvTZZqR/WAy2Y/OUZ5eUk6aF5A/Ykv65Vmgd4QitrHuHx+gcEYQPZxwTdUKBpKs0cPA6h/YSvUoZZsdp5WPA41J1FHfrO9pzNRGgImPhHlfE3C+vcIbpf8/ddwQ7wIDAQAB",
+  "permissions": ["nativeMessaging"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*", "https://claude.ai/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "AI Runs",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" }
+  },
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+}

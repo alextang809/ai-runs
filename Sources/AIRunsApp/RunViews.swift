@@ -86,7 +86,9 @@ enum RunText {
             host = "Codex"
         }
         var parts: [String]
-        if (session.tool == .claudeCode && host == "Claude") || (session.tool == .codex && host == "Codex") {
+        if session.tool.isWeb {
+            parts = [session.tool.displayName, host]
+        } else if (session.tool == .claudeCode && host == "Claude") || (session.tool == .codex && host == "Codex") {
             parts = ["\(host) app"]
         } else {
             parts = [session.tool.displayName, host]

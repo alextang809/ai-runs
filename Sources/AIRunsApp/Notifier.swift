@@ -103,8 +103,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         for session in changes.post {
             guard let kind = session.alertKind else { continue }
-            // Not while the user is already looking at that session's app.
-            if let host = Jumper.hostBundle(for: session), host == front { continue }
+            // Not while the user is already looking at that session's app. A
+            // browser is skipped only for agents: the chat may be in another tab.
+            if !session.tool.isWeb, let host = Jumper.hostBundle(for: session), host == front { continue }
             let content = Self.content(for: session, kind: kind)
             center.add(UNNotificationRequest(identifier: "alert-\(session.id)", content: content, trigger: nil))
             if NotificationSettings.remind, kind == .approval || kind == .input {
@@ -118,7 +119,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     static func content(for session: Session, kind: AlertKind) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
-        let tool = session.tool == .codex ? "Codex" : "Claude"
+        let tool: String
+        switch session.tool {
+        case .claudeCode: tool = "Claude"
+        case .codex: tool = "Codex"
+        case .chatgpt, .claudeWeb: tool = session.tool.displayName
+        }
         content.title = session.title
         switch kind {
         case .approval:

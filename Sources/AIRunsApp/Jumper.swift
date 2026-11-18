@@ -36,6 +36,10 @@ enum Jumper {
     ]
 
     static func open(session: Session, show: @escaping (String) -> Void) {
+        if session.tool.isWeb {
+            openWebChat(url: session.webURL, browser: session.terminal.bundleId, show: show)
+            return
+        }
         focus(tool: session.tool, sessionId: session.sessionId, cwd: session.cwd,
               terminal: session.terminal, title: session.title, isWorking: session.state == .working, show: show)
     }
@@ -136,6 +140,62 @@ enum Jumper {
 
     static func copyResumeCommand(for session: Session) {
         copy(session.tool.resumeCommand(sessionId: session.sessionId))
+    }
+
+    /// A ChatGPT or Claude chat: selects its tab if it is still open in the
+    /// browser that reported it, otherwise opens the page there.
+    private static func openWebChat(url text: String?, browser: String?, show: @escaping (String) -> Void) {
+        guard let text, let url = URL(string: text) else {
+            show("This chat’s address isn’t known yet.")
+            return
+        }
+        if let browser, selectTab(prefix: text, browser: browser) { return }
+        if let browser, let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: browser) {
+            NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Finds a tab whose address starts with `prefix` and brings it forward.
+    /// Chromium browsers share one AppleScript dictionary; Arc has its own.
+    private static func selectTab(prefix: String, browser: String) -> Bool {
+        let target = escaped(prefix)
+        if browser == "company.thebrowser.Browser" {
+            return runScript("""
+            tell application id "company.thebrowser.Browser"
+                repeat with w in windows
+                    repeat with t in tabs of w
+                        if (URL of t) starts with "\(target)" then
+                            tell t to select
+                            activate
+                            return true
+                        end if
+                    end repeat
+                end repeat
+            end tell
+            return false
+            """)
+        }
+        guard ["com.google.Chrome", "com.google.Chrome.beta", "com.brave.Browser", "com.microsoft.edgemac",
+               "com.vivaldi.Vivaldi", "org.chromium.Chromium"].contains(browser) else { return false }
+        return runScript("""
+        tell application id "\(browser)"
+            repeat with w in windows
+                set i to 0
+                repeat with t in tabs of w
+                    set i to i + 1
+                    if (URL of t) starts with "\(target)" then
+                        set active tab index of w to i
+                        set index of w to 1
+                        activate
+                        return true
+                    end if
+                end repeat
+            end repeat
+        end tell
+        return false
+        """)
     }
 
     /// `codex://threads/<id>` opens a thread in the Codex (ChatGPT) desktop app.

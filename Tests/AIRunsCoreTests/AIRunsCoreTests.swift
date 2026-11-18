@@ -863,3 +863,73 @@ final class AlertPlannerTests: XCTestCase {
         XCTAssertTrue(planner.changes(in: Array(store.sessions.values), enabled: Set(AlertKind.allCases)).post.isEmpty)
     }
 }
+
+final class WebBridgeTests: XCTestCase {
+    func testFramingRoundTrip() throws {
+        let framed = WebBridge.frame(["ok": true])
+        var cursor = 0
+        let body = try XCTUnwrap(WebBridge.readMessage { count in
+            defer { cursor += count }
+            return framed.subdata(in: cursor..<min(cursor + count, framed.count))
+        })
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Bool])
+        XCTAssertEqual(object["ok"], true)
+        XCTAssertNil(WebBridge.readMessage { _ in Data([1, 0]) })
+    }
+
+    func testMessagesBecomeEvents() throws {
+        let start = try XCTUnwrap(WebBridge.record(from: [
+            "site": "chatgpt", "event": "start", "conversation": "abc", "url": "https://chatgpt.com/c/abc",
+            "title": "Fix login", "prompt": "why does login fail",
+        ]))
+        XCTAssertEqual(start.tool, .chatgpt)
+        XCTAssertEqual(start.payload["hook_event_name"] as? String, "UserPromptSubmit")
+        XCTAssertNil(WebBridge.record(from: ["site": "chatgpt", "event": "ping"]))
+        XCTAssertNil(WebBridge.record(from: ["site": "other", "event": "start", "conversation": "x"]))
+
+        var store = SessionStore()
+        let parse = { (record: (tool: AgentTool, payload: [String: Any])) in
+            EventParser.parse(tool: record.tool, payload: record.payload, at: Date(), terminal: TerminalContext(bundleId: "com.google.Chrome"))!
+        }
+        store.apply(parse(start))
+        var session = try XCTUnwrap(store.sessions["chatgpt-web:abc"])
+        XCTAssertEqual(session.title, "Fix login")
+        XCTAssertEqual(session.webURL, "https://chatgpt.com/c/abc")
+        XCTAssertEqual(session.activity, "Writing a reply")
+        XCTAssertEqual(session.terminal.appName, "Chrome")
+
+        store.apply(parse(try XCTUnwrap(WebBridge.record(from: [
+            "site": "chatgpt", "event": "stop", "conversation": "abc", "reply": "Here is the fix. All tests pass now.",
+        ]))))
+        session = try XCTUnwrap(store.sessions["chatgpt-web:abc"])
+        XCTAssertEqual(session.state, .yourTurn)
+        XCTAssertEqual(session.outcome, .done)
+
+        store.apply(parse(try XCTUnwrap(WebBridge.record(from: [
+            "site": "chatgpt", "event": "title", "conversation": "abc", "title": "Login bug",
+        ]))))
+        XCTAssertEqual(store.sessions["chatgpt-web:abc"]?.title, "Login bug")
+        store.apply(parse(try XCTUnwrap(WebBridge.record(from: [
+            "site": "claude", "event": "title", "conversation": "zzz", "title": "Just opened",
+        ]))))
+        XCTAssertNil(store.sessions["claude-web:zzz"], "opening a page doesn't make a session")
+    }
+
+    func testConnectorWritesManifestsOnlyForInstalledBrowsers() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let chrome = home.appendingPathComponent("Library/Application Support/Google/Chrome")
+        try FileManager.default.createDirectory(at: chrome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let connector = BrowserConnector(home: home)
+        let helper = URL(fileURLWithPath: "/Users/me/.airuns/bin/airuns-hook")
+        XCTAssertEqual(connector.status(helper: helper).map(\.connected), [false])
+        XCTAssertEqual(try connector.install(helper: helper), ["Chrome"])
+        XCTAssertEqual(connector.status(helper: helper).map(\.connected), [true])
+        let file = chrome.appendingPathComponent("NativeMessagingHosts/\(WebBridge.hostName).json")
+        let manifest = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        XCTAssertEqual(manifest["allowed_origins"] as? [String], [WebBridge.allowedOrigin])
+        XCTAssertEqual(manifest["type"] as? String, "stdio")
+        connector.uninstall()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+}

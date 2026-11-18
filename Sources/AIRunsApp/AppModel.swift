@@ -136,7 +136,7 @@ final class AppModel: ObservableObject {
 
     private func suggestTitles() {
         var desktop: [ClaudeDesktopSession]?
-        for session in store.sessions.values where session.titleIsCustom != true {
+        for session in store.sessions.values where session.titleIsCustom != true && !session.tool.isWeb {
             let reply = session.lastMessage ?? ""
             if checkedAtReply[session.id] == reply || naming.contains(session.id) { continue }
             checkedAtReply[session.id] = reply
@@ -236,14 +236,46 @@ final class AppModel: ObservableObject {
 
     func hookStatus(_ tool: AgentTool) -> HookInstaller.Status { installer.status(for: tool) }
 
+    // MARK: - Browser extension
+
+    let browserConnector = BrowserConnector()
+
+    func browserStatus() -> [(browser: BrowserConnector.Browser, connected: Bool)] {
+        browserConnector.status(helper: paths.hookHelper)
+    }
+
+    /// Lets the installed Chromium browsers start AI Runs' helper for the extension.
+    @discardableResult
+    func connectBrowsers() throws -> [String] {
+        try browserConnector.install(helper: paths.hookHelper)
+    }
+
+    /// Copies the extension out of the app (so its folder survives app
+    /// updates) and shows it in Finder, ready for "Load unpacked".
+    func revealExtension() {
+        let fm = FileManager.default
+        guard let source = Bundle.main.url(forResource: "BrowserExtension", withExtension: nil) else {
+            show("The extension isn’t in this build. Use the BrowserExtension folder from the repository.")
+            return
+        }
+        let target = paths.root.appendingPathComponent("browser-extension", isDirectory: true)
+        try? fm.removeItem(at: target)
+        do {
+            try fm.copyItem(at: source, to: target)
+            NSWorkspace.shared.activateFileViewerSelecting([target])
+        } catch {
+            show("Couldn’t copy the extension: \(error.localizedDescription)")
+        }
+    }
+
     /// Tools whose hooks are set up but have never sent an event, usually
     /// because the tool still asks the user to approve them.
     var silentTools: [AgentTool] {
-        AgentTool.allCases.filter { installer.status(for: $0) == .installed && store.lastSeen($0) == nil }
+        AgentTool.hookTools.filter { installer.status(for: $0) == .installed && store.lastSeen($0) == nil }
     }
 
     var needsHookSetup: Bool {
-        AgentTool.allCases.contains {
+        AgentTool.hookTools.contains {
             let status = installer.status(for: $0)
             return status == .notInstalled || status == .partiallyInstalled
         }

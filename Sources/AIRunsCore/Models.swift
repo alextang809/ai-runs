@@ -1,23 +1,39 @@
 import Foundation
 
-/// The AI tools AI Runs can follow automatically through their hooks.
+/// The AI tools AI Runs follows: agents through their hooks, web chats
+/// through the browser extension.
 public enum AgentTool: String, Codable, CaseIterable, Sendable {
     case claudeCode = "claude-code"
     case codex = "codex"
+    /// A conversation on chatgpt.com.
+    case chatgpt = "chatgpt-web"
+    /// A conversation on claude.ai.
+    case claudeWeb = "claude-web"
+
+    /// Tools that report through hooks AI Runs installs.
+    public static let hookTools: [AgentTool] = [.claudeCode, .codex]
+
+    public var isWeb: Bool { self == .chatgpt || self == .claudeWeb }
+
+    /// Made by OpenAI (drawn in OpenAI's ink) rather than Anthropic (Claude's clay).
+    public var isOpenAI: Bool { self == .codex || self == .chatgpt }
 
     public var displayName: String {
         switch self {
         case .claudeCode: return "Claude Code"
         case .codex: return "Codex"
+        case .chatgpt: return "ChatGPT"
+        case .claudeWeb: return "Claude.ai"
         }
     }
 
     /// Command that reopens a session in a terminal, used when we cannot
-    /// bring the original window back.
+    /// bring the original window back. Empty for web chats.
     public func resumeCommand(sessionId: String) -> String {
         switch self {
         case .claudeCode: return "claude --resume \(sessionId)"
         case .codex: return "codex resume \(sessionId)"
+        case .chatgpt, .claudeWeb: return ""
         }
     }
 }
@@ -55,6 +71,13 @@ public struct TerminalContext: Codable, Equatable, Sendable {
         case ("com.microsoft.VSCode", _), (_, "vscode"): return "VS Code"
         case ("com.mitchellh.ghostty", _), (_, "ghostty"): return "Ghostty"
         case ("dev.warp.Warp-Stable", _), (_, "WarpTerminal"): return "Warp"
+        case ("com.google.Chrome", _): return "Chrome"
+        case ("com.google.Chrome.beta", _): return "Chrome Beta"
+        case ("company.thebrowser.Browser", _): return "Arc"
+        case ("com.brave.Browser", _): return "Brave"
+        case ("com.microsoft.edgemac", _): return "Edge"
+        case ("com.vivaldi.Vivaldi", _): return "Vivaldi"
+        case ("org.chromium.Chromium", _): return "Chromium"
         case (_, let program) where !program.isEmpty: return program
         default: return "Terminal"
         }
@@ -75,6 +98,8 @@ public enum EventKind: String, Codable, Sendable {
     case sessionEnd
     /// The AI asked the user a question with its "ask the user" tool.
     case question
+    /// A web chat's title or address changed; nothing else did.
+    case titleUpdate
 }
 
 /// One hook event, translated from the tool-specific payload.
@@ -102,6 +127,10 @@ public struct AgentEvent: Equatable, Sendable {
     public var scheduled: Int = 0
     /// The question, for `.question` events.
     public var question: String?
+    /// The name the tool itself shows (a web chat's title).
+    public var toolTitle: String?
+    /// The page of a web chat.
+    public var url: String?
 
     public init(tool: AgentTool, kind: EventKind, sessionId: String, at: Date, prompt: String? = nil,
                 lastMessage: String? = nil, approvalDetail: String? = nil, cwd: String? = nil,

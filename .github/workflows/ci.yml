@@ -20,6 +20,11 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: Test browser extension
+        working-directory: Tests/BrowserExtension
+        run: |
+          npm install --no-save --silent jsdom@24
+          node content.test.js
       - name: Package app
         run: |
           chmod +x Scripts/package_app.sh

@@ -20,6 +20,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/AIRuns" "$APP/Contents/MacOS/AIRuns"
 cp "$BIN/airuns-hook" "$APP/Contents/MacOS/airuns-hook"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp -R BrowserExtension "$APP/Contents/Resources/BrowserExtension"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

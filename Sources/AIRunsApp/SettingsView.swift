@@ -24,7 +24,7 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            ForEach(AgentTool.allCases, id: \.self) { tool in
+            ForEach(AgentTool.hookTools, id: \.self) { tool in
                 HookRow(tool: tool, status: statuses[tool] ?? .toolNotFound, lastSeen: model.store.lastSeen(tool),
                         file: model.installer.configFile(for: tool).path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) {
                     run { try model.installHooks(tool) }
@@ -46,6 +46,10 @@ struct SettingsView: View {
             if let error {
                 Text(error).font(.system(size: 12)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
+
+            Divider()
+
+            BrowserSection(model: model)
 
             Divider()
 
@@ -109,7 +113,7 @@ struct SettingsView: View {
     private func refresh() {
         hidden = iconHidden()
         var result: [AgentTool: HookInstaller.Status] = [:]
-        for tool in AgentTool.allCases { result[tool] = model.hookStatus(tool) }
+        for tool in AgentTool.hookTools { result[tool] = model.hookStatus(tool) }
         statuses = result
     }
 
@@ -209,5 +213,50 @@ struct NotificationSection: View {
             .disabled(status == .denied)
         }
         .task { status = await Notifier.shared.authorizationStatus() }
+    }
+}
+
+/// ChatGPT and Claude in the browser: connect the browsers, then load the extension.
+struct BrowserSection: View {
+    @ObservedObject var model: AppModel
+    @State private var browsers: [(browser: BrowserConnector.Browser, connected: Bool)] = []
+    @State private var note: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Browser").font(.headline)
+            Text("Follow chats on chatgpt.com and claude.ai in Chrome, Arc, Brave or Edge: what's still writing, what's done, and a notification when a reply is ready.")
+                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if browsers.isEmpty {
+                Text("No Chromium browser found (Chrome, Arc, Brave, Edge, Vivaldi). Safari isn't supported yet.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 10) {
+                    ForEach(browsers, id: \.browser.name) { item in
+                        Label(item.browser.name, systemImage: item.connected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 12))
+                            .foregroundStyle(item.connected ? Color.primary : Color.secondary)
+                    }
+                }
+                HStack {
+                    Button(browsers.allSatisfy(\.connected) ? "Reconnect Browsers" : "1. Connect Browsers") {
+                        do {
+                            let names = try model.connectBrowsers()
+                            note = names.isEmpty ? nil : "Connected \(names.joined(separator: ", "))."
+                        } catch {
+                            note = error.localizedDescription
+                        }
+                        browsers = model.browserStatus()
+                    }
+                    Button("2. Show Extension Folder") { model.revealExtension() }
+                }
+                .controlSize(.small)
+                Text("3. In the browser open chrome://extensions (arc://extensions, brave://extensions, edge://extensions), turn on Developer mode, click Load unpacked and choose the folder. Then reload your ChatGPT and Claude tabs.")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            if let note { Text(note).font(.system(size: 11.5)).foregroundStyle(.secondary) }
+        }
+        .onAppear { browsers = model.browserStatus() }
     }
 }

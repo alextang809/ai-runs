@@ -23,6 +23,7 @@ public struct HookInstaller {
     public func configDirectory(for tool: AgentTool) -> URL {
         switch tool {
         case .claudeCode: return home.appendingPathComponent(".claude", isDirectory: true)
+        case .chatgpt, .claudeWeb: return home.appendingPathComponent(".airuns/no-hooks", isDirectory: true)
         case .codex: return home.appendingPathComponent(".codex", isDirectory: true)
         }
     }
@@ -31,6 +32,7 @@ public struct HookInstaller {
     public func configFile(for tool: AgentTool) -> URL {
         switch tool {
         case .claudeCode: return configDirectory(for: tool).appendingPathComponent("settings.json")
+        case .chatgpt, .claudeWeb: return configDirectory(for: tool).appendingPathComponent("hooks.json")
         case .codex: return configDirectory(for: tool).appendingPathComponent("hooks.json")
         }
     }
@@ -44,6 +46,8 @@ public struct HookInstaller {
                     ("PreToolUse", "AskUserQuestion")]
         case .codex:
             return [("UserPromptSubmit", nil), ("Stop", nil), ("PermissionRequest", nil), ("PostToolUse", nil)]
+        case .chatgpt, .claudeWeb:
+            return []
         }
     }
 

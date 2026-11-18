@@ -22,12 +22,12 @@ enum Palette {
     static let codex = Color(nsColor: .labelColor)
 
     static func tool(_ tool: AgentTool) -> Color {
-        tool == .codex ? codex : claude
+        tool.isOpenAI ? codex : claude
     }
 
     /// Text on a solid fill of the tool colour.
     static func onTool(_ tool: AgentTool) -> Color {
-        tool == .codex ? Color(nsColor: .windowBackgroundColor) : .white
+        tool.isOpenAI ? Color(nsColor: .windowBackgroundColor) : .white
     }
 
     static let quiet = Color.secondary
@@ -174,6 +174,7 @@ struct MenuColumn: View {
         switch tool {
         case .codex: return "Codex hasn’t reported yet — approve the AI Runs hooks in Codex."
         case .claudeCode: return "Claude Code hasn’t reported yet — start or continue a session."
+        case .chatgpt, .claudeWeb: return ""
         }
     }
 
