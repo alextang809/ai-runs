@@ -64,8 +64,57 @@ enum ClaudeThreadsReader {
         let windows = (copy(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
         var budget = start
         let children = windows.compactMap { node($0, depth: 0, budget: &budget) }
-        let sightings = ClaudeThreadsView.sightings(in: AXNode(role: "AXApplication", children: children))
-        return Reading(sightings: sightings, complete: budget > 0)
+        let root = AXNode(role: "AXApplication", children: children)
+        let sightings = ClaudeThreadsView.sightings(in: root)
+        let complete = budget > 0
+        writeReport(windows: windows.count, root: root, sightings: sightings, complete: complete)
+        return Reading(sightings: sightings, complete: complete)
+    }
+
+    /// Counts only, never titles or ids: what the last look at Claude's window
+    /// found, written to `~/.airuns/threads-report.json` so a missing thread
+    /// can be traced to a layer (no window, no links, links but no section).
+    private struct Report: Codable {
+        var at: Date
+        var windows: Int
+        var nodes: Int
+        var links: Int
+        var threadLinks: Int
+        /// Link shapes that are not thread links: host and first path part only.
+        var otherLinkShapes: [String: Int]
+        /// Recognised section headings seen, by Claude's word.
+        var sections: [String: Int]
+        var sightings: Int
+        var sightingsWithState: Int
+        var complete: Bool
+    }
+
+    private static func writeReport(windows: Int, root: AXNode, sightings: [ThreadSighting], complete: Bool) {
+        var report = Report(at: Date(), windows: windows, nodes: 0, links: 0, threadLinks: 0, otherLinkShapes: [:],
+                            sections: [:], sightings: sightings.count,
+                            sightingsWithState: sightings.filter { $0.state != nil }.count, complete: complete)
+        func visit(_ node: AXNode) {
+            report.nodes += 1
+            if node.role == "AXLink" {
+                report.links += 1
+                if ClaudeThreadsView.thread(fromLink: node.url) != nil {
+                    report.threadLinks += 1
+                } else if let text = node.url, let parts = URLComponents(string: text) {
+                    let first = parts.path.split(separator: "/").first.map(String.init) ?? ""
+                    let shape = "\(parts.scheme ?? "?")://\(parts.host ?? "")/\(first)"
+                    if report.otherLinkShapes.count < 12 || report.otherLinkShapes[shape] != nil {
+                        report.otherLinkShapes[shape, default: 0] += 1
+                    }
+                }
+            }
+            if node.role == "AXHeading" || node.role == "AXButton", let state = NativeThreadState.from(heading: node.title) {
+                report.sections[state.heading, default: 0] += 1
+            }
+            node.children.forEach(visit)
+        }
+        visit(root)
+        let url = AIRunsPaths().root.appendingPathComponent("threads-report.json")
+        try? JSONFile.save(report, to: url)
     }
 
     /// Copies the part of the tree that matters, with limits so a huge window can't stall.
