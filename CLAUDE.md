@@ -1,0 +1,110 @@
+# AI Runs — notes for agents working on this repo
+
+AI Runs is an open-source macOS menu bar app (MIT) for people who run many AI
+agent sessions at once. It shows which sessions need the user, what the others
+are doing, and jumps back to any of them in one click. Owner: Alex. The repo is
+**public**.
+
+## What it follows and how
+
+| Source | How AI Runs hears about it |
+|---|---|
+| Claude Code (terminal, VS Code, Claude desktop) | Hooks in `~/.claude/settings.json` call `~/.airuns/bin/airuns-hook claude-code` |
+| Codex (CLI and the Codex / ChatGPT desktop app) | Hooks in `~/.codex/hooks.json`; Codex shows **Review hooks** and the user must **Allow all** before anything arrives |
+| chatgpt.com, claude.ai | `BrowserExtension/` (MV3, Chromium browsers) → native messaging → `airuns-hook chrome-extension://<id>/` |
+
+Every source appends one JSON line to `~/.airuns/events.jsonl`. The app polls it
+once a second (`EventLogReader`, offset in `cursor.json`), folds events into
+`SessionStore`, saves `sessions.json` and `pins.json`.
+
+Names come from the tools themselves: Claude desktop's session list
+(`ClaudeDesktopIndex`, joined on `cliSessionId`), Codex's `~/.codex/state_5.sqlite`
+(`CodexThreadIndex`, `threads.name`; `thread_source != user` are Codex's own
+helper threads and are ignored), the web page title for web chats.
+
+**Known gap:** a Claude *project thread* runs in the cloud and is not a local
+Claude Code session. Cloud threads fire no local hooks, and a local session woken
+by a project (`<wake …><project …><thread …>` or `<relay from="coordinator" …>`
+prompts) may serve several threads. One row per thread is not solved yet; see
+`collab/rounds/02-codex-brief.md`.
+
+## Layout
+
+- `Sources/AIRunsCore` — no UI, unit tested. Models, `EventParser`,
+  `SessionStore` (the state machine), `TurnClassifier` (done vs needs input),
+  `Timeline` (lifelines and header stats), `AlertPlanner`, `PinBoard`,
+  `HookInstaller`, `WebBridge` + `BrowserConnector`, `TextUtils`.
+- `Sources/airuns-hook` — tiny CLI the hooks and browsers call. Must never slow
+  down or break an agent: silent on failure, always exits 0.
+- `Sources/AIRunsApp` — AppKit + SwiftUI. `StatusBarController` (menu bar item,
+  panel), `PanelViews` / `RunViews` (rows, header dashboard, flyout),
+  `FloatingWindow`, `Notifier`, `Jumper` (go back to a session),
+  `SidebarClicker` (Accessibility), `SettingsView`, `TitleModel` (on-device model,
+  macOS 26 only, behind `#if canImport(FoundationModels)`).
+- `BrowserExtension/` — content script (`content.js`), relay worker, popup.
+  Fixed `key` in the manifest keeps the extension ID stable; it must match
+  `WebBridge.extensionID`.
+- `Tests/` — XCTest for the core; `Tests/BrowserExtension/content.test.js` (jsdom).
+- `collab/` — notes between Claude and Codex (see below). `docs/` — README images.
+
+## Build, test, release
+
+- Swift package, macOS 14+, swift-tools 5.10. `swift test`; `./Scripts/package_app.sh`
+  builds `build/AI Runs.app` (ad-hoc signed, bundle ID `io.github.alextang809.airuns`,
+  `LSUIElement`), copying `Resources/AppIcon.icns` and `BrowserExtension/`.
+- Cloud sessions have **no Swift toolchain**. Push and let CI compile:
+  GitHub Actions on macOS 15 (Swift 6.1) and macOS 26 (Swift 6.3) run
+  `swift test` and the extension test on every push. Read failures from the job
+  logs. Write Swift that compiles under strict concurrency on both.
+- Release: bump `VERSION` and `BrowserExtension/manifest.json`, then push a tag
+  `vX.Y.Z`; `.github/workflows/release.yml` builds and attaches `AI-Runs.zip`.
+  Pushing tags is refused from Claude cloud sessions; Alex pushes them from his Mac.
+- `gh` GraphQL is blocked in Claude cloud sessions: open PRs with the REST API
+  (`gh api repos/alextang809/ai-runs/pulls -f title=… -f head=… -f base=main -f body=…`).
+- On Alex's Mac, `~/ai-runs` is Codex's working copy; builds happen in the
+  worktree `~/ai-runs-build` (`git fetch && git checkout --detach origin/main &&
+  ./Scripts/package_app.sh`).
+
+## Design rules
+
+- Simple and clear; everything important visible without hovering.
+- **Colour means the tool**: Claude clay `#D97757`, OpenAI ink (black, white in
+  dark mode) for Codex and ChatGPT. Everything else grey. State is told by words
+  (APPROVE, NEEDS INPUT, REPLIED, WORKING, SCHEDULED, BACKGROUND, DONE) and by how
+  the colour is applied: solid = needs you, outline = working, light = replied,
+  grey = done or background.
+- Logo: a **fermata** (arc over a dot), "hold until the conductor gives the cue".
+  Menu bar: arc alone = idle, arc + dot = working, amber dot + count = holding
+  for you. Amber `#E8890C` belongs to the logo only. No traditional Chinese
+  cultural motifs in branding.
+- When unsure, say so rather than guess: REPLIED instead of a wrong DONE.
+- Interface text is English. Alex talks to agents in Chinese.
+
+## Behaviour decisions worth keeping
+
+- A session's name is chosen once (user rename > tool's own title > on-device
+  model > first real request) and does not follow every reply.
+- "Remove" hides a session until the user prompts it again or it asks for
+  approval; Undo for 6 s.
+- Notifications: APPROVE and NEEDS INPUT on by default; REPLIED and DONE off;
+  one reminder after 15 min; withdrawn when the moment ends; none while the user
+  is in that session's app.
+- Floating window: auto-expand is off by default.
+- Hooks are only ever added or removed by entries whose command contains
+  `airuns-hook`; each config file is backed up once as `*.airuns-backup`.
+  Codex hook changes need the user's approval again, so don't change them lightly.
+
+## Privacy
+
+The repo is public. Never commit conversation text, thread titles, prompts,
+anything read from `~/.claude`, `~/.codex` or `~/Library`, tokens, or personal
+paths beyond `~`. Describe formats with field names and made-up values. AI Runs
+itself makes no network requests.
+
+## Working with Codex
+
+Codex runs on Alex's Mac and can read what cloud sessions can't. Exchange happens
+through `collab/`: one note per agent per round in `collab/rounds/NN-<agent>.md`
+with the headings Did / Found / Ideas / Asks / Needs from Alex; Codex delivers on
+`codex/round-NN`. Decisions go in `collab/DECISIONS.md`. Don't edit files Codex is
+told to own in a round.
