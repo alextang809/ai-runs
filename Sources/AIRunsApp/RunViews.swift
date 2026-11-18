@@ -42,7 +42,7 @@ struct SessionRow: View {
                     HStack(spacing: 10) {
                         LiveLine(session: session, now: now)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        LifelineView(spans: lifeline, now: now)
+                        LifelineView(spans: lifeline, now: now, color: Palette.tool(session.tool))
                             .frame(width: 104, height: 9)
                     }
                     .padding(.top, 2)
@@ -146,18 +146,20 @@ struct StatePill: View {
     let now: Date
 
     var body: some View {
-        let (fill, text): (Color, Color) = {
+        let tint = Palette.tool(session.tool)
+        // Solid = needs you, light fill = replied, outline = working, grey = the rest.
+        let style: (fill: Color, text: Color, outline: Bool) = {
             switch session.state {
-            case .needsApproval: return (Palette.waitingFill, .white)
+            case .needsApproval: return (tint, Palette.onTool(session.tool), false)
             case .yourTurn:
                 switch session.outcome {
-                case .needsInput: return (Palette.waitingFill, .white)
-                case .done: return (Color.primary.opacity(0.07), .secondary)
-                default: return (Palette.waitingFill.opacity(0.16), Palette.waiting)
+                case .needsInput: return (tint, Palette.onTool(session.tool), false)
+                case .done: return (Color.primary.opacity(0.07), .secondary, false)
+                default: return (tint.opacity(0.16), tint, false)
                 }
             case .working:
-                if session.isInBackground || session.isQuiet(now: now) { return (Color.primary.opacity(0.07), .secondary) }
-                return (Palette.working.opacity(0.13), Palette.working)
+                if session.isInBackground || session.isQuiet(now: now) { return (Color.primary.opacity(0.07), .secondary, false) }
+                return (.clear, tint, true)
             }
         }()
         HStack(spacing: 5) {
@@ -170,10 +172,11 @@ struct StatePill: View {
             Text(RunText.stateTime(session, now: now))
                 .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
         }
-        .foregroundStyle(text)
+        .foregroundStyle(style.text)
         .padding(.horizontal, 7)
         .padding(.vertical, 2)
-        .background(Capsule().fill(fill))
+        .background(Capsule().fill(style.fill))
+        .overlay(Capsule().strokeBorder(style.outline ? style.text : .clear, lineWidth: 1))
         .fixedSize()
     }
 }
@@ -203,7 +206,7 @@ struct LiveLine: View {
                     .foregroundStyle(session.isInBackground || session.isQuiet(now: now) ? .secondary : .primary)
                     .lineLimit(1)
                 if let progress = session.progress, !session.isInBackground {
-                    StepsBar(progress: progress, color: Palette.working)
+                    StepsBar(progress: progress, color: Palette.tool(session.tool))
                 }
             }
         }
@@ -250,6 +253,9 @@ struct StepsBar: View {
 struct LifelineView: View {
     let spans: [ActivitySpan]
     let now: Date
+    /// The tool's colour: solid while working, faded and outlined while it
+    /// waits on the user, grey in the background.
+    let color: Color
     var window: TimeInterval = 3600
 
     var body: some View {
@@ -267,13 +273,17 @@ struct LifelineView: View {
                 let x = CGFloat(from.timeIntervalSince(start) / window) * size.width
                 let width = max(2, CGFloat(to.timeIntervalSince(from) / window) * size.width)
                 let rect = CGRect(x: x, y: mid - 3.5, width: width, height: 7)
-                let color: Color
+                let shape = Path(roundedRect: rect, cornerRadius: 2)
                 switch span.kind {
-                case .working: color = Palette.working
-                case .waiting: color = Palette.waitingFill
-                case .background: color = .secondary.opacity(0.55)
+                case .working:
+                    context.fill(shape, with: .color(color))
+                case .waiting:
+                    context.fill(shape, with: .color(color.opacity(0.28)))
+                    context.stroke(Path(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 2),
+                                   with: .color(color), lineWidth: 1)
+                case .background:
+                    context.fill(shape, with: .color(.secondary.opacity(0.45)))
                 }
-                context.fill(Path(roundedRect: rect, cornerRadius: 2), with: .color(color))
             }
             let tick = CGRect(x: size.width - 1.5, y: 0, width: 1.5, height: size.height)
             context.fill(Path(roundedRect: tick, cornerRadius: 0.75), with: .color(.primary.opacity(0.5)))
@@ -325,11 +335,11 @@ struct HeaderDashboard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .bottom, spacing: 18) {
-                Metric(value: needs, label: "need you", color: needs > 0 ? Palette.waitingFill : .secondary)
-                Metric(value: working, label: "working", color: working > 0 ? Palette.working : .secondary)
+                Metric(value: needs, label: "need you", color: needs > 0 ? .primary : .secondary)
+                Metric(value: working, label: "working", color: working > 0 ? .primary : .secondary)
                 Metric(value: stats.sessionsToday, label: "today", color: .primary)
                 Spacer(minLength: 0)
-                Histogram(buckets: stats.buckets)
+                Histogram(buckets: stats.toolBuckets)
             }
             todayLine
         }
@@ -341,7 +351,7 @@ struct HeaderDashboard: View {
             Text("Agents waited on you ")
             Text(waited == "now" ? "0m" : waited)
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(stats.waitedToday >= 60 ? Palette.waiting : .secondary)
+                .foregroundStyle(stats.waitedToday >= 60 ? Color.primary : .secondary)
             Text(" today")
             if let average = stats.averageReply {
                 Text(" · you replied in ")
@@ -385,25 +395,27 @@ private struct Metric: View {
     }
 }
 
+/// Minutes agents worked in each slice of the last two hours, Claude and
+/// Codex stacked in their own colours.
 private struct Histogram: View {
-    let buckets: [(working: Double, waiting: Double)]
+    let buckets: [(claude: Double, codex: Double)]
 
     var body: some View {
-        let peak = max(1, buckets.map { $0.working + $0.waiting }.max() ?? 1)
+        let peak = max(1, buckets.map { $0.claude + $0.codex }.max() ?? 1)
         VStack(alignment: .trailing, spacing: 3) {
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(buckets.indices, id: \.self) { index in
                     let bucket = buckets[index]
                     VStack(spacing: 1) {
-                        if bucket.waiting > 0 {
-                            Rectangle().fill(Palette.waitingFill)
-                                .frame(height: max(1.5, 32 * bucket.waiting / peak))
+                        if bucket.codex > 0 {
+                            Rectangle().fill(Palette.codex)
+                                .frame(height: max(1.5, 32 * bucket.codex / peak))
                         }
-                        if bucket.working > 0 {
-                            Rectangle().fill(Palette.working)
-                                .frame(height: max(1.5, 32 * bucket.working / peak))
+                        if bucket.claude > 0 {
+                            Rectangle().fill(Palette.claude)
+                                .frame(height: max(1.5, 32 * bucket.claude / peak))
                         }
-                        if bucket.working + bucket.waiting == 0 {
+                        if bucket.claude + bucket.codex == 0 {
                             Rectangle().fill(Color.primary.opacity(0.12)).frame(height: 1.5)
                         }
                     }
@@ -423,7 +435,7 @@ private struct Histogram: View {
             .foregroundStyle(.secondary)
         }
         .fixedSize(horizontal: true, vertical: false)
-        .accessibilityLabel("Agent activity over the last two hours")
+        .accessibilityLabel("Agent activity over the last two hours, Claude and Codex")
     }
 }
 
@@ -445,23 +457,36 @@ struct SectionLabel: View {
 
 struct LifelineLegend: View {
     var body: some View {
-        HStack(spacing: 11) {
-            item(Palette.working, "working")
-            item(Palette.waitingFill, "waiting on you")
-            item(.secondary.opacity(0.55), "background")
-            Spacer()
+        HStack(spacing: 10) {
+            swatch(Palette.claude, "Claude")
+            swatch(Palette.codex, "Codex")
+            Text("·")
+            bar(filled: true, "working")
+            bar(filled: false, "waiting on you")
+            Spacer(minLength: 4)
             Text("last 60 min")
         }
         .font(.system(size: 10, weight: .medium))
         .foregroundStyle(.secondary)
+        .lineLimit(1)
         .padding(.horizontal, 14)
         .padding(.top, 2)
         .padding(.bottom, 6)
     }
 
-    private func item(_ color: Color, _ label: String) -> some View {
+    private func swatch(_ color: Color, _ label: String) -> some View {
         HStack(spacing: 4) {
             RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 6)
+            Text(label)
+        }
+    }
+
+    private func bar(filled: Bool, _ label: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.secondary.opacity(filled ? 0.9 : 0.25))
+                .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Color.secondary, lineWidth: filled ? 0 : 1))
+                .frame(width: 10, height: 6)
             Text(label)
         }
     }

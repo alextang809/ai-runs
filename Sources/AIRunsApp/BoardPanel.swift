@@ -131,12 +131,12 @@ struct BoardView: View {
 
             Text(dropTargeted ? "Drop to make a card" : "Drag text or a link here to make a card")
                 .font(.system(size: 11.5, weight: dropTargeted ? .semibold : .regular))
-                .foregroundStyle(dropTargeted ? Color.accentColor : Color.secondary)
+                .foregroundStyle(dropTargeted ? Color.primary : Color.secondary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 36)
                 .background(RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(style: StrokeStyle(lineWidth: dropTargeted ? 2 : 1, dash: [4, 3]))
-                    .foregroundStyle(dropTargeted ? Color.accentColor : Color.secondary.opacity(0.5)))
+                    .foregroundStyle(dropTargeted ? Color.primary : Color.secondary.opacity(0.5)))
                 .padding(10)
         }
         .frame(minWidth: 240, minHeight: 220)

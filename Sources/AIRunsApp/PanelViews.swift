@@ -9,16 +9,27 @@ enum PanelLayout {
     static let outerPadding: CGFloat = 10
 }
 
+/// Colour means "which tool": Claude's clay and Codex's ink (OpenAI's black,
+/// white in dark mode). Everything else is grey. State is told by words and
+/// by how the colour is applied: solid = needs you, outline = working,
+/// light fill = replied, grey = done or in the background.
 enum Palette {
-    static let waiting = Color(nsColor: NSColor(name: nil) { appearance in
+    static let claude = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(red: 1.0, green: 0.66, blue: 0.3, alpha: 1)
-            : NSColor(red: 0.64, green: 0.31, blue: 0.0, alpha: 1)
+            ? NSColor(red: 0.89, green: 0.53, blue: 0.42, alpha: 1)   // a touch lighter on dark
+            : NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1) // #D97757
     })
-    static let waitingFill = Color(red: 0.91, green: 0.54, blue: 0.05)
-    /// The only two colours in the panel: blue for work, orange for "needs you".
-    /// Everything else is grey.
-    static let working = Color(nsColor: .systemBlue)
+    static let codex = Color(nsColor: .labelColor)
+
+    static func tool(_ tool: AgentTool) -> Color {
+        tool == .codex ? codex : claude
+    }
+
+    /// Text on a solid fill of the tool colour.
+    static func onTool(_ tool: AgentTool) -> Color {
+        tool == .codex ? Color(nsColor: .windowBackgroundColor) : .white
+    }
+
     static let quiet = Color.secondary
 }
 
@@ -131,13 +142,13 @@ struct MenuColumn: View {
                 if let message = model.message {
                     Text(message)
                         .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(model.undo == nil ? Palette.working : Color.secondary)
+                        .foregroundStyle(Color.secondary)
                         .lineLimit(1)
                     if model.undo != nil {
                         Button("Undo") { model.performUndo() }
                             .buttonStyle(.plain)
                             .font(.system(size: 11.5, weight: .bold))
-                            .foregroundStyle(Palette.working)
+                            .foregroundStyle(Color.primary)
                             .keyboardShortcut("z", modifiers: .command)
                     }
                 }
@@ -147,7 +158,7 @@ struct MenuColumn: View {
             ForEach(model.silentTools, id: \.self) { tool in
                 Text(silentHint(tool))
                     .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.waiting)
+                    .foregroundStyle(Palette.tool(tool))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -310,13 +321,13 @@ struct MenuRow: View {
                 Spacer()
                 if !shortcut.isEmpty {
                     Text(shortcut).font(.system(size: 12))
-                        .foregroundStyle(hovering ? Color.white.opacity(0.85) : Color.secondary)
+                        .foregroundStyle(Color.secondary)
                 }
             }
             .padding(.horizontal, 9)
             .frame(height: 26)
-            .foregroundStyle(hovering ? Color.white : (tint ?? Color.primary))
-            .background(RoundedRectangle(cornerRadius: 5).fill(hovering ? Color.accentColor : Color.clear))
+            .foregroundStyle(tint ?? Color.primary)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -344,7 +355,7 @@ struct PinnedSection: View {
                     Label("Note", systemImage: "plus").font(.system(size: 12, weight: .semibold))
                 }
                 .buttonStyle(.borderless)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color.primary)
                 .help("Write a quick note")
             }
             .padding(.horizontal, 9)
@@ -460,7 +471,7 @@ struct FlyoutSurface<Content: View>: View {
 struct FlyoutBody: View {
     let title: String
     let subtitle: String
-    var chip: (text: String, waiting: Bool)? = nil
+    var chip: (text: String, color: Color?)? = nil
     var rows: [(String, String)] = []
     var noteLabel: String? = nil
     var note: String? = nil
@@ -478,8 +489,8 @@ struct FlyoutBody: View {
                         Text(chip.text)
                             .font(.system(size: 11.5, weight: .semibold))
                             .padding(.horizontal, 8).padding(.vertical, 2)
-                            .background(Capsule().fill(chip.waiting ? Palette.waitingFill.opacity(0.18) : Color.primary.opacity(0.08)))
-                            .foregroundStyle(chip.waiting ? Palette.waiting : Color.secondary)
+                            .background(Capsule().fill((chip.color ?? Color.primary).opacity(chip.color == nil ? 0.08 : 0.16)))
+                            .foregroundStyle(chip.color ?? Color.secondary)
                             .padding(.top, 4)
                     }
                 }
@@ -552,24 +563,26 @@ struct SessionFlyout: View {
         if !session.project.isEmpty { subtitle += " · \(session.project)" }
         subtitle += " · \(appName)"
 
-        let chip: (text: String, waiting: Bool)
+        let tint = Palette.tool(session.tool)
+        let chip: (text: String, color: Color?)
         switch session.state {
         case .needsApproval:
-            chip = ("Needs approval · waiting \(TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now)))", true)
+            chip = ("Needs approval · waiting \(TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now)))", tint)
         case .yourTurn:
             let since = TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now))
             switch session.outcome {
-            case .needsInput: chip = ("Needs your input · waiting \(since)", true)
-            case .done: chip = ("Done · \(since) ago", false)
-            default: chip = ("Replied · \(since) ago", true)
+            case .needsInput: chip = ("Needs your input · waiting \(since)", tint)
+            case .done: chip = ("Done · \(since) ago", nil)
+            default: chip = ("Replied · \(since) ago", tint)
             }
         case .working:
             if session.isInBackground {
                 let tasks = session.backgroundTasks ?? 1
-                chip = ("Waiting on \(tasks) background task\(tasks == 1 ? "" : "s") · continues by itself", false)
+                chip = ("Waiting on \(tasks) background task\(tasks == 1 ? "" : "s") · continues by itself", nil)
             } else {
-                chip = (session.isQuiet(now: now) ? "No update for a while — it may have stopped"
-                        : "Working · \(TextUtils.duration(now.timeIntervalSince(session.turnStartedAt)))", false)
+                chip = session.isQuiet(now: now)
+                    ? ("No update for a while — it may have stopped", nil)
+                    : ("Working · \(TextUtils.duration(now.timeIntervalSince(session.turnStartedAt)))", tint)
             }
         }
 

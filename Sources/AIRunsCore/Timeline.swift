@@ -42,6 +42,8 @@ extension SpanKind {
 public struct ActivityStats: Equatable, Sendable {
     /// Minutes of work and of waiting per bucket, oldest first.
     public var buckets: [(working: Double, waiting: Double)]
+    /// Minutes agents worked per bucket, split by tool, oldest first.
+    public var toolBuckets: [(claude: Double, codex: Double)] = []
     /// Total time sessions waited on the user since local midnight.
     public var waitedToday: TimeInterval
     /// Average time the user took to answer a waiting session today; nil before the first answer.
@@ -61,12 +63,14 @@ public struct ActivityStats: Equatable, Sendable {
         let size = window / Double(bucketCount)
         let origin = now.addingTimeInterval(-window)
         var buckets = Array(repeating: (working: 0.0, waiting: 0.0), count: bucketCount)
+        var toolBuckets = Array(repeating: (claude: 0.0, codex: 0.0), count: bucketCount)
         let midnight = calendar.startOfDay(for: now)
         var waited: TimeInterval = 0
         var replies: [TimeInterval] = []
         var today = 0
 
-        for spans in history.values {
+        for (key, spans) in history {
+            let isCodex = key.hasPrefix(AgentTool.codex.rawValue + ":")
             if spans.contains(where: { $0.end(or: now) > midnight }) { today += 1 }
             for span in spans {
                 for index in 0..<bucketCount {
@@ -74,7 +78,9 @@ public struct ActivityStats: Equatable, Sendable {
                     let seconds = span.overlap(from: from, to: from.addingTimeInterval(size), now: now)
                     guard seconds > 0 else { continue }
                     switch span.kind {
-                    case .working, .background: buckets[index].working += seconds / 60
+                    case .working, .background:
+                        buckets[index].working += seconds / 60
+                        if isCodex { toolBuckets[index].codex += seconds / 60 } else { toolBuckets[index].claude += seconds / 60 }
                     case .waiting: buckets[index].waiting += seconds / 60
                     }
                 }
@@ -85,7 +91,8 @@ public struct ActivityStats: Equatable, Sendable {
             }
         }
         let average = replies.isEmpty ? nil : replies.reduce(0, +) / Double(replies.count)
-        return ActivityStats(buckets: buckets, waitedToday: waited, averageReply: average, sessionsToday: today)
+        return ActivityStats(buckets: buckets, toolBuckets: toolBuckets, waitedToday: waited, averageReply: average,
+                             sessionsToday: today)
     }
 }
 

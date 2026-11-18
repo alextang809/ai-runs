@@ -82,7 +82,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
             button.attributedTitle = NSAttributedString(
                 string: " \(needsYou)",
                 attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold),
-                             .foregroundColor: NSColor.systemOrange])
+                             .foregroundColor: NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1)])
             button.setAccessibilityLabel("AI Runs, \(needsYou) need you")
         } else {
             button.attributedTitle = NSAttributedString(string: "")
@@ -429,7 +429,7 @@ enum Icons {
             let bars: [(CGFloat, CGFloat)] = [(8, 7.5), (3.5, 8.5), (0.5, 6)]
             for (index, (x, bar)) in zip(xs, bars).enumerated() {
                 let isLast = index == xs.count - 1
-                (needsYou && isLast ? NSColor.systemOrange : ink).setFill()
+                (needsYou && isLast ? NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1) : ink).setFill()
                 NSBezierPath(roundedRect: NSRect(x: x - 1.6, y: bar.0, width: 3.2, height: bar.1),
                              xRadius: 1, yRadius: 1).fill()
             }
