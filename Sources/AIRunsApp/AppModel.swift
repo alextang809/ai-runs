@@ -64,6 +64,35 @@ final class AppModel: ObservableObject {
         clockTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
+        threadsTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.readClaudeThreads() }
+        }
+    }
+
+    // MARK: - Claude's Threads list
+
+    private var threadsTimer: Timer?
+    private var readingThreads = false
+
+    /// Looks at the Claude app's window for project threads, which is the only
+    /// way to see the ones that work in the cloud.
+    private func readClaudeThreads() {
+        guard !readingThreads, let pid = ClaudeThreadsReader.target() else { return }
+        readingThreads = true
+        ClaudeThreadsReader.read(pid: pid) { [weak self] sightings in
+            MainActor.assumeIsolated { self?.apply(sightings: sightings) }
+        }
+    }
+
+    private func apply(sightings: [ThreadSighting]) {
+        readingThreads = false
+        guard !sightings.isEmpty else { return }
+        var updated = store
+        updated.observe(sightings, at: Date())
+        guard updated != store else { return }
+        store = updated
+        now = Date()
+        saveSessions()
     }
 
     func refresh() {
@@ -75,6 +104,7 @@ final class AppModel: ObservableObject {
         now = Date()
         var updated = store
         updated.pruneStale(now: now)
+        updated.expireSightings(now: now)
         if updated != store {
             store = updated
             saveSessions()

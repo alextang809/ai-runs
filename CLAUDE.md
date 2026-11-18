@@ -28,8 +28,18 @@ wrapped in `<wake><project id="chan_…"><thread ts="cmsg_…"><message …>requ
 `PromptWrapper` reads that address; `SessionStore` then shows one row per thread
 (`Session.thread`, key `claude-code:project:<chan>:<cmsg>`) and treats local
 sessions as its executors (`SessionStore.executors`); the newest one speaks for
-the row. Threads that never woke a local session are not visible yet (plan:
-Accessibility, see `collab/rounds/02-claude.md`).
+the row. Clicking the row opens `claude://code/project/<chan>?thread=<cmsg>`.
+
+Threads that work only in the cloud are read from the Claude app's window:
+`ClaudeThreadsReader` (app, Accessibility, read-only, every 5 s while Claude
+runs) copies the tree, `ClaudeThreadsView` (core) finds thread links
+(`AXLink.AXURL`) and the section heading each sits under (Working, Waiting on
+you, Ready for review, Idle), and `SessionStore.observe` gives active ones a row
+(`Session.native`). Rules: the pill uses Claude's own word; a hook event within
+two minutes outranks the list; a thread missing from the tree is left alone
+(the list is often partly drawn); after 10 minutes unseen a row says LAST SEEN
+instead of a state, except Waiting on you, which is kept; idle threads AI Runs
+never saw active get no row.
 
 ## Layout
 
@@ -42,7 +52,7 @@ Accessibility, see `collab/rounds/02-claude.md`).
 - `Sources/AIRunsApp` — AppKit + SwiftUI. `StatusBarController` (menu bar item,
   panel), `PanelViews` / `RunViews` (rows, header dashboard, flyout),
   `FloatingWindow`, `Notifier`, `Jumper` (go back to a session),
-  `SidebarClicker` (Accessibility), `SettingsView`, `TitleModel` (on-device model,
+  `SidebarClicker` and `ClaudeThreadsReader` (Accessibility), `SettingsView`, `TitleModel` (on-device model,
   macOS 26 only, behind `#if canImport(FoundationModels)`).
 - `BrowserExtension/` — content script (`content.js`), relay worker, popup.
   Fixed `key` in the manifest keeps the extension ID stable; it must match

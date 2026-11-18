@@ -12,6 +12,8 @@ public enum PinLink: Codable, Equatable, Sendable {
     public var label: String {
         switch self {
         case .url(let string):
+            // A link into the Claude app (`claude://code/project/…`).
+            if URL(string: string)?.scheme == "claude" { return "Claude" }
             return URL(string: string)?.host ?? string
         case .app(_, let name):
             return name
@@ -105,7 +107,10 @@ public struct PinBoard: Codable, Equatable, Sendable {
     /// Pins a session. If it is already pinned, the existing card is refreshed instead.
     @discardableResult
     public mutating func pin(session: Session, now: Date = Date()) -> PinCard {
+        // A project thread is pinned by its own link: local sessions come and go.
+        let threadLink = session.thread?.appLink.map { PinLink.url($0.absoluteString) }
         if let index = cards.firstIndex(where: {
+            if let threadLink { return $0.link == threadLink }
             if case .session(let tool, let sessionId, _, _) = $0.link {
                 return tool == session.tool && sessionId == session.sessionId
             }
@@ -124,7 +129,7 @@ public struct PinBoard: Codable, Equatable, Sendable {
             next: question ?? "",
             nextIsSuggested: question != nil,
             group: session.project.isEmpty ? PinBoard.inbox : session.project,
-            link: .session(tool: session.tool, sessionId: session.sessionId, cwd: session.cwd, terminal: session.terminal),
+            link: threadLink ?? .session(tool: session.tool, sessionId: session.sessionId, cwd: session.cwd, terminal: session.terminal),
             excerpt: TextUtils.preview(of: session.lastMessage, limit: 400),
             createdAt: now
         )

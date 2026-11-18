@@ -58,6 +58,11 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var planSteps: [PlanStep]?
     /// Set when this row is a Claude project thread rather than one local session.
     public var thread: ProjectThread?
+    /// When a hook last reported on this row.
+    public var lastHookAt: Date?
+    /// Set while the row's state comes from Claude's own Threads list rather
+    /// than from hooks (a thread working in the cloud).
+    public var native: NativeSighting?
 
     public var isInBackground: Bool { state == .working && ((backgroundTasks ?? 0) > 0 || (scheduled ?? 0) > 0) }
     /// Finished its work: shown, but not counted as needing the user.
@@ -86,6 +91,23 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public func isQuiet(now: Date) -> Bool {
         state == .working && now.timeIntervalSince(lastEventAt) > Session.quietThreshold
     }
+}
+
+/// What Claude's Threads list said about a thread, and when.
+public struct NativeSighting: Codable, Equatable, Sendable {
+    public var state: NativeThreadState
+    public var seenAt: Date
+    /// True once the sighting is too old to claim a state.
+    public var stale: Bool?
+
+    public init(state: NativeThreadState, seenAt: Date, stale: Bool? = nil) {
+        self.state = state
+        self.seenAt = seenAt
+        self.stale = stale
+    }
+
+    /// A state other than "Waiting on you" is only claimed this long after it was seen.
+    public static let freshFor: TimeInterval = 10 * 60
 }
 
 /// A local session working for a conversation that has its own row (a Claude
@@ -120,6 +142,9 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// Local sessions (by `Session.key(tool:sessionId:)`) that work for a project
     /// thread. A session without a link is its own row.
     public private(set) var executors: [String: ExecutorLink]? = nil
+    /// Removed thread rows that were waiting on the user when removed; seeing
+    /// them still waiting doesn't bring them back.
+    public private(set) var dismissedWaiting: Set<String>? = nil
 
     public func lastSeen(_ tool: AgentTool) -> Date? { toolLastSeen?[tool.rawValue] }
 
@@ -194,6 +219,9 @@ public struct SessionStore: Codable, Equatable, Sendable {
         guard var current = session else { return }
 
         current.lastEventAt = max(current.lastEventAt, event.at)
+        // A hook knows more than a look at Claude's window.
+        current.lastHookAt = event.at
+        current.native = nil
         if let cwd = event.cwd { current.cwd = cwd }
         if let path = event.transcriptPath { current.transcriptPath = path }
         if event.terminal != TerminalContext() { current.terminal = event.terminal }
@@ -321,6 +349,113 @@ public struct SessionStore: Codable, Equatable, Sendable {
         sessions[key]?.sessionId = event.sessionId
     }
 
+    // MARK: - Claude's Threads list
+
+    /// How long after a hook event the hooks alone speak for a row.
+    static let hookGrace: TimeInterval = 120
+
+    /// Folds in what Claude's Threads list showed at `at`. This is how threads
+    /// that work only in the cloud get a row.
+    ///
+    /// - A thread with no row gets one when it is working or wants the user;
+    ///   idle threads AI Runs never saw active stay out.
+    /// - A row hooks reported on in the last two minutes keeps its hook state.
+    /// - Threads missing from `sightings` are untouched: the list is often
+    ///   only partly drawn, so absence means nothing.
+    public mutating func observe(_ sightings: [ThreadSighting], at: Date, tool: AgentTool = .claudeCode) {
+        for sighting in sightings {
+            let key = Session.key(tool: tool, thread: sighting.thread)
+            if let state = sighting.state, state != .waitingOnYou { dismissedWaiting?.remove(key) }
+
+            guard var row = sessions[key] else {
+                guard let state = sighting.state, state != .idle else { continue }
+                if dismissed?.contains(key) == true {
+                    // Like an approval request: only wanting the user brings a removed row back.
+                    guard state == .waitingOnYou, dismissedWaiting?.contains(key) != true else { continue }
+                    dismissed?.remove(key)
+                }
+                var created = Session(tool: tool, sessionId: "", title: sighting.title ?? "Claude thread", cwd: nil,
+                                      state: .working, startedAt: at, turnStartedAt: at, waitingSince: nil,
+                                      lastEventAt: at, lastMessage: nil, approvalDetail: nil, transcriptPath: nil,
+                                      terminal: TerminalContext(bundleId: "com.anthropic.claudefordesktop"),
+                                      backgroundTasks: nil, firstPrompt: nil, titleIsCustom: nil,
+                                      titleSettled: sighting.title == nil ? nil : true, thread: sighting.thread)
+                Self.drive(&created, to: state, at: at)
+                sessions[key] = created
+                record(SpanKind(created), for: key, at: at)
+                continue
+            }
+
+            // Claude's own name for the thread beats one made from a request.
+            if let title = sighting.title, row.titleIsCustom != true {
+                row.title = title
+                row.titleSettled = true
+            }
+            if let state = sighting.state {
+                let hookIsFresh = at.timeIntervalSince(row.lastHookAt ?? row.lastEventAt) < Self.hookGrace
+                if row.native != nil || !(hookIsFresh || Self.agrees(row, with: state)) {
+                    Self.drive(&row, to: state, at: at)
+                    record(SpanKind(row), for: key, at: at)
+                }
+            }
+            sessions[key] = row
+        }
+        expireSightings(now: at)
+    }
+
+    /// Rows whose last look at Claude's list is too old stop claiming a state.
+    /// "Waiting on you" is kept: it stays true until the user answers.
+    public mutating func expireSightings(now: Date) {
+        for (key, row) in sessions {
+            guard let native = row.native, native.stale != true, native.state != .waitingOnYou,
+                  now.timeIntervalSince(native.seenAt) > NativeSighting.freshFor else { continue }
+            sessions[key]?.native?.stale = true
+            sessions[key]?.state = .yourTurn
+            sessions[key]?.outcome = .done
+            sessions[key]?.outcomeSource = nil
+            sessions[key]?.waitingSince = native.seenAt
+            record(nil, for: key, at: now)
+        }
+    }
+
+    private static func target(_ state: NativeThreadState) -> (state: SessionState, outcome: TurnOutcome?) {
+        switch state {
+        case .working: return (.working, nil)
+        case .waitingOnYou: return (.yourTurn, .needsInput)
+        case .readyForReview: return (.yourTurn, .replied)
+        case .idle: return (.yourTurn, .done)
+        }
+    }
+
+    /// True when the hooks already say what Claude's list says.
+    private static func agrees(_ row: Session, with state: NativeThreadState) -> Bool {
+        if state == .waitingOnYou, row.state == .needsApproval { return true }
+        let wanted = target(state)
+        return row.state == wanted.state && row.outcome == wanted.outcome
+    }
+
+    /// Claude's list now speaks for the row.
+    private static func drive(_ row: inout Session, to state: NativeThreadState, at: Date) {
+        let wanted = target(state)
+        let changed = row.native?.stale == true || row.state != wanted.state || row.outcome != wanted.outcome
+        row.native = NativeSighting(state: state, seenAt: at)
+        row.lastEventAt = max(row.lastEventAt, at)
+        guard changed else { return }
+        row.state = wanted.state
+        row.outcome = wanted.outcome
+        row.outcomeSource = nil
+        row.approvalDetail = nil
+        row.activity = nil
+        row.backgroundTasks = nil
+        row.scheduled = nil
+        if wanted.state == .working {
+            row.turnStartedAt = at
+            row.waitingSince = nil
+        } else {
+            row.waitingSince = at
+        }
+    }
+
     /// The user is done with this session; it leaves the panel until the next prompt.
     public mutating func resolve(id: String, at: Date = Date()) {
         sessions[id] = nil
@@ -329,7 +464,12 @@ public struct SessionStore: Codable, Equatable, Sendable {
 
     /// Removes a session from the list until the user prompts it again.
     public mutating func dismiss(id: String, at: Date = Date()) {
-        guard sessions[id] != nil else { return }
+        guard let session = sessions[id] else { return }
+        if session.thread != nil, session.needsUser {
+            var waiting = dismissedWaiting ?? []
+            waiting.insert(id)
+            dismissedWaiting = waiting
+        }
         resolve(id: id, at: at)
         var set = dismissed ?? []
         set.insert(id)

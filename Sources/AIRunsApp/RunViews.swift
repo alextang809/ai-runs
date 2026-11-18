@@ -96,7 +96,9 @@ enum RunText {
             host = "Codex"
         }
         var parts: [String]
-        if session.tool.isWeb {
+        if session.thread != nil {
+            parts = ["Claude project"]
+        } else if session.tool.isWeb {
             parts = [session.tool.displayName, host]
         } else if (session.tool == .claudeCode && host == "Claude") || (session.tool == .codex && host == "Codex") {
             parts = ["\(host) app"]
@@ -115,7 +117,15 @@ enum RunText {
         return "Also running here: " + (rest == 0 ? first : "\(first) and \(rest) more")
     }
 
+    /// "Seen in Claude just now", "Seen in Claude 3m ago".
+    static func seen(_ native: NativeSighting, now: Date) -> String {
+        let age = now.timeIntervalSince(native.seenAt)
+        return age < 60 ? "Seen in Claude just now" : "Seen in Claude \(TextUtils.duration(age)) ago"
+    }
+
     static func stateWord(_ session: Session, now: Date) -> String {
+        // A thread known only from Claude's Threads list keeps Claude's own word.
+        if let native = session.native { return native.stale == true ? "LAST SEEN" : native.state.word }
         switch session.state {
         case .needsApproval: return "APPROVE"
         case .yourTurn:
@@ -140,6 +150,9 @@ enum RunText {
     }
 
     static func liveText(_ session: Session, now: Date) -> String {
+        if let native = session.native {
+            return native.stale == true ? "State unknown · show its Threads list in Claude to refresh" : seen(native, now: now)
+        }
         switch session.state {
         case .needsApproval:
             return "Wants to run " + (session.approvalDetail ?? "a tool")
@@ -167,7 +180,9 @@ struct StatePill: View {
     var body: some View {
         let tint = Palette.tool(session.tool)
         // Solid = needs you, light fill = replied, outline = working, grey = the rest.
+        let stale = session.native?.stale == true
         let style: (fill: Color, text: Color, outline: Bool) = {
+            if stale { return (.clear, .secondary, false) }
             switch session.state {
             case .needsApproval: return (tint, Palette.onTool(session.tool), false)
             case .yourTurn:
@@ -182,7 +197,7 @@ struct StatePill: View {
             }
         }()
         HStack(spacing: 5) {
-            if session.isDone {
+            if session.isDone, session.native == nil {
                 Image(systemName: "checkmark").font(.system(size: 8.5, weight: .heavy))
             }
             Text(RunText.stateWord(session, now: now))
@@ -196,6 +211,8 @@ struct StatePill: View {
         .padding(.vertical, 2)
         .background(Capsule().fill(style.fill))
         .overlay(Capsule().strokeBorder(style.outline ? style.text : .clear, lineWidth: 1))
+        // Dashed: AI Runs no longer knows this thread's state.
+        .overlay(Capsule().strokeBorder(stale ? Color.secondary : Color.clear, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
         .fixedSize()
     }
 }
@@ -207,6 +224,16 @@ struct LiveLine: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            if session.native != nil {
+                Text(RunText.liveText(session, now: now)).foregroundStyle(.secondary).lineLimit(1)
+            } else {
+                hookLine
+            }
+        }
+        .font(.system(size: 11.5, weight: .medium))
+    }
+
+    @ViewBuilder private var hookLine: some View {
             switch session.state {
             case .needsApproval:
                 Text("wants to run").foregroundStyle(.secondary)
@@ -228,8 +255,6 @@ struct LiveLine: View {
                     StepsBar(progress: progress, color: Palette.tool(session.tool))
                 }
             }
-        }
-        .font(.system(size: 11.5, weight: .medium))
     }
 }
 

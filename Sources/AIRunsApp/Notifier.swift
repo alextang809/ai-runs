@@ -161,12 +161,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             content.body = "Wants to run " + (session.approvalDetail ?? "a tool")
             content.sound = .default
         case .input:
-            content.subtitle = "\(tool) · Needs input"
+            content.subtitle = "\(tool) · \(session.native?.state.heading ?? "Needs input")"
             content.body = session.approvalDetail.map { "“\($0)”" }
                 ?? TextUtils.preview(of: session.lastMessage, limit: 160) ?? "It needs your input."
             content.sound = .default
         case .replied:
-            content.subtitle = "\(tool) · Replied"
+            content.subtitle = "\(tool) · \(session.native?.state.heading ?? "Replied")"
             content.body = TextUtils.preview(of: session.lastMessage, limit: 160) ?? "It finished its turn."
         case .done:
             content.subtitle = "\(tool) · Done"

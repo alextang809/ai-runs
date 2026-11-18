@@ -561,12 +561,23 @@ struct SessionFlyout: View {
 
     var body: some View {
         let appName = session.terminal.appName
-        var subtitle = session.tool.displayName
+        var subtitle = session.thread == nil ? session.tool.displayName : "Claude project"
         if !session.project.isEmpty { subtitle += " · \(session.project)" }
         subtitle += " · \(appName)"
 
         let tint = Palette.tool(session.tool)
         let chip: (text: String, color: Color?)
+        if let native = session.native {
+            // Known only from Claude's Threads list: say so, and when.
+            let seen = "s" + RunText.seen(native, now: now).dropFirst()
+            if native.stale == true {
+                chip = ("State unknown · last \(seen)", nil)
+            } else if native.state == .idle {
+                chip = ("Idle · \(seen)", nil)
+            } else {
+                chip = ("\(native.state.heading) · \(seen)", tint)
+            }
+        } else {
         switch session.state {
         case .needsApproval:
             chip = ("Needs approval · waiting \(TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now)))", tint)
@@ -586,6 +597,7 @@ struct SessionFlyout: View {
                     ? ("No update for a while — it may have stopped", nil)
                     : ("Working · \(TextUtils.duration(now.timeIntervalSince(session.turnStartedAt)))", tint)
             }
+        }
         }
 
         var rows: [(String, String)] = []

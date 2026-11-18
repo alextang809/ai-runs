@@ -17,7 +17,8 @@ extension Session {
         case .yourTurn:
             switch outcome {
             case .needsInput: return .input
-            case .done: return .done
+            // "Idle" in Claude's list isn't news that work finished.
+            case .done: return native == nil ? .done : nil
             default: return .replied
             }
         case .working:
