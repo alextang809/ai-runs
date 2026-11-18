@@ -76,7 +76,13 @@ never saw active get no row.
   (`gh api repos/alextang809/ai-runs/pulls -f title=… -f head=… -f base=main -f body=…`).
 - On Alex's Mac, `~/ai-runs` is Codex's working copy; builds happen in the
   worktree `~/ai-runs-build` (`git fetch && git checkout --detach origin/main &&
-  ./Scripts/package_app.sh`).
+  ./Scripts/install_local.sh`). Keep one copy only, `/Applications/AI Runs.app`:
+  several copies with the same bundle ID confuse macOS permissions.
+- Signing: `./Scripts/make_signing_identity.sh` (once per Mac) creates a
+  self-signed "AI Runs Local Signing" identity; `package_app.sh` uses it when
+  present, so Accessibility survives rebuilds. Without it builds are ad hoc and
+  macOS drops the permission after each rebuild while System Settings still
+  shows it ticked.
 
 ## Design rules
 
