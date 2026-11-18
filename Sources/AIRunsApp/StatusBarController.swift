@@ -50,7 +50,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
             button.setAccessibilityLabel("AI Runs")
         }
         model.$store
-            .sink { [weak self] store in self?.updateButton(needsYou: store.needsUserCount) }
+            .sink { [weak self] store in self?.updateButton(store: store) }
             .store(in: &cancellables)
         model.$message
             .sink { [weak self] message in self?.showToastIfNeeded(message) }
@@ -65,25 +65,31 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
             }
             .store(in: &cancellables)
         floating.onVisibilityChange = { [weak self] visible in self?.ui.boardVisible = visible }
-        updateButton(needsYou: model.store.needsUserCount)
+        updateButton(store: model.store)
     }
 
-    /// The count the button currently shows, so the item is only touched when
-    /// it actually changes. Menu bar managers such as Bartender re-identify an
+    /// What the button currently shows, so the item is only touched when it
+    /// actually changes. Menu bar managers such as Bartender re-identify an
     /// item whose image keeps being replaced, and may treat it as a new item.
     private var shownCount: Int?
+    private var shownStatus: Icons.Status?
 
-    private func updateButton(needsYou: Int) {
-        guard let button = statusItem.button, needsYou != shownCount else { return }
-        let stateChanged = (needsYou > 0) != ((shownCount ?? 0) > 0) || shownCount == nil
+    private func updateButton(store: SessionStore) {
+        guard let button = statusItem.button else { return }
+        let status = Icons.Status(store: store)
+        if status != shownStatus {
+            shownStatus = status
+            button.image = Icons.statusImage(status)
+        }
+        let needsYou = store.needsUserCount
+        guard needsYou != shownCount else { return }
         shownCount = needsYou
-        if stateChanged { button.image = Icons.statusImage(needsYou: needsYou > 0) }
         if needsYou > 0 {
             button.attributedTitle = NSAttributedString(
                 string: " \(needsYou)",
                 attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold),
-                             .foregroundColor: NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1)])
-            button.setAccessibilityLabel("AI Runs, \(needsYou) need you")
+                             .foregroundColor: Icons.amber])
+            button.setAccessibilityLabel("AI Runs, \(needsYou) holding for you")
         } else {
             button.attributedTitle = NSAttributedString(string: "")
             button.setAccessibilityLabel("AI Runs")
@@ -413,36 +419,47 @@ struct ToastView: View {
 }
 
 enum Icons {
-    /// The app's mark in miniature: three lifelines from a sequence diagram,
-    /// each with an activation bar. When a run needs you, the last bar turns
-    /// orange; otherwise the image is a template so it follows the menu bar.
-    static func statusImage(needsYou: Bool) -> NSImage {
+    /// What the menu bar mark is saying.
+    enum Status: Equatable {
+        /// Nothing is running: the arc alone.
+        case idle
+        /// Runs are in progress: the arc with its dot.
+        case working
+        /// A run is holding for the user: the dot turns amber.
+        case needsYou
+
+        init(store: SessionStore) {
+            if store.needsUserCount > 0 {
+                self = .needsYou
+            } else {
+                self = store.workingCount > 0 ? .working : .idle
+            }
+        }
+    }
+
+    /// The logo's amber, used for the dot and the count.
+    static let amber = NSColor(red: 0.91, green: 0.537, blue: 0.047, alpha: 1)
+
+    /// The app's mark, a fermata: the musical sign for "hold until the
+    /// conductor gives the cue". A run holds; the user gives the cue.
+    /// Template (follows the menu bar's colour) unless the dot is amber.
+    static func statusImage(_ status: Status) -> NSImage {
         let size = NSSize(width: 18, height: 16)
         let image = NSImage(size: size, flipped: false) { _ in
-            let ink = needsYou ? NSColor.labelColor : NSColor.black
-            let xs: [CGFloat] = [3.5, 9, 14.5]
-
-            ink.withAlphaComponent(0.45).setStroke()
-            for x in xs {
-                let line = NSBezierPath()
-                line.move(to: NSPoint(x: x, y: 0.5))
-                line.line(to: NSPoint(x: x, y: 15.5))
-                line.lineWidth = 1
-                line.setLineDash([1.6, 1.4], count: 2, phase: 0)
-                line.stroke()
-            }
-
-            // (bottom, height) of each activation bar, top-left to bottom-right.
-            let bars: [(CGFloat, CGFloat)] = [(8, 7.5), (3.5, 8.5), (0.5, 6)]
-            for (index, (x, bar)) in zip(xs, bars).enumerated() {
-                let isLast = index == xs.count - 1
-                (needsYou && isLast ? NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1) : ink).setFill()
-                NSBezierPath(roundedRect: NSRect(x: x - 1.6, y: bar.0, width: 3.2, height: bar.1),
-                             xRadius: 1, yRadius: 1).fill()
+            let ink = status == .needsYou ? NSColor.labelColor : NSColor.black
+            let arc = NSBezierPath()
+            arc.appendArc(withCenter: NSPoint(x: 9, y: 4.6), radius: 6.6, startAngle: 0, endAngle: 180)
+            arc.lineWidth = 1.9
+            arc.lineCapStyle = .round
+            ink.setStroke()
+            arc.stroke()
+            if status != .idle {
+                (status == .needsYou ? amber : ink).setFill()
+                NSBezierPath(ovalIn: NSRect(x: 9 - 2, y: 5.1 - 2, width: 4, height: 4)).fill()
             }
             return true
         }
-        image.isTemplate = !needsYou
+        image.isTemplate = status != .needsYou
         return image
     }
 }

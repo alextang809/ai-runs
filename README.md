@@ -76,7 +76,9 @@ notification when the reply is ready, and a click brings back that exact tab.
 
 ## Can't see the icon?
 
-The icon is three small bars: <img src="docs/icon.png" width="14">. If you don't see it:
+The icon is an arc over a dot, a musical *fermata*: "hold until the conductor gives
+the cue". Arc alone: nothing running. Arc and dot: runs in progress. Amber dot and a
+number: that many are holding for you. If you don't see it:
 
 - **Press ⌥⌘A** — it opens the panel from anywhere.
 - **MacBooks with a notch:** icons that don't fit beside the notch are hidden by

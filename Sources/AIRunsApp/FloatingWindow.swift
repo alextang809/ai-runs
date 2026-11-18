@@ -245,7 +245,7 @@ struct FloatingCapsule: View {
         let needs = model.store.needsUserCount
         FloatingSurface(radius: 22) {
             HStack(spacing: 10) {
-                Image(nsImage: Icons.statusImage(needsYou: needs > 0))
+                Image(nsImage: Icons.statusImage(Icons.Status(store: model.store)))
                 HStack(spacing: 5) {
                     Text("\(needs > 0 ? needs : model.store.workingCount)")
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
@@ -314,7 +314,7 @@ struct FloatingCard: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(nsImage: Icons.statusImage(needsYou: model.store.needsUserCount > 0))
+            Image(nsImage: Icons.statusImage(Icons.Status(store: model.store)))
             Picker("", selection: $state.tab) {
                 Text("Runs").tag(FloatingState.Tab.runs)
                 Text("Pinned").tag(FloatingState.Tab.pinned)
