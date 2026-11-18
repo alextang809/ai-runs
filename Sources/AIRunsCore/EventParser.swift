@@ -107,6 +107,7 @@ public enum EventParser {
             let input = payload["tool_input"] as? [String: Any]
             event.activity = ActivityDescriber.describe(toolName: toolName, input: input)
             event.progress = ActivityDescriber.progress(toolName: toolName, input: input)
+            event.plan = ActivityDescriber.planUpdate(toolName: toolName, input: input)
         case "SessionEnd":
             event.kind = .sessionEnd
         default:

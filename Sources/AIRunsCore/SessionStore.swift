@@ -50,6 +50,9 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var progress: RunProgress?
     /// Another agent that sends this session its prompts, e.g. "coordinator".
     public var drivenBy: String?
+    /// The last full step list from Claude desktop's plan tool, so a later
+    /// "advance" call can move it on.
+    public var planSteps: [PlanStep]?
 
     public var isInBackground: Bool { state == .working && ((backgroundTasks ?? 0) > 0 || (scheduled ?? 0) > 0) }
     /// Finished its work: shown, but not counted as needing the user.
@@ -179,7 +182,24 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.approvalDetail = event.approvalDetail ?? current.approvalDetail
         case .toolActivity:
             if let activity = event.activity { current.activity = activity }
-            if let progress = event.progress { current.progress = progress }
+            switch event.plan {
+            case .list(let steps)?:
+                current.planSteps = steps
+                current.progress = RunProgress(steps: steps)
+            case .advance?:
+                // Without a list there is nothing to move on.
+                if let steps = current.planSteps {
+                    let next = ActivityDescriber.advance(steps)
+                    current.planSteps = next
+                    current.progress = RunProgress(steps: next)
+                }
+            case nil:
+                if let progress = event.progress {
+                    current.progress = progress
+                    // Another kind of list (TodoWrite) replaces the desktop plan.
+                    current.planSteps = nil
+                }
+            }
             if current.state != .working {
                 // A tool ran, so the approval or question was answered.
                 current.state = .working
@@ -217,7 +237,10 @@ public struct SessionStore: Codable, Equatable, Sendable {
                 current.outcomeSource = source
                 if outcome == .needsInput { current.approvalDetail = TurnClassifier.lastQuestion(in: event.lastMessage) }
             }
-            if current.progress?.isFinished == true { current.progress = nil }
+            if current.progress?.isFinished == true {
+                current.progress = nil
+                current.planSteps = nil
+            }
         case .sessionEnd, .titleUpdate:
             break
         }
