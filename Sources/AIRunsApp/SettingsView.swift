@@ -197,6 +197,12 @@ struct ClaudeThreadsSection: View {
                 .font(.system(size: 12.5))
         }
         .onAppear { trusted = SidebarClicker.isTrusted }
+        // Permission is granted in System Settings while this window stays
+        // open, so look again rather than only when the window appears.
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+            let now = SidebarClicker.isTrusted
+            if now != trusted { trusted = now }
+        }
     }
 }
 
