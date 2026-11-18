@@ -20,6 +20,14 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: Package app and check its icon
+        run: |
+          chmod +x Scripts/package_app.sh
+          ./Scripts/package_app.sh
+          icns="build/AI Runs.app/Contents/Resources/AppIcon.icns"
+          iconutil -c iconset "$icns" -o /tmp/check.iconset
+          ls /tmp/check.iconset
+          test -f /tmp/check.iconset/icon_512x512@2x.png
       - name: Test browser extension
         working-directory: Tests/BrowserExtension
         run: |

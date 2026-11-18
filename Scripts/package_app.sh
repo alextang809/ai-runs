@@ -19,7 +19,12 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/AIRuns" "$APP/Contents/MacOS/AIRuns"
 cp "$BIN/airuns-hook" "$APP/Contents/MacOS/airuns-hook"
-cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# Build the icon with Apple's own tool so Finder, the Dock and notifications accept it.
+if command -v iconutil >/dev/null; then
+    iconutil -c icns Resources/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
+else
+    cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+fi
 cp -R BrowserExtension "$APP/Contents/Resources/BrowserExtension"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -32,6 +37,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>AI Runs</string>
     <key>CFBundleDisplayName</key><string>AI Runs</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleIconName</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundleVersion</key><string>${VERSION}</string>
