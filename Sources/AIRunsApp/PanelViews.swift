@@ -527,7 +527,7 @@ struct FlyoutBody: View {
                 if let note {
                     VStack(alignment: .leading, spacing: 2) {
                         if let noteLabel { Text(noteLabel).font(.system(size: 11)).foregroundStyle(.secondary) }
-                        Text(note).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                        Text(note).font(.system(size: 12)).lineLimit(8).fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal, 14).padding(.bottom, 8)
                 }
@@ -535,12 +535,16 @@ struct FlyoutBody: View {
                 if let quote, !quote.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
                         if let quoteLabel { Text(quoteLabel).font(.system(size: 11)).foregroundStyle(.secondary) }
-                        Text(quote).font(.system(size: 12)).lineLimit(8).fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
+                        // Not selectable: once clicked, selectable text forgets its
+                        // line limit and is drawn past the box, over the actions.
+                        Text(quote).font(.system(size: 12)).lineLimit(8).truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10).padding(.vertical, 8)
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
+                    // Whatever the text does, it stays inside its box.
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
                     .padding(.horizontal, 14).padding(.bottom, 10)
                 }
