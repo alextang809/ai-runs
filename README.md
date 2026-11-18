@@ -1,54 +1,156 @@
-<p align="center"><img src="docs/icon.png" width="128" alt="AI Runs icon"></p>
+<p align="center"><img src="docs/icon.png" width="112" alt="AI Runs icon"></p>
 
-# AI Runs
+<h1 align="center">AI Runs</h1>
 
-A small macOS menu bar app for people who run several AI sessions at once.
-It shows which Claude Code and Codex sessions are still working and which are
-waiting for you, lets you jump straight back to the right terminal tab, and
-keeps a pinned board of the threads and ideas you don't want to lose track of.
+<p align="center">
+A menu bar app for people who run many Claude Code and Codex sessions at once.<br>
+See which ones need you, what the rest are doing, and jump back to any of them in one click.
+</p>
 
-Everything stays on your Mac. There is no server and no account.
+<p align="center"><a href="README.zh-CN.md">中文说明</a></p>
 
-## What it does
+<p align="center"><img src="docs/panel.png" width="446" alt="The AI Runs panel with sample sessions"></p>
 
-- **Active** — every Claude Code and Codex session appears automatically.
-  Sessions that need you (a finished turn, or a permission prompt) sit at the
-  top with how long they have been waiting. Click one to bring its Terminal,
-  iTerm2 or VS Code window back.
-- **Hover for details** — hover a session to see when it started, what it wants
-  to run, and its last reply, with Open, Pin to Board, Rename and Resolve.
-- **Pinned** — keep the threads you are working on, grouped by project. Each
-  card has one line for the next step; when you pin a session, the next step is
-  suggested from the AI's last question. Cards nobody touched for three days
-  move to "Maybe done".
-- **Continue in a New Chat** — copies a short summary of a card so a long,
-  crowded conversation can be split into a clean new one.
-- **Floating board** — show the pinned board as a small window that stays on
-  top, and drag text or links onto it to make cards.
-- **Pin Front AI Window** — pins the browser tab (Safari, Chrome, Arc, Brave,
-  Edge) or app you were just using.
+When five agents are running in three apps, it's hard to tell which one finished,
+which one is waiting for an answer, and which one quietly stopped. AI Runs puts
+them all in one list in your menu bar:
 
-The menu bar icon shows a number when sessions are waiting for you.
+- **Needs you** — sessions that ask for approval or for your input, with how long they have waited.
+- **Working** — what each one is doing right now ("Building", "Editing routes.ts", step 3 of 7).
+- **Done** — finished sessions, out of the way but still there.
 
-## How it works
+Everything stays on your Mac. No account, no server, nothing is sent anywhere.
 
-AI Runs installs [hooks](https://code.claude.com/docs/en/hooks) for Claude Code
-and [Codex](https://developers.openai.com/codex/hooks). Each hook runs
-`~/.airuns/bin/airuns-hook`, a tiny helper that appends one line to
-`~/.airuns/events.jsonl` and exits. The app reads that file, so it never slows
-the agents down and does not miss events while it is closed.
+> **This is an early build for friends to try.** Expect rough edges, and please
+> tell me what breaks — see [Feedback](#feedback).
 
-| Tool        | Config file               | Events                                                                  |
-| ----------- | ------------------------- | ----------------------------------------------------------------------- |
-| Claude Code | `~/.claude/settings.json` | UserPromptSubmit, Stop, PermissionRequest, Notification, PostToolUse, SessionEnd |
-| Codex       | `~/.codex/hooks.json`     | UserPromptSubmit, Stop, PermissionRequest, PostToolUse                   |
+## Install
 
-The installer only adds or removes entries whose command contains
-`airuns-hook`, and backs up each file once (`*.airuns-backup`) before the first
-change. After installing for Codex, run `/hooks` in Codex once and trust the new
-hooks.
+You need a Mac with Apple silicon (M1 or later) and macOS 14 or later.
 
-## Build and run
+1. Download **AI-Runs.zip** from the [latest release](https://github.com/alextang809/ai-runs/releases/latest)
+   and unzip it.
+2. Drag **AI Runs** into your **Applications** folder.
+3. Open it. Because the app isn't notarized by Apple yet, macOS blocks it the
+   first time:
+   - Open **System Settings → Privacy & Security**, scroll down to
+     "AI Runs was blocked…", click **Open Anyway**, and confirm.
+   - Or run this once in Terminal:
+     `xattr -dr com.apple.quarantine "/Applications/AI Runs.app"`
+
+On an Intel Mac, [build it from source](#build-from-source).
+
+## Set up (2 minutes)
+
+AI Runs opens its settings on first launch.
+
+1. **Claude Code: click Install.** This adds AI Runs to `~/.claude/settings.json`.
+   It works for Claude Code in the terminal, in VS Code and in the Claude desktop app.
+2. **Codex: click Install**, then open Codex. It shows **Review hooks** with four
+   AI Runs hooks — click **Allow all**. Until you do, Codex sends nothing.
+3. Start or continue any session. It appears in the menu bar within a second.
+
+macOS may ask for two permissions later, each once:
+
+| When | Permission | Why |
+|---|---|---|
+| You first click a Terminal or iTerm2 session | Automation | To bring the right tab to the front |
+| You first click a Claude app session | Accessibility | To select that thread in Claude's sidebar |
+
+## Can't see the icon?
+
+The icon is three small bars: <img src="docs/icon.png" width="14">. If you don't see it:
+
+- **Press ⌥⌘A** — it opens the panel from anywhere.
+- **MacBooks with a notch:** icons that don't fit beside the notch are hidden by
+  macOS. Remove a few other icons, or use Bartender / Ice and put AI Runs in the
+  always-shown section, near the clock.
+- In Settings you can also turn on **Also show AI Runs in the Dock**.
+
+## Using it
+
+**Each row** shows the app the session runs in (its real icon), its name (the
+same one Claude or Codex shows in its sidebar), its state, where it runs, what
+it's doing, and a small timeline of its last hour.
+
+| You see | Means |
+|---|---|
+| **APPROVE** (solid) | It wants to run a command or edit a file and is waiting for your OK |
+| **NEEDS INPUT** (solid) | It asked you a question, or said it's blocked |
+| **REPLIED** (light) | It finished a turn, and AI Runs can't tell whether it needs you |
+| **WORKING** (outline) | It's running; the line below says what it's doing |
+| **SCHEDULED / BACKGROUND** (grey) | It's waiting on its own timer or background task and continues by itself |
+| **DONE ✓** (grey) | It finished what you asked |
+
+Colour tells you the tool: **Claude** in its clay orange, **Codex** in black
+(white in dark mode). Everything else is grey.
+
+How "done" vs "needs input" is decided, from most to least certain: Claude's
+ask-the-user tool, a completed step list, then the wording of the last message
+(English and Chinese), then Apple's on-device model on macOS 26. When it can't
+tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
+
+**Click a row** to go back to that session:
+
+| The session runs in | Click does |
+|---|---|
+| Terminal or iTerm2 | Selects its tab; if the tab was closed, reopens the session in a new tab in the same folder |
+| VS Code, Cursor | Opens the project window |
+| Codex app | Opens that exact thread |
+| Claude app | Brings Claude forward and selects the thread in its sidebar |
+
+**Other things you can do**
+
+- **Remove** a session: hover and click **×**, or right-click → Remove from List.
+  **Undo** (⌘Z) for a few seconds. It comes back only when you message it again.
+- **Rename**, **Pin to Board** and more: right-click a row, or hover it for details.
+- **Pinned board:** keep threads and quick notes you don't want to lose, grouped
+  by project. **Show Pinned Board on Screen** turns it into a small floating window;
+  drag text or links onto it to make cards.
+- **Pin Front AI Window:** pins the browser tab or app you were just in (for
+  claude.ai or chatgpt.com chats, which AI Runs can't track automatically yet).
+
+## Privacy
+
+AI Runs only reads and writes files on your Mac:
+
+- It **adds hooks** to `~/.claude/settings.json` and `~/.codex/hooks.json`
+  (only entries whose command contains `airuns-hook`; each file is backed up once
+  as `*.airuns-backup`). Each hook appends one line to `~/.airuns/events.jsonl`.
+- It **reads thread names** from the Claude app's session list and from Codex's
+  `~/.codex/state_5.sqlite` (read-only).
+- On macOS 26 it may ask **Apple's on-device model** to name a session or judge
+  a reply. That runs on your Mac.
+
+It makes no network requests.
+
+## Feedback
+
+Tell me what's confusing, wrong or missing — the most useful things are:
+
+- a screenshot of the panel (blur anything private),
+- what you expected to happen, and what happened instead,
+- your macOS version and whether you use Claude Code, Codex, or both.
+
+Open an [issue](https://github.com/alextang809/ai-runs/issues) or just message me.
+
+## Uninstall
+
+1. Open AI Runs settings and click **Remove** for Claude Code and for Codex.
+2. Quit AI Runs and drag it from Applications to the Trash.
+3. Delete its data: `rm -rf ~/.airuns`
+
+## Known limitations
+
+- Sessions on the web (claude.ai, chatgpt.com, cloud agents) aren't tracked yet;
+  pin them with Pin Front AI Window.
+- Ghostty, Warp and other terminals can't be scripted, so a click brings the app
+  forward but can't pick the tab.
+- The build is ad-hoc signed, so after each update macOS may ask for the
+  Accessibility permission again.
+- Usage limits per tool aren't shown yet.
+
+## Build from source
 
 Requires macOS 14 or later and Xcode 16 (or the Swift 6 toolchain).
 
@@ -59,63 +161,13 @@ cd ai-runs
 open "build/AI Runs.app"
 ```
 
-On first launch AI Runs opens its settings so you can install the hooks. The
-first time you jump to a Terminal or iTerm2 tab, macOS asks whether AI Runs may
-control that app; allow it so the right tab comes to the front.
-
 Run the tests with `swift test`.
 
-## Project layout
-
-- `Sources/AIRunsCore` — event parsing, the session state machine, the pinned
-  board, the event log and the hook installer. No UI; fully unit tested.
+- `Sources/AIRunsCore` — event parsing, the session state machine, outcome
+  detection, the pinned board and the hook installer. No UI; unit tested.
 - `Sources/airuns-hook` — the helper the hooks call.
 - `Sources/AIRunsApp` — the menu bar app (AppKit + SwiftUI).
-- `Scripts/package_app.sh` — builds `AI Runs.app`.
-
-## Known limitations
-
-- Jumping to the exact tab works for Terminal and iTerm2. VS Code and Cursor
-  open the project folder; other terminals are brought to the front and the
-  `claude --resume` / `codex resume` command is copied to the clipboard.
-- GitHub Copilot in VS Code can load hooks from `~/.claude/settings.json`, so
-  its agent sessions may appear as Claude Code sessions.
-- Desktop chat apps (ChatGPT, Claude) don't report progress; pin them with
-  Pin Front AI Window and track them on the board.
-
-## Clicking a session
-
-One click takes you back to where the session lives, in the app you use for it.
-You never have to paste a command.
-
-| The session runs in | Click does |
-|---|---|
-| Terminal or iTerm2 | Selects its tab. If the tab was closed, reopens the session in a new tab, in its folder. |
-| VS Code, Cursor | Opens the project window. |
-| Codex app | Opens the exact thread (`codex://threads/<id>`). |
-| Claude app | Brings Claude forward and selects the thread by its sidebar name (asks once for Accessibility). Otherwise it tells you the thread's name and copies it. |
-| claude.ai, chatgpt.com | Pin the browser tab with Pin Front AI Window; the card opens that page. Automatic tracking needs the planned browser extension. |
-
-Terminal users also get **Copy Resume Command** in the session's details.
-
-## Roadmap
-
-- Remaining usage for each tool
-- Drop a screenshot to make a card, with the title read from the image
-- GitHub Copilot CLI and VS Code agent hooks
-- Browser extension for claude.ai and chatgpt.com conversations
-- Global shortcut for Pin Front AI Window
-
-## 中文简介
-
-AI Runs 是一个 macOS 菜单栏小工具，给同时开很多个 AI 会话的人用：
-
-- 自动列出 Claude Code 和 Codex 的会话，等你回复或等你批准的排在最上面，并显示等了多久，点一下回到对应的终端标签页；
-- 鼠标停在会话上，可以看到开始时间、它想执行的命令和最后一条回复；
-- 钉板：按项目分组记录正在推进的线程和碎片想法，每张卡片一句“下一步”，三天没动自动收进“Maybe done”；
-- 钉板可以变成屏幕上常驻的小窗，往里拖文字或链接就生成卡片。
-
-所有数据只存在本机的 `~/.airuns`。
+- `collab/` — notes from Claude and Codex working on this project together.
 
 ## License
 
