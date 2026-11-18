@@ -180,6 +180,7 @@ struct MenuColumn: View {
 
     @ViewBuilder private var activeSection: some View {
         let sessions = model.store.ordered()
+        let overlap = Overlap.sameRepo(sessions)
         VStack(alignment: .leading, spacing: 0) {
             if sessions.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -202,15 +203,15 @@ struct MenuColumn: View {
                 let done = sessions.filter { $0.isDone }
                 if !needs.isEmpty {
                     SectionLabel(title: "Needs you", count: needs.count)
-                    rows(needs)
+                    rows(needs, overlap: overlap)
                 }
                 if !working.isEmpty {
                     SectionLabel(title: "Working", count: working.count)
-                    rows(working)
+                    rows(working, overlap: overlap)
                 }
                 if !done.isEmpty {
                     SectionLabel(title: "Done", count: done.count)
-                    rows(done)
+                    rows(done, overlap: overlap)
                 }
                 LifelineLegend()
             }
@@ -218,11 +219,11 @@ struct MenuColumn: View {
         .padding(.vertical, 3)
     }
 
-    private func rows(_ sessions: [Session]) -> some View {
+    private func rows(_ sessions: [Session], overlap: [String: [Session]]) -> some View {
         VStack(spacing: 0) {
             ForEach(sessions) { session in
                 SessionRow(session: session, lifeline: model.store.lifeline(for: session.id, now: model.now),
-                           now: model.now, ui: ui,
+                           now: model.now, alsoHere: (overlap[session.id] ?? []).map(\.title), ui: ui,
                            rename: { actions.renameSession(session.id) },
                            pin: { model.pin(sessionId: session.id) },
                            remove: {
@@ -605,6 +606,9 @@ struct SessionFlyout: View {
             default: verdict = "Can’t tell if it’s done"
             }
             rows.append(("Status", "\(verdict) · \(source.explanation.lowercased())"))
+        }
+        if let others = Overlap.sameRepo(Array(model.store.sessions.values))[session.id] {
+            rows.append(("Also running here", others.map(\.title).sorted().joined(separator: ", ")))
         }
         rows.append(("Started", Self.clock.string(from: session.startedAt)))
         // Only when AI Runs saw the turn start; otherwise the number means nothing.

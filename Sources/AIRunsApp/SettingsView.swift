@@ -178,6 +178,7 @@ struct NotificationSection: View {
     @AppStorage(NotificationSettings.key(.input)) private var input = true
     @AppStorage(NotificationSettings.key(.replied)) private var replied = false
     @AppStorage(NotificationSettings.key(.done)) private var done = false
+    @AppStorage(NotificationSettings.key(.stalled)) private var stalled = false
     @AppStorage(NotificationSettings.remindKey) private var remind = true
 
     var body: some View {
@@ -207,6 +208,7 @@ struct NotificationSection: View {
                 Toggle("Questions and blockers (NEEDS INPUT)", isOn: $input)
                 Toggle("Unclear replies (REPLIED)", isOn: $replied)
                 Toggle("Finished work (DONE)", isOn: $done)
+                Toggle("Stalled runs (NO UPDATE)", isOn: $stalled)
                 Toggle("Remind me once if it's still waiting after 15 minutes", isOn: $remind)
             }
             .font(.system(size: 12.5))
