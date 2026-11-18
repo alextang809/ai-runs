@@ -131,6 +131,8 @@ public struct AgentEvent: Equatable, Sendable {
     public var toolTitle: String?
     /// The page of a web chat.
     public var url: String?
+    /// A Claude desktop plan call: its whole step list, or a step forward.
+    public var plan: PlanUpdate?
 
     public init(tool: AgentTool, kind: EventKind, sessionId: String, at: Date, prompt: String? = nil,
                 lastMessage: String? = nil, approvalDetail: String? = nil, cwd: String? = nil,

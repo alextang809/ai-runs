@@ -528,6 +528,115 @@ final class ActivityTests: XCTestCase {
         XCTAssertNil(store.lastSeen(.claudeCode))
     }
 
+    // MARK: Claude desktop plans (mcp__ccd_turn__update_plan)
+
+    private func planEvent(_ input: [String: Any], at seconds: TimeInterval) -> AgentEvent {
+        let payload: [String: Any] = ["session_id": "s1", "hook_event_name": "PostToolUse",
+                                      "tool_name": "mcp__ccd_turn__update_plan", "tool_input": input]
+        let line = HookRecord.makeLine(tool: "claude-code", payload: try! JSONSerialization.data(withJSONObject: payload),
+                                       environment: [:], tty: nil, receivedAt: Date(timeIntervalSince1970: seconds))
+        return EventParser.parse(line: line)!
+    }
+
+    private let desktopPlan: [String: Any] = ["scope": "turn", "items": [
+        ["content": "Read the code", "status": "completed"],
+        ["content": "Build the lens", "status": "in_progress"],
+        ["content": "Write tests", "status": "pending"],
+        ["content": "Open the PR", "status": "pending"],
+    ]]
+
+    func testDesktopPlanFullList() throws {
+        XCTAssertEqual(ActivityDescriber.progress(toolName: "mcp__ccd_turn__update_plan", input: desktopPlan),
+                       RunProgress(done: 1, total: 4, current: "Build the lens"))
+        XCTAssertEqual(ActivityDescriber.describe(toolName: "mcp__ccd_turn__update_plan", input: desktopPlan), "Updating its plan")
+        let noneStarted: [String: Any] = ["items": [["content": "A", "status": "pending"], ["content": "B", "status": "pending"]]]
+        XCTAssertEqual(ActivityDescriber.progress(toolName: "mcp__ccd_turn__update_plan", input: noneStarted)?.summary, "0/2 · A")
+        XCTAssertNil(ActivityDescriber.progress(toolName: "mcp__ccd_turn__update_plan", input: ["advance": true]))
+
+        let event = planEvent(desktopPlan, at: 1)
+        XCTAssertEqual(event.kind, .toolActivity)
+        XCTAssertEqual(event.progress, RunProgress(done: 1, total: 4, current: "Build the lens"))
+        var store = SessionStore()
+        store.apply(event)
+        let session = try XCTUnwrap(store.sessions["claude-code:s1"])
+        XCTAssertEqual(session.progress?.summary, "1/4 · Build the lens")
+        XCTAssertEqual(session.planSteps?.map(\.status), ["completed", "in_progress", "pending", "pending"])
+    }
+
+    func testDesktopPlanAdvanceAfterList() throws {
+        var store = SessionStore()
+        store.apply(planEvent(desktopPlan, at: 1))
+        let advance = planEvent(["advance": true], at: 2)
+        XCTAssertEqual(advance.plan, .advance)
+        XCTAssertNil(advance.progress)
+        store.apply(advance)
+        let session = try XCTUnwrap(store.sessions["claude-code:s1"])
+        XCTAssertEqual(session.progress, RunProgress(done: 2, total: 4, current: "Write tests"))
+        XCTAssertEqual(session.planSteps?.map(\.status), ["completed", "completed", "in_progress", "pending"])
+    }
+
+    func testDesktopPlanAdvanceWithNothingInProgress() {
+        let steps = [PlanStep(content: "A", status: "pending"), PlanStep(content: "B", status: "pending"),
+                     PlanStep(content: "C", status: "pending")]
+        XCTAssertEqual(ActivityDescriber.advance(steps).map(\.status), ["completed", "in_progress", "pending"])
+    }
+
+    func testDesktopPlanAdvanceBeforeListIsIgnored() throws {
+        var store = SessionStore()
+        store.apply(planEvent(["advance": true], at: 1))
+        let session = try XCTUnwrap(store.sessions["claude-code:s1"])
+        XCTAssertNil(session.progress)
+        XCTAssertNil(session.planSteps)
+        XCTAssertEqual(session.activity, "Updating its plan")
+    }
+
+    func testDesktopPlanRepeatedAdvancesFinish() throws {
+        var store = SessionStore()
+        store.apply(planEvent(desktopPlan, at: 1))
+        for second in 2...8 { store.apply(planEvent(["advance": true], at: TimeInterval(second))) }
+        let session = try XCTUnwrap(store.sessions["claude-code:s1"])
+        let progress = try XCTUnwrap(session.progress)
+        XCTAssertEqual(progress.done, progress.total)
+        XCTAssertEqual(progress.total, 4)
+        XCTAssertTrue(progress.isFinished)
+        XCTAssertNil(progress.current)
+        // A finished plan is cleared when the turn ends, like the others.
+        store.apply(event(.turnEnd, at: 9))
+        XCTAssertNil(store.sessions["claude-code:s1"]?.progress)
+        XCTAssertNil(store.sessions["claude-code:s1"]?.planSteps)
+    }
+
+    func testTodoWriteReplacesDesktopPlan() throws {
+        var store = SessionStore()
+        store.apply(planEvent(desktopPlan, at: 1))
+        store.apply(event(.toolActivity, at: 2, progress: RunProgress(done: 0, total: 1, current: "X")))
+        store.apply(planEvent(["advance": true], at: 3))
+        let session = try XCTUnwrap(store.sessions["claude-code:s1"])
+        XCTAssertEqual(session.progress, RunProgress(done: 0, total: 1, current: "X"))
+        XCTAssertNil(session.planSteps)
+    }
+
+    func testSessionsFileWithoutPlanStepsStillLoads() throws {
+        let json = """
+        {"sessions":{"claude-code:s1":{"tool":"claude-code","sessionId":"s1","title":"T","state":"working",
+        "startedAt":0,"turnStartedAt":0,"lastEventAt":0,"terminal":{},
+        "progress":{"done":1,"total":3,"current":"B"}}}}
+        """
+        var store = try JSONDecoder().decode(SessionStore.self, from: Data(json.utf8))
+        let session = try XCTUnwrap(store.sessions["claude-code:s1"])
+        XCTAssertNil(session.planSteps)
+        XCTAssertEqual(session.progress, RunProgress(done: 1, total: 3, current: "B"))
+        // An advance on a session loaded without a list changes nothing.
+        store.apply(planEvent(["advance": true], at: 1))
+        XCTAssertEqual(store.sessions["claude-code:s1"]?.progress, RunProgress(done: 1, total: 3, current: "B"))
+
+        // And the new field survives a save and load.
+        store.apply(planEvent(desktopPlan, at: 2))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        try JSONFile.save(store, to: url)
+        XCTAssertEqual(JSONFile.load(SessionStore.self, from: url)?.sessions["claude-code:s1"]?.planSteps?.count, 4)
+    }
+
     func testParserFillsActivity() {
         let payload: [String: Any] = ["session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Bash",
                                       "tool_input": ["command": "cd x && swift build"]]

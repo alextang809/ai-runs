@@ -16,12 +16,43 @@ public struct RunProgress: Codable, Equatable, Sendable {
 
     public var isFinished: Bool { total > 0 && done >= total }
 
+    /// Counts a step list: the current step is the one in progress, else the
+    /// first one not completed.
+    public init(steps: [PlanStep]) {
+        let current = steps.first { $0.status == PlanStep.inProgress }
+            ?? steps.first { $0.status != PlanStep.completed }
+        self.init(done: steps.filter { $0.status == PlanStep.completed }.count, total: steps.count,
+                  current: current.map { TextUtils.truncate($0.content, limit: 60) })
+    }
+
     /// "2/8 · Build the lens".
     public var summary: String {
         var text = "\(done)/\(total)"
         if let current, !current.isEmpty { text += " · \(current)" }
         return text
     }
+}
+
+/// One step of a Claude desktop plan (`mcp__ccd_turn__update_plan`).
+public struct PlanStep: Codable, Equatable, Sendable {
+    public static let pending = "pending"
+    public static let inProgress = "in_progress"
+    public static let completed = "completed"
+
+    public var content: String
+    /// `pending`, `in_progress` or `completed`.
+    public var status: String
+
+    public init(content: String, status: String) {
+        self.content = content
+        self.status = status
+    }
+}
+
+/// What a Claude desktop plan call says: the whole list, or "one step further".
+public enum PlanUpdate: Equatable, Sendable {
+    case list([PlanStep])
+    case advance
 }
 
 /// Turns a tool call from a hook payload into a few words a person would use:
@@ -32,6 +63,7 @@ public enum ActivityDescriber {
         let input = input ?? [:]
         let lower = toolName.lowercased()
 
+        if lower == ActivityDescriber.desktopPlanTool { return "Updating its plan" }
         if lower.hasPrefix("mcp__") {
             // mcp__server__tool → "Using server"
             let parts = toolName.components(separatedBy: "__")
@@ -67,9 +99,18 @@ public enum ActivityDescriber {
         }
     }
 
-    /// Reads a step list from `TodoWrite` (Claude Code) or `update_plan` (Codex).
+    /// The tool Claude desktop plans with, lowercased.
+    public static let desktopPlanTool = "mcp__ccd_turn__update_plan"
+
+    /// Reads a step list from `TodoWrite` (Claude Code), `update_plan` (Codex) or
+    /// a full list sent to Claude desktop's plan tool. An `advance` call carries no
+    /// list; the store applies it with `planUpdate` and `advance`.
     public static func progress(toolName: String?, input: [String: Any]?) -> RunProgress? {
         guard let toolName = toolName?.lowercased(), let input else { return nil }
+        if toolName == desktopPlanTool {
+            guard case .list(let steps)? = planUpdate(toolName: toolName, input: input) else { return nil }
+            return RunProgress(steps: steps)
+        }
         let items: [[String: Any]]
         let textKeys: [String]
         switch toolName {
@@ -93,6 +134,47 @@ public enum ActivityDescriber {
         let current = items.first { ($0["status"] as? String) == "in_progress" }
             ?? items.first { ($0["status"] as? String) != "completed" }
         return RunProgress(done: done, total: items.count, current: current.flatMap(text))
+    }
+
+    /// Reads a Claude desktop plan call: `{items: [{content, status}], scope}` is the
+    /// whole list, `{advance}` moves it one step on. Nil for other tools.
+    public static func planUpdate(toolName: String?, input: [String: Any]?) -> PlanUpdate? {
+        guard toolName?.lowercased() == desktopPlanTool, let input else { return nil }
+        if let items = input["items"] as? [[String: Any]] {
+            let steps = items.map { item -> PlanStep in
+                let text = ["content", "activeForm", "title", "step"].lazy
+                    .compactMap { item[$0] as? String }.first { !$0.isEmpty } ?? ""
+                let status = (item["status"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? PlanStep.pending
+                return PlanStep(content: TextUtils.truncate(text, limit: 60), status: status)
+            }
+            return steps.isEmpty ? nil : .list(steps)
+        }
+        if let value = input["advance"] {
+            // The value's meaning is unverified; only an explicit false or 0 is read as "no".
+            if let flag = value as? Bool, !flag { return nil }
+            return .advance
+        }
+        return nil
+    }
+
+    /// Moves a plan one step on: the step in progress is completed and the next
+    /// pending one starts. With none in progress, the first pending step is
+    /// completed and the one after it starts. A finished plan stays as it is.
+    public static func advance(_ steps: [PlanStep]) -> [PlanStep] {
+        var steps = steps
+        let finished: Int
+        if let index = steps.firstIndex(where: { $0.status == PlanStep.inProgress }) {
+            finished = index
+        } else if let index = steps.firstIndex(where: { $0.status == PlanStep.pending }) {
+            finished = index
+        } else {
+            return steps
+        }
+        steps[finished].status = PlanStep.completed
+        let next = steps.indices.first { $0 > finished && steps[$0].status == PlanStep.pending }
+            ?? steps.indices.first { steps[$0].status == PlanStep.pending }
+        if let next { steps[next].status = PlanStep.inProgress }
+        return steps
     }
 
     /// A shell command in words. Leading `cd …` steps are skipped.
