@@ -133,6 +133,9 @@ public struct AgentEvent: Equatable, Sendable {
     public var url: String?
     /// A Claude desktop plan call: its whole step list, or a step forward.
     public var plan: PlanUpdate?
+    /// The Claude project thread that sent this prompt (`<wake>`), which this
+    /// session now works for.
+    public var thread: ProjectThread?
 
     public init(tool: AgentTool, kind: EventKind, sessionId: String, at: Date, prompt: String? = nil,
                 lastMessage: String? = nil, approvalDetail: String? = nil, cwd: String? = nil,

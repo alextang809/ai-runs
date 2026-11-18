@@ -10,8 +10,11 @@ public enum SessionState: String, Codable, Sendable {
 }
 
 /// One AI conversation that is still open in the panel.
+///
+/// Usually one local session. For a Claude project thread it is the thread,
+/// and `sessionId` is the local session that worked for it most recently.
 public struct Session: Codable, Equatable, Identifiable, Sendable {
-    public var id: String { Session.key(tool: tool, sessionId: sessionId) }
+    public var id: String { thread.map { Session.key(tool: tool, thread: $0) } ?? Session.key(tool: tool, sessionId: sessionId) }
     public var tool: AgentTool
     public var sessionId: String
     public var title: String
@@ -53,16 +56,35 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// The last full step list from Claude desktop's plan tool, so a later
     /// "advance" call can move it on.
     public var planSteps: [PlanStep]?
+    /// Set when this row is a Claude project thread rather than one local session.
+    public var thread: ProjectThread?
+    /// When a hook last reported on this row.
+    public var lastHookAt: Date?
+    /// Set while the row's state comes from Claude's own Threads list rather
+    /// than from hooks (a thread working in the cloud).
+    public var native: NativeSighting?
+    /// Set by "Ignore for Now"; see `isIgnored`.
+    public var ignored: Bool?
 
     public var isInBackground: Bool { state == .working && ((backgroundTasks ?? 0) > 0 || (scheduled ?? 0) > 0) }
     /// Finished its work: shown, but not counted as needing the user.
     public var isDone: Bool { state == .yourTurn && outcome == .done }
     /// Waiting on the user: approval, a question, or a reply AI Runs can't classify.
-    public var needsUser: Bool { state.needsUser && !isDone }
+    public var needsUser: Bool { waitsOnUser && !isIgnored }
+    /// The same, whether or not the user chose to ignore it.
+    public var waitsOnUser: Bool { state.needsUser && !isDone }
+    /// The user said "I know" to this wait: it stays in sight but no longer
+    /// counts or reminds. Ends by itself when the run moves on.
+    public var isIgnored: Bool { ignored == true && state == .yourTurn && !isDone }
 
     public var project: String { TextUtils.projectName(fromPath: cwd) }
 
     public static func key(tool: AgentTool, sessionId: String) -> String { "\(tool.rawValue):\(sessionId)" }
+
+    /// The row of a project thread, whichever local session works for it.
+    public static func key(tool: AgentTool, thread: ProjectThread) -> String {
+        "\(tool.rawValue):project:\(thread.projectId):\(thread.threadId)"
+    }
 
     public static func genericTitle(for tool: AgentTool) -> String { "\(tool.displayName) session" }
 
@@ -78,8 +100,39 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// What Claude's Threads list said about a thread, and when.
+public struct NativeSighting: Codable, Equatable, Sendable {
+    public var state: NativeThreadState
+    public var seenAt: Date
+    /// True once the sighting is too old to claim a state.
+    public var stale: Bool?
+
+    public init(state: NativeThreadState, seenAt: Date, stale: Bool? = nil) {
+        self.state = state
+        self.seenAt = seenAt
+        self.stale = stale
+    }
+
+    /// A state other than "Waiting on you" is only claimed this long after it was seen.
+    public static let freshFor: TimeInterval = 10 * 60
+}
+
+/// A local session working for a conversation that has its own row (a Claude
+/// project thread). One thread can have several over time; the newest one
+/// it woke speaks for the row.
+public struct ExecutorLink: Codable, Equatable, Sendable {
+    /// The row's key.
+    public var conversation: String
+    public var thread: ProjectThread
+    /// When the thread last woke this session.
+    public var linkedAt: Date
+    /// How the link was learned: "wake" (the prompt's wrapper).
+    public var source: String
+}
+
 /// All open sessions, driven by hook events. Pure value type so it is easy to test.
 public struct SessionStore: Codable, Equatable, Sendable {
+    /// Rows by `Session.id`.
     public private(set) var sessions: [String: Session] = [:]
     /// When each tool last sent any event, keyed by `AgentTool.rawValue`.
     /// Lets the app tell "nothing running" apart from "hooks not firing".
@@ -93,19 +146,41 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// The tools' own internal threads (Codex naming and review helpers).
     /// Never shown.
     public private(set) var ignored: Set<String>? = nil
+    /// Local sessions (by `Session.key(tool:sessionId:)`) that work for a project
+    /// thread. A session without a link is its own row.
+    public private(set) var executors: [String: ExecutorLink]? = nil
+    /// Removed thread rows that were waiting on the user when removed; seeing
+    /// them still waiting doesn't bring them back.
+    public private(set) var dismissedWaiting: Set<String>? = nil
 
     public func lastSeen(_ tool: AgentTool) -> Date? { toolLastSeen?[tool.rawValue] }
 
     public init() {}
 
     public mutating func apply(_ event: AgentEvent) {
-        let key = Session.key(tool: event.tool, sessionId: event.sessionId)
-        var session = sessions[key]
+        let executor = Session.key(tool: event.tool, sessionId: event.sessionId)
         var seen = toolLastSeen ?? [:]
         seen[event.tool.rawValue] = max(seen[event.tool.rawValue] ?? event.at, event.at)
         toolLastSeen = seen
 
-        if ignored?.contains(key) == true { return }
+        if ignored?.contains(executor) == true { return }
+        if event.kind == .promptStart, let thread = event.thread {
+            link(executor: executor, event: event, to: thread)
+        }
+        let linked = executors?[executor]
+        let key = linked?.conversation ?? executor
+        if linked != nil, let row = sessions[key], row.sessionId != event.sessionId {
+            if event.kind == .needsApproval || event.kind == .question {
+                // Another session of this thread is blocked on the user: that
+                // matters more than what the newest one is doing, so it takes the row.
+                sessions[key]?.sessionId = event.sessionId
+            } else {
+                // An earlier session of this thread; the newest one speaks for the row.
+                if event.kind == .sessionEnd { executors?[executor] = nil }
+                return
+            }
+        }
+        var session = sessions[key]
         if event.kind == .titleUpdate {
             // Only for chats AI Runs already follows; opening a page isn't a session.
             guard var session = sessions[key] else { return }
@@ -124,6 +199,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
         if event.kind == .sessionEnd {
             sessions[key] = nil
             dismissed?.remove(key)
+            executors?[executor] = nil
             record(nil, for: key, at: event.at)
             return
         }
@@ -144,11 +220,17 @@ public struct SessionStore: Codable, Equatable, Sendable {
                               state: .working, startedAt: event.at, turnStartedAt: event.at,
                               waitingSince: nil, lastEventAt: event.at, lastMessage: nil,
                               approvalDetail: nil, transcriptPath: event.transcriptPath,
-                              terminal: event.terminal, backgroundTasks: nil, firstPrompt: nil, titleIsCustom: nil)
+                              terminal: event.terminal, backgroundTasks: nil, firstPrompt: nil, titleIsCustom: nil,
+                              thread: linked?.thread)
         }
         guard var current = session else { return }
 
         current.lastEventAt = max(current.lastEventAt, event.at)
+        // A hook knows more than a look at Claude's window.
+        current.lastHookAt = event.at
+        current.native = nil
+        // Whatever it reports next is a new moment.
+        current.ignored = nil
         if let cwd = event.cwd { current.cwd = cwd }
         if let path = event.transcriptPath { current.transcriptPath = path }
         if event.terminal != TerminalContext() { current.terminal = event.terminal }
@@ -248,6 +330,142 @@ public struct SessionStore: Codable, Equatable, Sendable {
         record(SpanKind(current), for: key, at: event.at)
     }
 
+    /// The thread woke this local session: from now on the session works for
+    /// the thread's row, and as the newest one it speaks for it.
+    private mutating func link(executor: String, event: AgentEvent, to thread: ProjectThread) {
+        let key = Session.key(tool: event.tool, thread: thread)
+        var links = executors ?? [:]
+        let wasLinked = links[executor] != nil
+        links[executor] = ExecutorLink(conversation: key, thread: thread, linkedAt: event.at, source: "wake")
+        if links.count > 500 {
+            let newest = links.sorted { $0.value.linkedAt > $1.value.linkedAt }.prefix(250)
+            links = Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
+        }
+        executors = links
+
+        // The session's own row, from before AI Runs knew it works for a thread,
+        // becomes the thread's row (or goes, when the thread already has one).
+        if !wasLinked, var own = sessions.removeValue(forKey: executor) {
+            if sessions[key] == nil, dismissed?.contains(key) != true {
+                own.thread = thread
+                sessions[key] = own
+                if history?[key] == nil, let spans = history?[executor] { history?[key] = spans }
+                history?[executor] = nil
+            } else {
+                record(nil, for: executor, at: event.at)
+            }
+        }
+        sessions[key]?.sessionId = event.sessionId
+    }
+
+    // MARK: - Claude's Threads list
+
+    /// How long after a hook event the hooks alone speak for a row.
+    static let hookGrace: TimeInterval = 120
+
+    /// Folds in what Claude's Threads list showed at `at`. This is how threads
+    /// that work only in the cloud get a row.
+    ///
+    /// - A thread with no row gets one when it is working or wants the user;
+    ///   idle threads AI Runs never saw active stay out.
+    /// - A row hooks reported on in the last two minutes keeps its hook state.
+    /// - Threads missing from `sightings` are untouched: the list is often
+    ///   only partly drawn, so absence means nothing.
+    public mutating func observe(_ sightings: [ThreadSighting], at: Date, tool: AgentTool = .claudeCode) {
+        for sighting in sightings {
+            let key = Session.key(tool: tool, thread: sighting.thread)
+            if let state = sighting.state, state != .waitingOnYou { dismissedWaiting?.remove(key) }
+
+            guard var row = sessions[key] else {
+                guard let state = sighting.state, state != .idle else { continue }
+                if dismissed?.contains(key) == true {
+                    // Like an approval request: only wanting the user brings a removed row back.
+                    guard state == .waitingOnYou, dismissedWaiting?.contains(key) != true else { continue }
+                    dismissed?.remove(key)
+                }
+                var created = Session(tool: tool, sessionId: "", title: sighting.title ?? "Claude thread", cwd: nil,
+                                      state: .working, startedAt: at, turnStartedAt: at, waitingSince: nil,
+                                      lastEventAt: at, lastMessage: nil, approvalDetail: nil, transcriptPath: nil,
+                                      terminal: TerminalContext(bundleId: "com.anthropic.claudefordesktop"),
+                                      backgroundTasks: nil, firstPrompt: nil, titleIsCustom: nil,
+                                      titleSettled: sighting.title == nil ? nil : true, thread: sighting.thread)
+                Self.drive(&created, to: state, at: at)
+                sessions[key] = created
+                record(SpanKind(created), for: key, at: at)
+                continue
+            }
+
+            // Claude's own name for the thread beats one made from a request.
+            if let title = sighting.title, row.titleIsCustom != true {
+                row.title = title
+                row.titleSettled = true
+            }
+            if let state = sighting.state {
+                let hookIsFresh = at.timeIntervalSince(row.lastHookAt ?? row.lastEventAt) < Self.hookGrace
+                if row.native != nil || !(hookIsFresh || Self.agrees(row, with: state)) {
+                    Self.drive(&row, to: state, at: at)
+                    record(SpanKind(row), for: key, at: at)
+                }
+            }
+            sessions[key] = row
+        }
+        expireSightings(now: at)
+    }
+
+    /// Rows whose last look at Claude's list is too old stop claiming a state.
+    /// "Waiting on you" is kept: it stays true until the user answers.
+    public mutating func expireSightings(now: Date) {
+        for (key, row) in sessions {
+            guard let native = row.native, native.stale != true, native.state != .waitingOnYou,
+                  now.timeIntervalSince(native.seenAt) > NativeSighting.freshFor else { continue }
+            sessions[key]?.native?.stale = true
+            sessions[key]?.state = .yourTurn
+            sessions[key]?.outcome = .done
+            sessions[key]?.outcomeSource = nil
+            sessions[key]?.waitingSince = native.seenAt
+            record(nil, for: key, at: now)
+        }
+    }
+
+    private static func target(_ state: NativeThreadState) -> (state: SessionState, outcome: TurnOutcome?) {
+        switch state {
+        case .working: return (.working, nil)
+        case .waitingOnYou: return (.yourTurn, .needsInput)
+        case .readyForReview: return (.yourTurn, .replied)
+        case .idle: return (.yourTurn, .done)
+        }
+    }
+
+    /// True when the hooks already say what Claude's list says.
+    private static func agrees(_ row: Session, with state: NativeThreadState) -> Bool {
+        if state == .waitingOnYou, row.state == .needsApproval { return true }
+        let wanted = target(state)
+        return row.state == wanted.state && row.outcome == wanted.outcome
+    }
+
+    /// Claude's list now speaks for the row.
+    private static func drive(_ row: inout Session, to state: NativeThreadState, at: Date) {
+        let wanted = target(state)
+        let changed = row.native?.stale == true || row.state != wanted.state || row.outcome != wanted.outcome
+        row.native = NativeSighting(state: state, seenAt: at)
+        row.lastEventAt = max(row.lastEventAt, at)
+        guard changed else { return }
+        row.ignored = nil
+        row.state = wanted.state
+        row.outcome = wanted.outcome
+        row.outcomeSource = nil
+        row.approvalDetail = nil
+        row.activity = nil
+        row.backgroundTasks = nil
+        row.scheduled = nil
+        if wanted.state == .working {
+            row.turnStartedAt = at
+            row.waitingSince = nil
+        } else {
+            row.waitingSince = at
+        }
+    }
+
     /// The user is done with this session; it leaves the panel until the next prompt.
     public mutating func resolve(id: String, at: Date = Date()) {
         sessions[id] = nil
@@ -256,7 +474,12 @@ public struct SessionStore: Codable, Equatable, Sendable {
 
     /// Removes a session from the list until the user prompts it again.
     public mutating func dismiss(id: String, at: Date = Date()) {
-        guard sessions[id] != nil else { return }
+        guard let session = sessions[id] else { return }
+        if session.thread != nil, session.waitsOnUser {
+            var waiting = dismissedWaiting ?? []
+            waiting.insert(id)
+            dismissedWaiting = waiting
+        }
         resolve(id: id, at: at)
         var set = dismissed ?? []
         set.insert(id)
@@ -306,6 +529,15 @@ public struct SessionStore: Codable, Equatable, Sendable {
         ignored = set
     }
 
+    /// "Ignore for Now" and "Stop Ignoring". Only a question or a reply can be
+    /// ignored: an approval request blocks the agent until it is answered.
+    public mutating func setIgnored(id: String, _ ignored: Bool, at: Date = Date()) {
+        guard var session = sessions[id], session.state == .yourTurn, session.waitsOnUser else { return }
+        session.ignored = ignored ? true : nil
+        sessions[id] = session
+        record(SpanKind(session), for: id, at: at)
+    }
+
     /// The user's own name for the session. Automatic names never replace it.
     public mutating func rename(id: String, to title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -335,6 +567,10 @@ public struct SessionStore: Codable, Equatable, Sendable {
         let gone = sessions.filter { now.timeIntervalSince($0.value.lastEventAt) >= age }.map(\.key)
         sessions = sessions.filter { now.timeIntervalSince($0.value.lastEventAt) < age }
         for key in gone { record(nil, for: key, at: now) }
+        if let links = executors {
+            let kept = links.filter { now.timeIntervalSince($0.value.linkedAt) < age || sessions[$0.value.conversation] != nil }
+            executors = kept.isEmpty ? nil : kept
+        }
         if var all = history {
             all = all.filter { _, spans in spans.contains { $0.end(or: now) > now.addingTimeInterval(-24 * 3600) } }
             history = all.isEmpty ? nil : all
@@ -349,9 +585,9 @@ public struct SessionStore: Codable, Equatable, Sendable {
             case .needsApproval: return 0
             case .yourTurn:
                 switch session.outcome {
-                case .needsInput: return 1
+                case .needsInput: return session.isIgnored ? 5 : 1
                 case .done: return 4
-                default: return 2
+                default: return session.isIgnored ? 5 : 2
                 }
             case .working: return 3
             }
@@ -361,7 +597,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
             if a.needsUser {
                 return (a.waitingSince ?? a.lastEventAt) < (b.waitingSince ?? b.lastEventAt)
             }
-            if a.isDone { return (a.waitingSince ?? a.lastEventAt) > (b.waitingSince ?? b.lastEventAt) }
+            if a.isDone || a.isIgnored { return (a.waitingSince ?? a.lastEventAt) > (b.waitingSince ?? b.lastEventAt) }
             return a.turnStartedAt > b.turnStartedAt
         }
     }

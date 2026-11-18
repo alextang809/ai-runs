@@ -15,9 +15,11 @@ extension Session {
         switch state {
         case .needsApproval: return .approval
         case .yourTurn:
+            if isIgnored { return nil }
             switch outcome {
             case .needsInput: return .input
-            case .done: return .done
+            // "Idle" in Claude's list isn't news that work finished.
+            case .done: return native == nil ? .done : nil
             default: return .replied
             }
         case .working:

@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
         installHelper()
         upgradeHooks()
         Notifier.shared.open = { [weak self] id in self?.open(sessionId: id) }
+        Notifier.shared.ignore = { [weak self] id in self?.setIgnored(sessionId: id, true) }
         Notifier.shared.update(sessions: Array(store.sessions.values))
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -64,6 +65,35 @@ final class AppModel: ObservableObject {
         clockTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
+        threadsTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.readClaudeThreads() }
+        }
+    }
+
+    // MARK: - Claude's Threads list
+
+    private var threadsTimer: Timer?
+    private var readingThreads = false
+
+    /// Looks at the Claude app's window for project threads, which is the only
+    /// way to see the ones that work in the cloud.
+    private func readClaudeThreads() {
+        guard !readingThreads, let pid = ClaudeThreadsReader.target() else { return }
+        readingThreads = true
+        ClaudeThreadsReader.read(pid: pid) { [weak self] sightings in
+            MainActor.assumeIsolated { self?.apply(sightings: sightings) }
+        }
+    }
+
+    private func apply(sightings: [ThreadSighting]) {
+        readingThreads = false
+        guard !sightings.isEmpty else { return }
+        var updated = store
+        updated.observe(sightings, at: Date())
+        guard updated != store else { return }
+        store = updated
+        now = Date()
+        saveSessions()
     }
 
     func refresh() {
@@ -75,6 +105,7 @@ final class AppModel: ObservableObject {
         now = Date()
         var updated = store
         updated.pruneStale(now: now)
+        updated.expireSightings(now: now)
         if updated != store {
             store = updated
             saveSessions()
@@ -159,11 +190,13 @@ final class AppModel: ObservableObject {
                 }
                 toolTitle = thread.name
             }
-            if session.tool == .claudeCode {
+            // A project thread's local session has its own name, which isn't the
+            // thread's; the thread is named from what was asked in it.
+            if session.tool == .claudeCode, session.thread == nil {
                 if desktop == nil { desktop = ClaudeDesktopIndex.load(root: ClaudeDesktopIndex.root()) }
                 toolTitle = ClaudeDesktopIndex.session(forCLI: session.sessionId, in: desktop ?? [])?.title
             }
-            if toolTitle == nil, let transcript { toolTitle = TranscriptReader.toolTitle(at: transcript) }
+            if toolTitle == nil, session.thread == nil, let transcript { toolTitle = TranscriptReader.toolTitle(at: transcript) }
 
             if let toolTitle {
                 if toolTitle != session.title || session.titleSettled != true {
@@ -354,6 +387,15 @@ final class AppModel: ObservableObject {
     func rename(sessionId: String, to title: String) {
         store.rename(id: sessionId, to: title)
         saveSessions()
+    }
+
+    /// "Ignore for Now" / "Stop Ignoring" on a run that waits on the user.
+    func setIgnored(sessionId: String, _ ignored: Bool) {
+        store.setIgnored(id: sessionId, ignored, at: Date())
+        saveSessions()
+        if ignored, store.sessions[sessionId]?.isIgnored == true {
+            show("Ignored. It comes back when it asks something new.")
+        }
     }
 
     func pin(sessionId: String) {

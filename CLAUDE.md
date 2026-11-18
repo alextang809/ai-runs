@@ -22,11 +22,24 @@ Names come from the tools themselves: Claude desktop's session list
 (`CodexThreadIndex`, `threads.name`; `thread_source != user` are Codex's own
 helper threads and are ignored), the web page title for web chats.
 
-**Known gap:** a Claude *project thread* runs in the cloud and is not a local
-Claude Code session. Cloud threads fire no local hooks, and a local session woken
-by a project (`<wake …><project …><thread …>` or `<relay from="coordinator" …>`
-prompts) may serve several threads. One row per thread is not solved yet; see
-`collab/rounds/02-codex-brief.md`.
+**Claude project threads:** a project thread runs in the cloud and fires no
+local hooks itself. When it wakes a local Claude Code session, the prompt is
+wrapped in `<wake><project id="chan_…"><thread ts="cmsg_…"><message …>request</message>`.
+`PromptWrapper` reads that address; `SessionStore` then shows one row per thread
+(`Session.thread`, key `claude-code:project:<chan>:<cmsg>`) and treats local
+sessions as its executors (`SessionStore.executors`); the newest one speaks for
+the row. Clicking the row opens `claude://code/project/<chan>?thread=<cmsg>`.
+
+Threads that work only in the cloud are read from the Claude app's window:
+`ClaudeThreadsReader` (app, Accessibility, read-only, every 5 s while Claude
+runs) copies the tree, `ClaudeThreadsView` (core) finds thread links
+(`AXLink.AXURL`) and the section heading each sits under (Working, Waiting on
+you, Ready for review, Idle), and `SessionStore.observe` gives active ones a row
+(`Session.native`). Rules: the pill uses Claude's own word; a hook event within
+two minutes outranks the list; a thread missing from the tree is left alone
+(the list is often partly drawn); after 10 minutes unseen a row says LAST SEEN
+instead of a state, except Waiting on you, which is kept; idle threads AI Runs
+never saw active get no row.
 
 ## Layout
 
@@ -39,7 +52,7 @@ prompts) may serve several threads. One row per thread is not solved yet; see
 - `Sources/AIRunsApp` — AppKit + SwiftUI. `StatusBarController` (menu bar item,
   panel), `PanelViews` / `RunViews` (rows, header dashboard, flyout),
   `FloatingWindow`, `Notifier`, `Jumper` (go back to a session),
-  `SidebarClicker` (Accessibility), `SettingsView`, `TitleModel` (on-device model,
+  `SidebarClicker` and `ClaudeThreadsReader` (Accessibility), `SettingsView`, `TitleModel` (on-device model,
   macOS 26 only, behind `#if canImport(FoundationModels)`).
 - `BrowserExtension/` — content script (`content.js`), relay worker, popup.
   Fixed `key` in the manifest keeps the extension ID stable; it must match
@@ -93,6 +106,9 @@ prompts) may serve several threads. One row per thread is not solved yet; see
 - Hooks are only ever added or removed by entries whose command contains
   `airuns-hook`; each config file is backed up once as `*.airuns-backup`.
   Codex hook changes need the user's approval again, so don't change them lightly.
+
+- "Ignore for Now" on a run that waits on you (not on APPROVE): the row stays,
+  in an Ignored section, without counting or reminding, until the run moves on.
 
 ## Privacy
 

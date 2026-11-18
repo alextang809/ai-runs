@@ -11,16 +11,32 @@ public enum TextUtils {
     /// What the user actually typed: tagged blocks the tools insert
     /// (`<system-reminder>…</system-reminder>`, pasted content, IDE context),
     /// code blocks and extra whitespace removed. Nil when nothing is left.
+    ///
+    /// A Claude project's `<wake>` prompt is the exception: the request sits
+    /// inside its `<message>`, so that text is kept instead of being stripped.
     public static func cleanPrompt(_ prompt: String) -> String? {
         var text = prompt
-        text = text.replacingOccurrences(of: #"(?s)<([A-Za-z][\w-]*)(\s[^>]*)?>.*?</\1[^>]*>"#,
-                                         with: " ", options: .regularExpression)
+        var wrapped = false
+        if let wake = PromptWrapper.wake(in: prompt) {
+            guard let request = wake.request else { return nil }
+            text = request
+            wrapped = true
+        }
+        text = removingTaggedBlocks(text)
         text = text.replacingOccurrences(of: #"<[A-Za-z][\w-]*(\s[^>]*)?/?>"#, with: " ", options: .regularExpression)
         text = text.replacingOccurrences(of: #"(?s)```.*?```"#, with: " ", options: .regularExpression)
+        // Wrappers escape the text inside them; tags are gone, so decoding can't make new ones.
+        if wrapped { text = PromptWrapper.decodeEntities(text) }
         text = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty || text.hasPrefix("Caveat:") { return nil }
         return text
+    }
+
+    /// Removes every `<tag …>…</tag>` block along with its content.
+    static func removingTaggedBlocks(_ text: String) -> String {
+        text.replacingOccurrences(of: #"(?s)<([A-Za-z][\w-]*)(\s[^>]*)?>.*?</\1[^>]*>"#,
+                                  with: " ", options: .regularExpression)
     }
 
     /// The last question in a reply, used as the suggested next step.

@@ -340,9 +340,15 @@ struct FloatingCard: View {
         .modifier(WindowDrag(controller: controller))
     }
 
+    private func ignoreAction(for session: Session) -> (() -> Void)? {
+        guard RunText.canIgnore(session) else { return nil }
+        let id = session.id
+        return { model.setIgnored(sessionId: id, true) }
+    }
+
     @ViewBuilder private var runs: some View {
         let sessions = model.store.ordered()
-        let active = sessions.filter { !$0.isDone && !($0.state == .working && $0.isInBackground) }
+        let active = sessions.filter { !$0.isDone && !$0.isIgnored && !($0.state == .working && $0.isInBackground) }
         let quiet = sessions.count - active.count
         if active.isEmpty {
             Text(sessions.isEmpty ? "Nothing running." : "Nothing needs you; nothing is working right now.")
@@ -356,7 +362,8 @@ struct FloatingCard: View {
                                 open: { controller.open(session) },
                                 rename: { controller.rename(session.id) },
                                 pin: { model.pin(sessionId: session.id) },
-                                remove: { model.remove(sessionId: session.id) })
+                                remove: { model.remove(sessionId: session.id) },
+                                ignore: ignoreAction(for: session))
                 }
             }
             .padding(.horizontal, 4)
@@ -369,7 +376,7 @@ struct FloatingCard: View {
             }
         }
         if quiet > 0 {
-            Text("+ \(quiet) done or in the background")
+            Text("+ \(quiet) done, ignored or in the background")
                 .font(.system(size: 10.5, weight: .medium)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14).padding(.bottom, 9).padding(.top, 2)
@@ -386,6 +393,8 @@ private struct FloatingRow: View {
     let rename: () -> Void
     let pin: () -> Void
     let remove: () -> Void
+    /// "Ignore for Now"; nil when this run can't be ignored.
+    var ignore: (() -> Void)? = nil
     @State private var hovering = false
 
     var body: some View {
@@ -417,10 +426,26 @@ private struct FloatingRow: View {
                     .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
         }
+        // A waiting run can be set aside right here: it leaves this window and
+        // stays in the panel's Ignored section.
+        .overlay(alignment: .bottomTrailing) {
+            if hovering, let ignore {
+                Button("Ignore", action: ignore)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
+                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.3), lineWidth: 1))
+                    .padding(.trailing, 8).padding(.bottom, 5)
+                    .help("Stop counting this until it asks something new")
+                    .accessibilityLabel("Ignore \(session.title) for now")
+            }
+        }
         .onHover { hovering = $0 }
         .help(RunText.place(session))
         .contextMenu {
             Button("Open", action: open)
+            if let ignore { Button("Ignore for Now", action: ignore) }
             Button("Rename…", action: rename)
             Button("Pin to Board", action: pin)
             Divider()

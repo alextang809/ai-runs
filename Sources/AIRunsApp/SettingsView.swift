@@ -57,6 +57,10 @@ struct SettingsView: View {
 
             Divider()
 
+            ClaudeThreadsSection()
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("Floating window").font(.headline)
                 Text("A capsule that stays on top of every app and Space. Open it from the menu: Show Floating Window. Click it to see your runs and the pinned board; drag it anywhere.")
@@ -172,6 +176,30 @@ private struct HookRow: View {
 }
 
 /// Permission, and which moments to announce.
+struct ClaudeThreadsSection: View {
+    @AppStorage(ClaudeThreadsReader.enabledKey) private var enabled = true
+    @State private var trusted = SidebarClicker.isTrusted
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Claude project threads").font(.headline)
+                Spacer()
+                if enabled, trusted {
+                    Label("On", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.system(size: 12))
+                } else if enabled {
+                    Button("Allow Accessibility…") { _ = SidebarClicker.requestTrust() }.controlSize(.small)
+                }
+            }
+            Text("Threads that work in the cloud send AI Runs nothing. While the Threads list is on screen in Claude, AI Runs reads each thread’s name and where Claude files it (Working, Waiting on you, Ready for review, Idle), so those threads get a row too. It only reads, and only the Claude app.")
+                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Show threads from Claude’s Threads list", isOn: $enabled)
+                .font(.system(size: 12.5))
+        }
+        .onAppear { trusted = SidebarClicker.isTrusted }
+    }
+}
+
 struct NotificationSection: View {
     @State private var status: UNAuthorizationStatus = .notDetermined
     @AppStorage(NotificationSettings.key(.approval)) private var approval = true
