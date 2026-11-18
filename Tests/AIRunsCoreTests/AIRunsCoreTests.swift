@@ -215,7 +215,8 @@ final class TextUtilsTests: XCTestCase {
     func testUserRenameIsNotOverwrittenBySuggestions() {
         var store = SessionStore()
         let t = Date(timeIntervalSince1970: 1_800_000_000)
-        store.apply(AgentEvent(tool: .codex, kind: .promptStart, sessionId: "s", at: t, prompt: "<wake reason=\"mention\"> fix flaky test"))
+        store.apply(AgentEvent(tool: .codex, kind: .promptStart, sessionId: "s", at: t, prompt: "<wake reason=\"mention\"> fix flaky test",
+                               transcriptPath: "/x/rollout.jsonl"))
         XCTAssertEqual(store.sessions["codex:s"]?.title, "fix flaky test")
         XCTAssertEqual(store.sessions["codex:s"]?.firstPrompt, "fix flaky test")
         store.setSuggestedTitle(id: "codex:s", to: "Flaky test fix")
@@ -612,7 +613,8 @@ final class TimelineTests: XCTestCase {
 
 final class RemoveTests: XCTestCase {
     private func ev(_ kind: EventKind, _ s: Double, drivenBy: String? = nil) -> AgentEvent {
-        AgentEvent(tool: .codex, kind: kind, sessionId: "x", at: Date(timeIntervalSince1970: s), drivenBy: drivenBy)
+        AgentEvent(tool: .codex, kind: kind, sessionId: "x", at: Date(timeIntervalSince1970: s),
+                   transcriptPath: "/x/rollout.jsonl", drivenBy: drivenBy)
     }
 
     func testRemovedSessionStaysOutUntilUserPromptsIt() {
