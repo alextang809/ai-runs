@@ -17,6 +17,13 @@ public struct ProjectThread: Codable, Equatable, Hashable, Sendable {
         self.threadId = threadId
     }
 
+    /// Opens this thread in the Claude desktop app. Checked on a real Mac
+    /// (Claude 5.11492.5, collab/rounds/03-codex.md): it lands on the exact thread.
+    public var appLink: URL? {
+        guard Self.isProjectId(projectId), Self.isThreadId(threadId) else { return nil }
+        return URL(string: "claude://code/project/\(projectId)?thread=\(threadId)")
+    }
+
     /// Only the shapes seen so far; anything else is not linked to a thread.
     static func isProjectId(_ value: String) -> Bool { value.range(of: #"^chan_[A-Za-z0-9]{4,}$"#, options: .regularExpression) != nil }
     static func isThreadId(_ value: String) -> Bool { value.range(of: #"^cmsg_[A-Za-z0-9]{4,}$"#, options: .regularExpression) != nil }

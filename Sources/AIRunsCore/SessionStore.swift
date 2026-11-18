@@ -138,9 +138,15 @@ public struct SessionStore: Codable, Equatable, Sendable {
         let linked = executors?[executor]
         let key = linked?.conversation ?? executor
         if linked != nil, let row = sessions[key], row.sessionId != event.sessionId {
-            // An earlier session of this thread; the newest one speaks for the row.
-            if event.kind == .sessionEnd { executors?[executor] = nil }
-            return
+            if event.kind == .needsApproval || event.kind == .question {
+                // Another session of this thread is blocked on the user: that
+                // matters more than what the newest one is doing, so it takes the row.
+                sessions[key]?.sessionId = event.sessionId
+            } else {
+                // An earlier session of this thread; the newest one speaks for the row.
+                if event.kind == .sessionEnd { executors?[executor] = nil }
+                return
+            }
         }
         var session = sessions[key]
         if event.kind == .titleUpdate {

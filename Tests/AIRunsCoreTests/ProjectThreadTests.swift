@@ -129,6 +129,22 @@ final class ProjectThreadStoreTests: XCTestCase {
         XCTAssertEqual(store.sessions[rowKey]?.lastMessage, "Added it.")
     }
 
+    func testAnEarlierSessionAskingForApprovalTakesTheRow() {
+        var store = SessionStore()
+        store.apply(event(.promptStart, 0, session: "local-a", prompt: wake("One"), thread: thread))
+        store.apply(event(.promptStart, 10, session: "local-b", prompt: wake("Two"), thread: thread))
+        store.apply(event(.toolActivity, 15, session: "local-a"))
+        XCTAssertEqual(store.sessions[rowKey]?.sessionId, "local-b")
+        store.apply(event(.needsApproval, 20, session: "local-a"))
+        XCTAssertEqual(store.sessions[rowKey]?.sessionId, "local-a")
+        XCTAssertEqual(store.sessions[rowKey]?.state, .needsApproval)
+    }
+
+    func testThreadAppLink() {
+        XCTAssertEqual(thread.appLink?.absoluteString, "claude://code/project/chan_example123?thread=cmsg_root123456")
+        XCTAssertNil(ProjectThread(projectId: "chan_x y", threadId: "cmsg_root123456").appLink)
+    }
+
     func testPlainSessionsKeepTheirOwnRows() {
         var store = SessionStore()
         store.apply(event(.promptStart, 0, session: "local-a", prompt: wake("Thread work"), thread: thread))
