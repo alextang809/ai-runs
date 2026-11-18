@@ -32,9 +32,8 @@ struct SessionRow: View {
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         StatePill(session: session, now: now)
-                        if highlighted {
-                            RemoveButton(label: "Remove \(session.title) from the list", action: remove)
-                        }
+                        // Always reserved, so nothing moves when the × appears.
+                        Color.clear.frame(width: RemoveZone.slot, height: 18)
                     }
                     Text(RunText.place(session))
                         .font(.system(size: 11.5))
@@ -55,6 +54,13 @@ struct SessionRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .topTrailing) {
+            if highlighted {
+                RemoveZone(label: "Remove \(session.title) from the list", action: remove)
+                    .padding(.top, 7 + 9 - RemoveZone.size.height / 2)
+                    .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
+            }
+        }
         .contextMenu {
             Button("Open", action: open)
             Button("Rename…", action: rename)
@@ -472,12 +478,33 @@ struct RemoveButton: View {
             Image(systemName: "xmark")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(hovering ? Color.primary : Color.secondary)
-                .frame(width: 18, height: 18)
-                .background(Circle().fill(Color.primary.opacity(hovering ? 0.14 : 0.08)))
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Color.primary.opacity(hovering ? 0.16 : 0.08)))
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Remove from list")
         .accessibilityLabel(label)
+    }
+}
+
+/// The × plus a margin around it that swallows clicks, so a near miss does
+/// nothing instead of opening the session.
+struct RemoveZone: View {
+    static let slot: CGFloat = 20
+    static let size = CGSize(width: 40, height: 34)
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {}
+            RemoveButton(label: label, action: action)
+        }
+        .frame(width: Self.size.width, height: Self.size.height)
     }
 }

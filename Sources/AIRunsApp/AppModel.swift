@@ -11,6 +11,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var now = Date()
     /// A short confirmation shown in the panel header or as a toast.
     @Published private(set) var message: String?
+    /// Offered next to `message` for a few seconds after removing something.
+    @Published private(set) var undo: (() -> Void)?
 
     let paths = AIRunsPaths()
     let installer = HookInstaller()
@@ -35,6 +37,7 @@ final class AppModel: ObservableObject {
         let cursor = JSONFile.load(Cursor.self, from: paths.cursor)
         reader = EventLogReader(url: paths.events, offset: cursor?.offset ?? 0)
         store = JSONFile.load(SessionStore.self, from: paths.sessions) ?? SessionStore()
+        store.tidy()
         board = JSONFile.load(PinBoard.self, from: paths.pins) ?? PinBoard()
         installHelper()
         upgradeHooks()
@@ -260,14 +263,26 @@ final class AppModel: ObservableObject {
 
     // MARK: - Messages
 
-    func show(_ text: String) {
+    func show(_ text: String, undo: (() -> Void)? = nil) {
         messageWork?.cancel()
         message = text
+        self.undo = undo
         let work = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated { self?.message = nil }
+            MainActor.assumeIsolated {
+                self?.message = nil
+                self?.undo = nil
+            }
         }
         messageWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (undo == nil ? 2.8 : 6), execute: work)
+    }
+
+    func performUndo() {
+        let action = undo
+        messageWork?.cancel()
+        message = nil
+        undo = nil
+        action?()
     }
 
     // MARK: - Sessions
@@ -286,10 +301,13 @@ final class AppModel: ObservableObject {
 
     /// Takes a session off the list until the user messages it again.
     func remove(sessionId: String) {
-        guard store.sessions[sessionId] != nil else { return }
+        guard let session = store.sessions[sessionId] else { return }
         store.dismiss(id: sessionId, at: Date())
         saveSessions()
-        show("Removed. It comes back if you message it again.")
+        show("Removed “\(TextUtils.truncate(session.title, limit: 28))”") { [weak self] in
+            self?.store.restore(session)
+            self?.saveSessions()
+        }
     }
 
     func rename(sessionId: String, to title: String) {
@@ -354,10 +372,13 @@ final class AppModel: ObservableObject {
     }
 
     func archive(cardId: UUID) {
-        let title = board.card(id: cardId)?.title
+        guard let card = board.card(id: cardId), let index = board.index(of: cardId) else { return }
         board.archive(id: cardId)
         savePins()
-        if let title { show("Archived: \(title)") }
+        show("Removed “\(TextUtils.truncate(card.title, limit: 28))”") { [weak self] in
+            self?.board.unarchive(id: cardId, at: index)
+            self?.savePins()
+        }
     }
 
     /// Copies a summary of the card and opens a fresh chat where possible, so

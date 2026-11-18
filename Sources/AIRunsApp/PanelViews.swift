@@ -131,8 +131,15 @@ struct MenuColumn: View {
                 if let message = model.message {
                     Text(message)
                         .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(Palette.working)
+                        .foregroundStyle(model.undo == nil ? Palette.working : Color.secondary)
                         .lineLimit(1)
+                    if model.undo != nil {
+                        Button("Undo") { model.performUndo() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11.5, weight: .bold))
+                            .foregroundStyle(Palette.working)
+                            .keyboardShortcut("z", modifiers: .command)
+                    }
                 }
             }
             HeaderDashboard(needs: model.store.needsUserCount, working: model.store.workingCount,
@@ -260,13 +267,10 @@ struct CardRow: View {
                         .foregroundStyle(Color.secondary)
                 }
                 Spacer(minLength: 8)
-                if highlighted, let remove {
-                    RemoveButton(label: "Remove \(card.title)", action: remove)
-                } else {
-                    Text(TextUtils.age(now.timeIntervalSince(card.touchedAt)))
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(Color.secondary)
-                }
+                Text(TextUtils.age(now.timeIntervalSince(card.touchedAt)))
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(Color.secondary)
+                    .opacity(highlighted && remove != nil ? 0 : 1)
             }
             .padding(.leading, 22)
             .padding(.trailing, 8)
@@ -277,6 +281,11 @@ struct CardRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .trailing) {
+            if highlighted, let remove {
+                RemoveZone(label: "Remove \(card.title)", action: remove)
+            }
+        }
         .contextMenu {
             Button("Open", action: open)
             if let remove { Button("Remove", action: remove) }

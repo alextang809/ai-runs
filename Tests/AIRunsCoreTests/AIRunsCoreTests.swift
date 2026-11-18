@@ -780,3 +780,45 @@ final class TurnOutcomeTests: XCTestCase {
         XCTAssertEqual(EventParser.parse(tool: .claudeCode, payload: stop, at: Date(), terminal: TerminalContext())?.scheduled, 1)
     }
 }
+
+final class TidyTests: XCTestCase {
+    func testCodexHelperThreadsAreIgnored() {
+        var store = SessionStore()
+        var helper = AgentEvent(tool: .codex, kind: .promptStart, sessionId: "h", at: Date(),
+                                prompt: "This is an app-generated request for a suggested next user message.")
+        helper.transcriptPath = nil
+        store.apply(helper)
+        var unsaved = AgentEvent(tool: .codex, kind: .promptStart, sessionId: "u", at: Date(), prompt: "anything")
+        unsaved.transcriptPath = ""
+        store.apply(unsaved)
+        let real = AgentEvent(tool: .codex, kind: .promptStart, sessionId: "r", at: Date(), prompt: "fix it",
+                              transcriptPath: "/x/rollout.jsonl")
+        store.apply(real)
+        XCTAssertEqual(Array(store.sessions.keys), ["codex:r"])
+    }
+
+    func testTidyJudgesOldTurnsAndRestoreUndoesRemove() throws {
+        var store = SessionStore()
+        store.apply(AgentEvent(tool: .claudeCode, kind: .promptStart, sessionId: "a", at: Date(), transcriptPath: "/t"))
+        store.apply(AgentEvent(tool: .claudeCode, kind: .turnEnd, sessionId: "a", at: Date(), lastMessage: "Pushed. All tests pass."))
+        var data = try JSONEncoder().encode(store)
+        // Simulate a file written before outcomes existed.
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var sessions = try XCTUnwrap(json["sessions"] as? [String: [String: Any]])
+        sessions["claude-code:a"]?["outcome"] = nil
+        sessions["claude-code:a"]?["outcomeSource"] = nil
+        json["sessions"] = sessions
+        data = try JSONSerialization.data(withJSONObject: json)
+        var old = try JSONDecoder().decode(SessionStore.self, from: data)
+        XCTAssertNil(old.sessions["claude-code:a"]?.outcome)
+        old.tidy()
+        XCTAssertEqual(old.sessions["claude-code:a"]?.outcome, .done)
+
+        let session = try XCTUnwrap(old.sessions["claude-code:a"])
+        old.dismiss(id: session.id)
+        XCTAssertTrue(old.sessions.isEmpty)
+        old.restore(session)
+        XCTAssertEqual(old.sessions.count, 1)
+        XCTAssertFalse(old.dismissed?.contains(session.id) ?? false)
+    }
+}

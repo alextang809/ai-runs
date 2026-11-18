@@ -101,6 +101,10 @@ public struct SessionStore: Codable, Equatable, Sendable {
         toolLastSeen = seen
 
         if ignored?.contains(key) == true { return }
+        if sessions[key] == nil, Self.isToolHelper(event) {
+            ignore(id: key)
+            return
+        }
         if event.kind == .sessionEnd {
             sessions[key] = nil
             dismissed?.remove(key)
@@ -216,6 +220,39 @@ public struct SessionStore: Codable, Equatable, Sendable {
         var set = dismissed ?? []
         set.insert(id)
         dismissed = set
+    }
+
+    /// Codex starts short-lived helper threads (suggested next message, naming)
+    /// that it never saves: they have no transcript, and their prompt says so.
+    static func isToolHelper(_ event: AgentEvent) -> Bool {
+        guard event.tool == .codex else { return false }
+        if let prompt = event.prompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+           prompt.hasPrefix("This is an app-generated request") || prompt.hasPrefix("User: This is an app-generated") {
+            return true
+        }
+        return event.kind == .promptStart && (event.transcriptPath ?? "").isEmpty
+    }
+
+    /// Run after loading: hides helper threads saved by older versions and
+    /// judges finished turns that ended before outcomes existed.
+    public mutating func tidy() {
+        for (key, session) in sessions {
+            if session.tool == .codex, (session.transcriptPath ?? "").isEmpty {
+                ignore(id: key)
+                continue
+            }
+            if session.state == .yourTurn, session.outcome == nil {
+                let (outcome, source) = TurnClassifier.classify(message: session.lastMessage, progress: session.progress)
+                sessions[key]?.outcome = outcome
+                sessions[key]?.outcomeSource = source
+            }
+        }
+    }
+
+    /// Undoes `dismiss`.
+    public mutating func restore(_ session: Session) {
+        dismissed?.remove(session.id)
+        sessions[session.id] = session
     }
 
     /// Hides a tool's internal thread for good, along with its history.

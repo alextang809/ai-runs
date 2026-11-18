@@ -159,6 +159,14 @@ public struct PinBoard: Codable, Equatable, Sendable {
         if archived.count > 200 { archived.removeLast(archived.count - 200) }
     }
 
+    /// Undoes `archive`: puts the card back where it was.
+    public mutating func unarchive(id: UUID, at index: Int) {
+        guard let position = archived.firstIndex(where: { $0.id == id }) else { return }
+        cards.insert(archived.remove(at: position), at: min(max(0, index), cards.count))
+    }
+
+    public func index(of id: UUID) -> Int? { cards.firstIndex { $0.id == id } }
+
     /// Text to paste at the start of a new chat so it can pick up the thread.
     public static func handoff(for card: PinCard) -> String {
         var lines = ["Continuing from an earlier conversation: \(card.title)."]

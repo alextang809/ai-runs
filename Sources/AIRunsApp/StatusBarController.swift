@@ -308,12 +308,28 @@ final class PanelUIState: ObservableObject {
     @Published var boardVisible = false
     private var clearWork: DispatchWorkItem?
 
+    private var switchWork: DispatchWorkItem?
+
+    /// The first hover shows details at once. Moving to another row waits a
+    /// moment, so passing over rows on the way to a button doesn't flip the
+    /// details back and forth.
     func hoverOn(_ target: Target) {
         clearWork?.cancel()
-        if hover != target { hover = target }
+        switchWork?.cancel()
+        guard hover != target else { return }
+        guard hover != nil else {
+            hover = target
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.hover = target }
+        }
+        switchWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14, execute: work)
     }
 
     func hoverOff() {
+        switchWork?.cancel()
         clearWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated { self?.hover = nil }
@@ -326,6 +342,7 @@ final class PanelUIState: ObservableObject {
 
     func reset() {
         clearWork?.cancel()
+        switchWork?.cancel()
         hover = nil
         addingNote = false
         draft = ""
