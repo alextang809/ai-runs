@@ -81,6 +81,9 @@ public enum EventParser {
             event.kind = .promptStart
             event.prompt = payload["prompt"] as? String
             event.drivenBy = TextUtils.relaySource(in: event.prompt)
+            if tool == .claudeCode, let prompt = event.prompt {
+                event.thread = PromptWrapper.wake(in: prompt)?.thread
+            }
         case "Stop":
             event.kind = .turnEnd
             event.lastMessage = payload["last_assistant_message"] as? String

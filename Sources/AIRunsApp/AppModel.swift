@@ -159,11 +159,13 @@ final class AppModel: ObservableObject {
                 }
                 toolTitle = thread.name
             }
-            if session.tool == .claudeCode {
+            // A project thread's local session has its own name, which isn't the
+            // thread's; the thread is named from what was asked in it.
+            if session.tool == .claudeCode, session.thread == nil {
                 if desktop == nil { desktop = ClaudeDesktopIndex.load(root: ClaudeDesktopIndex.root()) }
                 toolTitle = ClaudeDesktopIndex.session(forCLI: session.sessionId, in: desktop ?? [])?.title
             }
-            if toolTitle == nil, let transcript { toolTitle = TranscriptReader.toolTitle(at: transcript) }
+            if toolTitle == nil, session.thread == nil, let transcript { toolTitle = TranscriptReader.toolTitle(at: transcript) }
 
             if let toolTitle {
                 if toolTitle != session.title || session.titleSettled != true {

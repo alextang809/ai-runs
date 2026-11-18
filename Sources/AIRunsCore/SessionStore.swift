@@ -10,8 +10,11 @@ public enum SessionState: String, Codable, Sendable {
 }
 
 /// One AI conversation that is still open in the panel.
+///
+/// Usually one local session. For a Claude project thread it is the thread,
+/// and `sessionId` is the local session that worked for it most recently.
 public struct Session: Codable, Equatable, Identifiable, Sendable {
-    public var id: String { Session.key(tool: tool, sessionId: sessionId) }
+    public var id: String { thread.map { Session.key(tool: tool, thread: $0) } ?? Session.key(tool: tool, sessionId: sessionId) }
     public var tool: AgentTool
     public var sessionId: String
     public var title: String
@@ -53,6 +56,8 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// The last full step list from Claude desktop's plan tool, so a later
     /// "advance" call can move it on.
     public var planSteps: [PlanStep]?
+    /// Set when this row is a Claude project thread rather than one local session.
+    public var thread: ProjectThread?
 
     public var isInBackground: Bool { state == .working && ((backgroundTasks ?? 0) > 0 || (scheduled ?? 0) > 0) }
     /// Finished its work: shown, but not counted as needing the user.
@@ -63,6 +68,11 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var project: String { TextUtils.projectName(fromPath: cwd) }
 
     public static func key(tool: AgentTool, sessionId: String) -> String { "\(tool.rawValue):\(sessionId)" }
+
+    /// The row of a project thread, whichever local session works for it.
+    public static func key(tool: AgentTool, thread: ProjectThread) -> String {
+        "\(tool.rawValue):project:\(thread.projectId):\(thread.threadId)"
+    }
 
     public static func genericTitle(for tool: AgentTool) -> String { "\(tool.displayName) session" }
 
@@ -78,8 +88,22 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// A local session working for a conversation that has its own row (a Claude
+/// project thread). One thread can have several over time; the newest one
+/// it woke speaks for the row.
+public struct ExecutorLink: Codable, Equatable, Sendable {
+    /// The row's key.
+    public var conversation: String
+    public var thread: ProjectThread
+    /// When the thread last woke this session.
+    public var linkedAt: Date
+    /// How the link was learned: "wake" (the prompt's wrapper).
+    public var source: String
+}
+
 /// All open sessions, driven by hook events. Pure value type so it is easy to test.
 public struct SessionStore: Codable, Equatable, Sendable {
+    /// Rows by `Session.id`.
     public private(set) var sessions: [String: Session] = [:]
     /// When each tool last sent any event, keyed by `AgentTool.rawValue`.
     /// Lets the app tell "nothing running" apart from "hooks not firing".
@@ -93,19 +117,32 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// The tools' own internal threads (Codex naming and review helpers).
     /// Never shown.
     public private(set) var ignored: Set<String>? = nil
+    /// Local sessions (by `Session.key(tool:sessionId:)`) that work for a project
+    /// thread. A session without a link is its own row.
+    public private(set) var executors: [String: ExecutorLink]? = nil
 
     public func lastSeen(_ tool: AgentTool) -> Date? { toolLastSeen?[tool.rawValue] }
 
     public init() {}
 
     public mutating func apply(_ event: AgentEvent) {
-        let key = Session.key(tool: event.tool, sessionId: event.sessionId)
-        var session = sessions[key]
+        let executor = Session.key(tool: event.tool, sessionId: event.sessionId)
         var seen = toolLastSeen ?? [:]
         seen[event.tool.rawValue] = max(seen[event.tool.rawValue] ?? event.at, event.at)
         toolLastSeen = seen
 
-        if ignored?.contains(key) == true { return }
+        if ignored?.contains(executor) == true { return }
+        if event.kind == .promptStart, let thread = event.thread {
+            link(executor: executor, event: event, to: thread)
+        }
+        let linked = executors?[executor]
+        let key = linked?.conversation ?? executor
+        if linked != nil, let row = sessions[key], row.sessionId != event.sessionId {
+            // An earlier session of this thread; the newest one speaks for the row.
+            if event.kind == .sessionEnd { executors?[executor] = nil }
+            return
+        }
+        var session = sessions[key]
         if event.kind == .titleUpdate {
             // Only for chats AI Runs already follows; opening a page isn't a session.
             guard var session = sessions[key] else { return }
@@ -124,6 +161,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
         if event.kind == .sessionEnd {
             sessions[key] = nil
             dismissed?.remove(key)
+            executors?[executor] = nil
             record(nil, for: key, at: event.at)
             return
         }
@@ -144,7 +182,8 @@ public struct SessionStore: Codable, Equatable, Sendable {
                               state: .working, startedAt: event.at, turnStartedAt: event.at,
                               waitingSince: nil, lastEventAt: event.at, lastMessage: nil,
                               approvalDetail: nil, transcriptPath: event.transcriptPath,
-                              terminal: event.terminal, backgroundTasks: nil, firstPrompt: nil, titleIsCustom: nil)
+                              terminal: event.terminal, backgroundTasks: nil, firstPrompt: nil, titleIsCustom: nil,
+                              thread: linked?.thread)
         }
         guard var current = session else { return }
 
@@ -248,6 +287,34 @@ public struct SessionStore: Codable, Equatable, Sendable {
         record(SpanKind(current), for: key, at: event.at)
     }
 
+    /// The thread woke this local session: from now on the session works for
+    /// the thread's row, and as the newest one it speaks for it.
+    private mutating func link(executor: String, event: AgentEvent, to thread: ProjectThread) {
+        let key = Session.key(tool: event.tool, thread: thread)
+        var links = executors ?? [:]
+        let wasLinked = links[executor] != nil
+        links[executor] = ExecutorLink(conversation: key, thread: thread, linkedAt: event.at, source: "wake")
+        if links.count > 500 {
+            let newest = links.sorted { $0.value.linkedAt > $1.value.linkedAt }.prefix(250)
+            links = Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
+        }
+        executors = links
+
+        // The session's own row, from before AI Runs knew it works for a thread,
+        // becomes the thread's row (or goes, when the thread already has one).
+        if !wasLinked, var own = sessions.removeValue(forKey: executor) {
+            if sessions[key] == nil, dismissed?.contains(key) != true {
+                own.thread = thread
+                sessions[key] = own
+                if history?[key] == nil, let spans = history?[executor] { history?[key] = spans }
+                history?[executor] = nil
+            } else {
+                record(nil, for: executor, at: event.at)
+            }
+        }
+        sessions[key]?.sessionId = event.sessionId
+    }
+
     /// The user is done with this session; it leaves the panel until the next prompt.
     public mutating func resolve(id: String, at: Date = Date()) {
         sessions[id] = nil
@@ -335,6 +402,10 @@ public struct SessionStore: Codable, Equatable, Sendable {
         let gone = sessions.filter { now.timeIntervalSince($0.value.lastEventAt) >= age }.map(\.key)
         sessions = sessions.filter { now.timeIntervalSince($0.value.lastEventAt) < age }
         for key in gone { record(nil, for: key, at: now) }
+        if let links = executors {
+            let kept = links.filter { now.timeIntervalSince($0.value.linkedAt) < age || sessions[$0.value.conversation] != nil }
+            executors = kept.isEmpty ? nil : kept
+        }
         if var all = history {
             all = all.filter { _, spans in spans.contains { $0.end(or: now) > now.addingTimeInterval(-24 * 3600) } }
             history = all.isEmpty ? nil : all

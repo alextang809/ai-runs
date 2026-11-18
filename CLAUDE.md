@@ -22,11 +22,14 @@ Names come from the tools themselves: Claude desktop's session list
 (`CodexThreadIndex`, `threads.name`; `thread_source != user` are Codex's own
 helper threads and are ignored), the web page title for web chats.
 
-**Known gap:** a Claude *project thread* runs in the cloud and is not a local
-Claude Code session. Cloud threads fire no local hooks, and a local session woken
-by a project (`<wake …><project …><thread …>` or `<relay from="coordinator" …>`
-prompts) may serve several threads. One row per thread is not solved yet; see
-`collab/rounds/02-codex-brief.md`.
+**Claude project threads:** a project thread runs in the cloud and fires no
+local hooks itself. When it wakes a local Claude Code session, the prompt is
+wrapped in `<wake><project id="chan_…"><thread ts="cmsg_…"><message …>request</message>`.
+`PromptWrapper` reads that address; `SessionStore` then shows one row per thread
+(`Session.thread`, key `claude-code:project:<chan>:<cmsg>`) and treats local
+sessions as its executors (`SessionStore.executors`); the newest one speaks for
+the row. Threads that never woke a local session are not visible yet (plan:
+Accessibility, see `collab/rounds/02-claude.md`).
 
 ## Layout
 
