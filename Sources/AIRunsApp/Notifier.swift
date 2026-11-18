@@ -9,7 +9,8 @@ enum NotificationSettings {
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
-            key(.approval): true, key(.input): true, key(.replied): false, key(.done): false, remindKey: true,
+            key(.approval): true, key(.input): true, key(.replied): false, key(.done): false, key(.stalled): false,
+            remindKey: true,
         ])
     }
 
@@ -31,6 +32,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     private var planner = AlertPlanner()
     private var primed = false
+    /// The sessions from the last update. A stall is the absence of events,
+    /// so no update announces it: a timer re-checks these instead.
+    private var lastSessions: [Session] = []
+    private var recheckTimer: Timer?
+    private static let recheckEvery: TimeInterval = 60
     private static let category = "session"
     private static let openAction = "open"
     private static let snoozeAction = "snooze"
@@ -76,14 +82,37 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     // MARK: Updates
 
     func update(sessions: [Session]) {
-        guard !primed else { return post(planner.changes(in: sessions, enabled: NotificationSettings.enabled)) }
-        planner.prime(sessions)
+        lastSessions = sessions
+        startRechecking()
+        let now = Date()
+        guard !primed else {
+            return post(planner.changes(in: sessions, enabled: NotificationSettings.enabled, now: now), now: now)
+        }
+        planner.prime(sessions, now: now)
         primed = true
+    }
+
+    /// Runs the planner again on the last sessions, so a run that went quiet
+    /// is announced (and its notification withdrawn once it reports again).
+    private func recheck() {
+        guard primed else { return }
+        let now = Date()
+        post(planner.changes(in: lastSessions, enabled: NotificationSettings.enabled, now: now), now: now)
+    }
+
+    private func startRechecking() {
+        guard recheckTimer == nil else { return }
+        let timer = Timer(timeInterval: Self.recheckEvery, repeats: true) { _ in
+            MainActor.assumeIsolated { Notifier.shared.recheck() }
+        }
+        timer.tolerance = 10
+        RunLoop.main.add(timer, forMode: .common)
+        recheckTimer = timer
     }
 
     private var askedThisLaunch = false
 
-    private func post(_ changes: (post: [Session], ended: [String])) {
+    private func post(_ changes: (post: [Session], ended: [String]), now: Date) {
         guard let center else { return }
         // Ask for permission the first time there is something worth showing,
         // rather than at launch when the user doesn't know why yet.
@@ -91,7 +120,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             askedThisLaunch = true
             Task {
                 if await authorizationStatus() == .notDetermined { await requestAuthorization() }
-                post(changes)
+                post(changes, now: now)
             }
             return
         }
@@ -102,7 +131,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         for session in changes.post {
-            guard let kind = session.alertKind else { continue }
+            guard let kind = session.alertKind(now: now) else { continue }
             // Not while the user is already looking at that session's app. A
             // browser is skipped only for agents: the chat may be in another tab.
             if !session.tool.isWeb, let host = Jumper.hostBundle(for: session), host == front { continue }
@@ -142,6 +171,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         case .done:
             content.subtitle = "\(tool) · Done"
             content.body = TextUtils.preview(of: session.lastMessage, limit: 160) ?? "It finished."
+        case .stalled:
+            content.subtitle = "\(tool) · No update"
+            content.body = "No events for \(Int(Session.quietThreshold / 60)) minutes — it may have stopped."
         }
         content.threadIdentifier = session.id
         content.categoryIdentifier = category

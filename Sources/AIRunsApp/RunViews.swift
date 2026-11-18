@@ -11,6 +11,8 @@ struct SessionRow: View {
     let session: Session
     let lifeline: [ActivitySpan]
     let now: Date
+    /// Titles of other runs working in the same repository right now.
+    var alsoHere: [String] = []
     @ObservedObject var ui: PanelUIState
     let rename: () -> Void
     let pin: () -> Void
@@ -46,6 +48,14 @@ struct SessionRow: View {
                             .frame(width: 104, height: 9)
                     }
                     .padding(.top, 2)
+                    if let warning = RunText.alsoHere(alsoHere) {
+                        Label(warning, systemImage: "arrow.triangle.branch")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .padding(.top, 1)
+                    }
                 }
             }
             .padding(.horizontal, 8)
@@ -72,7 +82,7 @@ struct SessionRow: View {
         .reportFrame(key.key)
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
-        .accessibilityLabel("\(session.title), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.liveText(session, now: now))")
+        .accessibilityLabel("\(session.title), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.liveText(session, now: now))\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
         .accessibilityAddTraits(.isButton)
     }
 }
@@ -96,6 +106,13 @@ enum RunText {
         if !session.project.isEmpty { parts.append(session.project) }
         if let driver = session.drivenBy { parts.append("via \(driver)") }
         return parts.joined(separator: " · ")
+    }
+
+    /// "Also running here: Fix login" or "Also running here: Fix login and 2 more".
+    static func alsoHere(_ titles: [String]) -> String? {
+        guard let first = titles.first else { return nil }
+        let rest = titles.count - 1
+        return "Also running here: " + (rest == 0 ? first : "\(first) and \(rest) more")
     }
 
     static func stateWord(_ session: Session, now: Date) -> String {

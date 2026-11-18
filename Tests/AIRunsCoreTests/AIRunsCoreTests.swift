@@ -864,6 +864,120 @@ final class AlertPlannerTests: XCTestCase {
     }
 }
 
+final class StalledAlertTests: XCTestCase {
+    private func ev(_ kind: EventKind, _ minutes: Double, id: String = "s", background: Int = 0) -> AgentEvent {
+        AgentEvent(tool: .claudeCode, kind: kind, sessionId: id, at: Date(timeIntervalSince1970: minutes * 60),
+                   prompt: kind == .promptStart ? "Long build" : nil, backgroundTasks: background)
+    }
+    private func at(_ minutes: Double) -> Date { Date(timeIntervalSince1970: minutes * 60) }
+
+    func testStallIsAnnouncedOnceAndWithdrawnAfterANewEvent() throws {
+        var store = SessionStore()
+        var planner = AlertPlanner()
+        let enabled = Set(AlertKind.allCases)
+        store.apply(ev(.promptStart, 0))
+        planner.prime(Array(store.sessions.values), now: at(1))
+
+        var result = planner.changes(in: Array(store.sessions.values), enabled: enabled, now: at(20))
+        XCTAssertTrue(result.post.isEmpty && result.ended.isEmpty, "not quiet yet")
+
+        result = planner.changes(in: Array(store.sessions.values), enabled: enabled, now: at(31))
+        XCTAssertEqual(result.post.map(\.id), ["claude-code:s"])
+        XCTAssertEqual(try XCTUnwrap(result.post.first).alertKind(now: at(31)), .stalled)
+
+        result = planner.changes(in: Array(store.sessions.values), enabled: enabled, now: at(32))
+        XCTAssertTrue(result.post.isEmpty, "the same stall is announced once")
+        result = planner.changes(in: Array(store.sessions.values), enabled: enabled, now: at(90))
+        XCTAssertTrue(result.post.isEmpty && result.ended.isEmpty, "still the same stall")
+
+        store.apply(ev(.toolActivity, 91))
+        result = planner.changes(in: Array(store.sessions.values), enabled: enabled, now: at(91))
+        XCTAssertTrue(result.post.isEmpty)
+        XCTAssertEqual(result.ended, ["claude-code:s"], "a new event ends the stall")
+
+        result = planner.changes(in: Array(store.sessions.values), enabled: enabled, now: at(122))
+        XCTAssertEqual(result.post.map(\.id), ["claude-code:s"], "a later stall is a new moment")
+    }
+
+    func testStallNotAnnouncedWhenDisabled() {
+        var store = SessionStore()
+        var planner = AlertPlanner()
+        store.apply(ev(.promptStart, 0))
+        planner.prime(Array(store.sessions.values), now: at(1))
+        let enabled: Set<AlertKind> = [.approval, .input, .replied, .done]
+        XCTAssertTrue(planner.changes(in: Array(store.sessions.values), enabled: enabled, now: at(31)).post.isEmpty)
+        // Turning it on later doesn't replay a stall that was already seen.
+        XCTAssertTrue(planner.changes(in: Array(store.sessions.values), enabled: Set(AlertKind.allCases), now: at(32)).post.isEmpty)
+    }
+
+    func testBackgroundAndRecentRunsAreNotStalled() throws {
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0, id: "bg"))
+        store.apply(ev(.turnEnd, 1, id: "bg", background: 1))
+        let background = try XCTUnwrap(store.sessions["claude-code:bg"])
+        XCTAssertTrue(background.isInBackground)
+        XCTAssertNil(background.alertKind(now: at(120)))
+
+        store.apply(ev(.promptStart, 0, id: "live"))
+        XCTAssertNil(try XCTUnwrap(store.sessions["claude-code:live"]).alertKind(now: at(29)))
+    }
+
+    func testPrimeDoesNotReplayAnOldStall() {
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0))
+        var planner = AlertPlanner()
+        planner.prime(Array(store.sessions.values), now: at(45))
+        XCTAssertTrue(planner.changes(in: Array(store.sessions.values), enabled: Set(AlertKind.allCases), now: at(46)).post.isEmpty)
+    }
+}
+
+final class OverlapTests: XCTestCase {
+    private func store(_ runs: [(id: String, cwd: String?, working: Bool)], tool: AgentTool = .claudeCode) -> [Session] {
+        var store = SessionStore()
+        for run in runs {
+            store.apply(AgentEvent(tool: tool, kind: .promptStart, sessionId: run.id, at: Date(), prompt: "Task \(run.id)",
+                                   cwd: run.cwd, transcriptPath: "/t/\(run.id)"))
+            if !run.working {
+                store.apply(AgentEvent(tool: tool, kind: .turnEnd, sessionId: run.id, at: Date(), lastMessage: "Done."))
+            }
+        }
+        return store.ordered()
+    }
+
+    func testSameFolderAndNestedFoldersOverlap() {
+        let sessions = store([("a", "/Users/me/app", true), ("b", "/Users/me/app/", true),
+                              ("c", "/Users/me/app/Sources", true), ("d", "/Users/me/apple", true)])
+        let overlap = Overlap.sameRepo(sessions)
+        XCTAssertEqual(Set(overlap["claude-code:a"]?.map(\.sessionId) ?? []), ["b", "c"])
+        XCTAssertEqual(Set(overlap["claude-code:b"]?.map(\.sessionId) ?? []), ["a", "c"])
+        XCTAssertEqual(Set(overlap["claude-code:c"]?.map(\.sessionId) ?? []), ["a", "b"])
+        XCTAssertNil(overlap["claude-code:d"], "/Users/me/apple is not inside /Users/me/app")
+    }
+
+    func testSiblingsDoNotOverlap() {
+        let overlap = Overlap.sameRepo(store([("a", "/w/x/one", true), ("b", "/w/x/two", true)]))
+        XCTAssertTrue(overlap.isEmpty)
+    }
+
+    func testOnlyWorkingSessionsWithAFolderCount() {
+        let sessions = store([("a", "/repo", true), ("b", "/repo", false), ("c", nil, true), ("d", nil, true)])
+        XCTAssertTrue(Overlap.sameRepo(sessions).isEmpty, "finished runs and folderless chats never overlap")
+
+        let three = store([("a", "/repo", true), ("b", "/repo/../repo/", true), ("c", "/repo", false)])
+        let overlap = Overlap.sameRepo(three)
+        XCTAssertEqual(overlap["claude-code:a"]?.map(\.sessionId), ["b"])
+        XCTAssertNil(overlap["claude-code:c"])
+    }
+
+    func testContainsIsByPathComponent() {
+        XCTAssertTrue(Overlap.contains("/a", "/a/b"))
+        XCTAssertTrue(Overlap.contains("/a", "/a"))
+        XCTAssertFalse(Overlap.contains("/a", "/ab"))
+        XCTAssertFalse(Overlap.contains("/a/b", "/a"))
+        XCTAssertTrue(Overlap.contains("/", "/a"))
+    }
+}
+
 final class WebBridgeTests: XCTestCase {
     func testFramingRoundTrip() throws {
         let framed = WebBridge.frame(["ok": true])
