@@ -193,7 +193,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func saveSessions() { try? JSONFile.save(store, to: paths.sessions) }
+    private func saveSessions() {
+        try? JSONFile.save(store, to: paths.sessions)
+        // Removing, restoring or renaming changes what notifications should
+        // show even though no event arrived.
+        Notifier.shared.update(sessions: Array(store.sessions.values))
+    }
     private func savePins() { try? JSONFile.save(board, to: paths.pins) }
 
     // MARK: - Hook helper and hooks
@@ -224,9 +229,6 @@ final class AppModel: ObservableObject {
         } catch {
             helperMissing = !fm.isExecutableFile(atPath: paths.hookHelper.path)
         }
-        // Removing, restoring or renaming changes what notifications should
-        // show even though no event arrived.
-        Notifier.shared.update(sessions: Array(store.sessions.values))
     }
 
     /// When a new version listens to more Claude Code events (such as its
