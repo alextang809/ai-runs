@@ -2,6 +2,7 @@ import AIRunsCore
 import AppKit
 import ServiceManagement
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
@@ -44,6 +45,10 @@ struct SettingsView: View {
             if let error {
                 Text(error).font(.system(size: 12)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
+
+            Divider()
+
+            NotificationSection()
 
             Divider()
 
@@ -148,5 +153,50 @@ private struct HookRow: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+    }
+}
+
+/// Permission, and which moments to announce.
+struct NotificationSection: View {
+    @State private var status: UNAuthorizationStatus = .notDetermined
+    @AppStorage(NotificationSettings.key(.approval)) private var approval = true
+    @AppStorage(NotificationSettings.key(.input)) private var input = true
+    @AppStorage(NotificationSettings.key(.replied)) private var replied = false
+    @AppStorage(NotificationSettings.key(.done)) private var done = false
+    @AppStorage(NotificationSettings.remindKey) private var remind = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Notifications").font(.headline)
+                Spacer()
+                switch status {
+                case .authorized, .provisional:
+                    Label("On", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.system(size: 12))
+                case .denied:
+                    Button("Turn On in System Settings…") { Notifier.openSystemSettings() }.controlSize(.small)
+                default:
+                    Button("Allow Notifications") {
+                        Task {
+                            await Notifier.shared.requestAuthorization()
+                            status = await Notifier.shared.authorizationStatus()
+                        }
+                    }
+                    .controlSize(.small)
+                }
+            }
+            Text("A banner when a session needs you, so you can work elsewhere. None while you're already in that session's app.")
+                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Group {
+                Toggle("Approval requests (APPROVE)", isOn: $approval)
+                Toggle("Questions and blockers (NEEDS INPUT)", isOn: $input)
+                Toggle("Unclear replies (REPLIED)", isOn: $replied)
+                Toggle("Finished work (DONE)", isOn: $done)
+                Toggle("Remind me once if it's still waiting after 15 minutes", isOn: $remind)
+            }
+            .font(.system(size: 12.5))
+            .disabled(status == .denied)
+        }
+        .task { status = await Notifier.shared.authorizationStatus() }
     }
 }

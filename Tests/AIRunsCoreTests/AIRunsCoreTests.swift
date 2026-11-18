@@ -824,3 +824,42 @@ final class TidyTests: XCTestCase {
         XCTAssertFalse(old.dismissed?.contains(session.id) ?? false)
     }
 }
+
+final class AlertPlannerTests: XCTestCase {
+    private func ev(_ kind: EventKind, _ s: Double, id: String = "n", message: String? = nil) -> AgentEvent {
+        AgentEvent(tool: .claudeCode, kind: kind, sessionId: id, at: Date(timeIntervalSince1970: s), lastMessage: message)
+    }
+
+    func testAnnouncesEachMomentOnceAndOnlyEnabledKinds() {
+        var store = SessionStore()
+        var planner = AlertPlanner()
+        planner.prime(Array(store.sessions.values))
+        let enabled: Set<AlertKind> = [.approval, .input]
+
+        store.apply(ev(.promptStart, 0))
+        store.apply(ev(.needsApproval, 5))
+        var result = planner.changes(in: Array(store.sessions.values), enabled: enabled)
+        XCTAssertEqual(result.post.map(\.id), ["claude-code:n"])
+        result = planner.changes(in: Array(store.sessions.values), enabled: enabled)
+        XCTAssertTrue(result.post.isEmpty, "the same moment is announced once")
+
+        store.apply(ev(.toolActivity, 8))
+        result = planner.changes(in: Array(store.sessions.values), enabled: enabled)
+        XCTAssertEqual(result.ended, ["claude-code:n"], "answered approval is withdrawn")
+
+        store.apply(ev(.turnEnd, 12, message: "Done. All tests pass."))
+        result = planner.changes(in: Array(store.sessions.values), enabled: enabled)
+        XCTAssertTrue(result.post.isEmpty, "DONE is off here")
+        result = planner.changes(in: Array(store.sessions.values), enabled: [.done])
+        XCTAssertTrue(result.post.isEmpty, "already seen")
+    }
+
+    func testPrimeDoesNotReplayOldNews() {
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0))
+        store.apply(ev(.needsApproval, 5))
+        var planner = AlertPlanner()
+        planner.prime(Array(store.sessions.values))
+        XCTAssertTrue(planner.changes(in: Array(store.sessions.values), enabled: Set(AlertKind.allCases)).post.isEmpty)
+    }
+}

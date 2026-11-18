@@ -1,0 +1,171 @@
+import AIRunsCore
+import AppKit
+import UserNotifications
+
+/// Which moments to announce; set in Settings.
+enum NotificationSettings {
+    static func key(_ kind: AlertKind) -> String { "notify.\(kind.rawValue)" }
+    static let remindKey = "notify.remind"
+
+    static func registerDefaults() {
+        UserDefaults.standard.register(defaults: [
+            key(.approval): true, key(.input): true, key(.replied): false, key(.done): false, remindKey: true,
+        ])
+    }
+
+    static var enabled: Set<AlertKind> {
+        Set(AlertKind.allCases.filter { UserDefaults.standard.bool(forKey: key($0)) })
+    }
+
+    static var remind: Bool { UserDefaults.standard.bool(forKey: remindKey) }
+}
+
+/// Posts a notification when a session starts needing the user, withdraws it
+/// when that moment is over, and handles Open / Snooze.
+@MainActor
+final class Notifier: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = Notifier()
+
+    /// Opens a session by its ID (set by the app model).
+    var open: ((String) -> Void)?
+
+    private var planner = AlertPlanner()
+    private var primed = false
+    private static let category = "session"
+    private static let openAction = "open"
+    private static let snoozeAction = "snooze"
+    private static let remindAfter: TimeInterval = 15 * 60
+
+    /// Notifications need a bundle; a bare `swift run` has none.
+    private var center: UNUserNotificationCenter? {
+        Bundle.main.bundleIdentifier == nil ? nil : UNUserNotificationCenter.current()
+    }
+
+    func setUp() {
+        NotificationSettings.registerDefaults()
+        guard let center else { return }
+        center.delegate = self
+        let open = UNNotificationAction(identifier: Self.openAction, title: "Open", options: [.foreground])
+        let snooze = UNNotificationAction(identifier: Self.snoozeAction, title: "Snooze 15m", options: [])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: Self.category, actions: [open, snooze], intentIdentifiers: []),
+        ])
+    }
+
+    // MARK: Permission
+
+    func authorizationStatus() async -> UNAuthorizationStatus {
+        guard let center else { return .denied }
+        return await center.notificationSettings().authorizationStatus
+    }
+
+    /// Shows the system prompt the first time; afterwards macOS remembers the answer.
+    @discardableResult
+    func requestAuthorization() async -> Bool {
+        guard let center else { return false }
+        return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+    }
+
+    static func openSystemSettings() {
+        let id = Bundle.main.bundleIdentifier ?? ""
+        let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)")
+            ?? URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: Updates
+
+    func update(sessions: [Session]) {
+        guard !primed else { return post(planner.changes(in: sessions, enabled: NotificationSettings.enabled)) }
+        planner.prime(sessions)
+        primed = true
+    }
+
+    private var askedThisLaunch = false
+
+    private func post(_ changes: (post: [Session], ended: [String])) {
+        guard let center else { return }
+        // Ask for permission the first time there is something worth showing,
+        // rather than at launch when the user doesn't know why yet.
+        if !changes.post.isEmpty, !askedThisLaunch {
+            askedThisLaunch = true
+            Task {
+                if await authorizationStatus() == .notDetermined { await requestAuthorization() }
+                post(changes)
+            }
+            return
+        }
+        if !changes.ended.isEmpty {
+            let ids = changes.ended.flatMap { ["alert-\($0)", "remind-\($0)", "snooze-\($0)"] }
+            center.removePendingNotificationRequests(withIdentifiers: ids)
+            center.removeDeliveredNotifications(withIdentifiers: ids)
+        }
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        for session in changes.post {
+            guard let kind = session.alertKind else { continue }
+            // Not while the user is already looking at that session's app.
+            if let host = Jumper.hostBundle(for: session), host == front { continue }
+            let content = Self.content(for: session, kind: kind)
+            center.add(UNNotificationRequest(identifier: "alert-\(session.id)", content: content, trigger: nil))
+            if NotificationSettings.remind, kind == .approval || kind == .input {
+                let reminder = content.mutableCopy() as! UNMutableNotificationContent
+                reminder.title = "Still waiting: \(session.title)"
+                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Self.remindAfter, repeats: false)
+                center.add(UNNotificationRequest(identifier: "remind-\(session.id)", content: reminder, trigger: trigger))
+            }
+        }
+    }
+
+    static func content(for session: Session, kind: AlertKind) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        let tool = session.tool == .codex ? "Codex" : "Claude"
+        content.title = session.title
+        switch kind {
+        case .approval:
+            content.subtitle = "\(tool) · Approve"
+            content.body = "Wants to run " + (session.approvalDetail ?? "a tool")
+            content.sound = .default
+        case .input:
+            content.subtitle = "\(tool) · Needs input"
+            content.body = session.approvalDetail.map { "“\($0)”" }
+                ?? TextUtils.preview(of: session.lastMessage, limit: 160) ?? "It needs your input."
+            content.sound = .default
+        case .replied:
+            content.subtitle = "\(tool) · Replied"
+            content.body = TextUtils.preview(of: session.lastMessage, limit: 160) ?? "It finished its turn."
+        case .done:
+            content.subtitle = "\(tool) · Done"
+            content.body = TextUtils.preview(of: session.lastMessage, limit: 160) ?? "It finished."
+        }
+        content.threadIdentifier = session.id
+        content.categoryIdentifier = category
+        content.userInfo = ["session": session.id]
+        return content
+    }
+
+    // MARK: UNUserNotificationCenterDelegate
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification)
+        async -> UNNotificationPresentationOptions {
+        [.banner, .sound, .list]
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        let action = response.actionIdentifier
+        guard let id = response.notification.request.content.userInfo["session"] as? String else { return }
+        let snoozed = response.notification.request.content.mutableCopy() as? UNMutableNotificationContent
+        await MainActor.run {
+            switch action {
+            case Self.snoozeAction:
+                guard let snoozed else { return }
+                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Self.remindAfter, repeats: false)
+                UNUserNotificationCenter.current()
+                    .add(UNNotificationRequest(identifier: "snooze-\(id)", content: snoozed, trigger: trigger))
+            case UNNotificationDismissActionIdentifier:
+                break
+            default:
+                Notifier.shared.open?(id)
+            }
+        }
+    }
+}

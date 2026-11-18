@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Notifier.shared.setUp()
         NSApp.setActivationPolicy(AppSettings.showInDock ? .regular : .accessory)
         let model = AppModel()
         let statusBar = StatusBarController(model: model)

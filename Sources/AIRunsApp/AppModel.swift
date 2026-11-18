@@ -41,6 +41,8 @@ final class AppModel: ObservableObject {
         board = JSONFile.load(PinBoard.self, from: paths.pins) ?? PinBoard()
         installHelper()
         upgradeHooks()
+        Notifier.shared.open = { [weak self] id in self?.open(sessionId: id) }
+        Notifier.shared.update(sessions: Array(store.sessions.values))
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
@@ -97,6 +99,7 @@ final class AppModel: ObservableObject {
         now = Date()
         suggestTitles()
         refineOutcomes()
+        Notifier.shared.update(sessions: Array(store.sessions.values))
     }
 
     /// The reply each session was last checked at, so names are looked at
@@ -126,6 +129,7 @@ final class AppModel: ObservableObject {
                 guard let outcome = await TitleModel.judge(lastReply: message), let self else { return }
                 self.store.setOutcome(id: id, outcome, source: .model, forMessage: message)
                 self.saveSessions()
+                Notifier.shared.update(sessions: Array(self.store.sessions.values))
             }
         }
     }
