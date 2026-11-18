@@ -239,7 +239,7 @@ struct MenuColumn: View {
     private var bottomMenu: some View {
         VStack(spacing: 0) {
             MenuRow(title: "Pin Front AI Window") { model.pinFrontWindow() }
-            MenuRow(title: ui.boardVisible ? "Hide Pinned Board" : "Show Pinned Board on Screen") { actions.toggleBoard() }
+            MenuRow(title: ui.boardVisible ? "Hide Floating Window" : "Show Floating Window") { actions.toggleBoard() }
             MenuRow(title: "Hooks & Settings…") { actions.showSettings() }
             MenuRow(title: "Quit AI Runs", shortcut: "⌘Q") { NSApp.terminate(nil) }
         }

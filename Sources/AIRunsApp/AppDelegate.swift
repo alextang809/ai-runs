@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.model = model
         self.statusBar = statusBar
         model.start()
+        statusBar.restoreFloating()
 
         // A full menu bar can hide the icon (often behind the camera notch),
         // so the panel can also be opened with a shortcut or by opening the

@@ -32,7 +32,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
     private var monitors: [Any] = []
     private var cancellables = Set<AnyCancellable>()
     private var settingsWindow: NSWindow?
-    private lazy var boardController = BoardPanelController(model: model, actions: self)
+    private lazy var floating = FloatingController(model: model, actions: self)
     private let toast = ToastController()
 
     init(model: AppModel) {
@@ -64,7 +64,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
                 self.placePanel()
             }
             .store(in: &cancellables)
-        boardController.onVisibilityChange = { [weak self] visible in self?.ui.boardVisible = visible }
+        floating.onVisibilityChange = { [weak self] visible in self?.ui.boardVisible = visible }
         updateButton(needsYou: model.store.needsUserCount)
     }
 
@@ -210,11 +210,18 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
 
     // MARK: - PanelActions
 
-    var isBoardVisible: Bool { boardController.isVisible }
+    var isBoardVisible: Bool { floating.isVisible }
 
+    /// Shows or hides the floating window (runs and the pinned board).
     func toggleBoard() {
-        boardController.toggle()
-        ui.boardVisible = boardController.isVisible
+        closePanel()
+        floating.toggle()
+        ui.boardVisible = floating.isVisible
+    }
+
+    func restoreFloating() {
+        floating.restore()
+        ui.boardVisible = floating.isVisible
     }
 
     func showSettings() {

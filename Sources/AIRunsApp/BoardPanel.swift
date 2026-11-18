@@ -3,68 +3,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The pinned board as a small window that stays on top of other apps, so
-/// open threads are visible while you work.
-@MainActor
-final class BoardPanelController: NSObject, NSWindowDelegate {
-    private let model: AppModel
-    private weak var actions: PanelActions?
-    private var panel: NSPanel?
-    var onVisibilityChange: ((Bool) -> Void)?
-
-    init(model: AppModel, actions: PanelActions) {
-        self.model = model
-        self.actions = actions
-    }
-
-    var isVisible: Bool { panel?.isVisible == true }
-
-    func toggle() {
-        if isVisible {
-            panel?.orderOut(nil)
-            onVisibilityChange?(false)
-        } else {
-            show()
-        }
-    }
-
-    func show() {
-        let panel = self.panel ?? makePanel()
-        self.panel = panel
-        panel.orderFrontRegardless()
-        onVisibilityChange?(true)
-    }
-
-    private func makePanel() -> NSPanel {
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 290, height: 440),
-                            styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
-                            backing: .buffered, defer: true)
-        panel.title = "Pinned"
-        panel.level = .floating
-        panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = false
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.minSize = NSSize(width: 240, height: 220)
-        panel.delegate = self
-        panel.contentView = NSHostingView(rootView: BoardView(model: model, editCard: { [weak self] card in
-            self?.actions?.editCard(card)
-        }))
-        if !panel.setFrameUsingName("AIRunsPinnedBoard") {
-            if let screen = NSScreen.main?.visibleFrame {
-                panel.setFrameOrigin(NSPoint(x: screen.minX + 40, y: screen.maxY - 480))
-            }
-        }
-        panel.setFrameAutosaveName("AIRunsPinnedBoard")
-        return panel
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        onVisibilityChange?(false)
-    }
-}
-
+/// The pinned board, shown in the floating window's Pinned tab.
 struct BoardView: View {
     @ObservedObject var model: AppModel
     let editCard: (PinCard) -> Void

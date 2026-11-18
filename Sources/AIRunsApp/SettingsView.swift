@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var error: String?
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var showInDock = AppSettings.showInDock
+    @AppStorage(FloatingSettings.autoExpandKey) private var autoExpand = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -49,6 +50,16 @@ struct SettingsView: View {
             Divider()
 
             NotificationSection()
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Floating window").font(.headline)
+                Text("A capsule that stays on top of every app and Space. Open it from the menu: Show Floating Window. Click it to see your runs and the pinned board; drag it anywhere.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Toggle("Open it by itself when a session needs you", isOn: $autoExpand)
+                    .font(.system(size: 12.5))
+            }
 
             Divider()
 

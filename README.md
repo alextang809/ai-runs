@@ -105,9 +105,15 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 - **Remove** a session: hover and click **×**, or right-click → Remove from List.
   **Undo** (⌘Z) for a few seconds. It comes back only when you message it again.
 - **Rename**, **Pin to Board** and more: right-click a row, or hover it for details.
+- **Floating window:** menu → **Show Floating Window**. A small capsule stays on
+  top of every app, Space and full-screen window, showing how many sessions need
+  you. Click it for your runs and the pinned board; drag it anywhere (it snaps to
+  edges). It can open by itself when something needs you (Settings).
 - **Pinned board:** keep threads and quick notes you don't want to lose, grouped
-  by project. **Show Pinned Board on Screen** turns it into a small floating window;
-  drag text or links onto it to make cards.
+  by project, in the floating window's Pinned tab. Drag text or links onto it to
+  make cards.
+- **Notifications:** a banner when a session asks for approval or input, with
+  Open and Snooze. Choose which moments in Settings.
 - **Pin Front AI Window:** pins the browser tab or app you were just in (for
   claude.ai or chatgpt.com chats, which AI Runs can't track automatically yet).
 
