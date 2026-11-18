@@ -350,20 +350,23 @@ struct FloatingCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14).padding(.bottom, 12)
         } else {
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(active) { session in
-                        FloatingRow(session: session, now: model.now,
-                                    open: { controller.open(session) },
-                                    rename: { controller.rename(session.id) },
-                                    pin: { model.pin(sessionId: session.id) },
-                                    remove: { model.remove(sessionId: session.id) })
-                    }
+            let list = VStack(spacing: 0) {
+                ForEach(active) { session in
+                    FloatingRow(session: session, now: model.now,
+                                open: { controller.open(session) },
+                                rename: { controller.rename(session.id) },
+                                pin: { model.pin(sessionId: session.id) },
+                                remove: { model.remove(sessionId: session.id) })
                 }
-                .padding(.horizontal, 4)
             }
-            .frame(maxHeight: 420)
-            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4)
+            // The window sizes itself to its content, so a scroll view only
+            // appears (with a fixed height) once the list is long.
+            if active.count <= 8 {
+                list
+            } else {
+                ScrollView { list }.frame(height: 400)
+            }
         }
         if quiet > 0 {
             Text("+ \(quiet) done or in the background")
