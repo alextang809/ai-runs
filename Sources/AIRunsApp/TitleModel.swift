@@ -1,3 +1,4 @@
+import AIRunsCore
 import Foundation
 #if canImport(FoundationModels)
 import FoundationModels
@@ -24,6 +25,33 @@ enum TitleModel {
             do {
                 let response = try await session.respond(to: input)
                 return clean(response.content)
+            } catch {
+                return nil
+            }
+        }
+        #endif
+        return nil
+    }
+
+    /// Did the assistant finish, or does it need the user? Nil when the model
+    /// is unavailable or unsure.
+    static func judge(lastReply: String) async -> TurnOutcome? {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            guard case .available = SystemLanguageModel.default.availability else { return nil }
+            let session = LanguageModelSession(instructions: """
+                You read the last message an AI coding assistant wrote at the end of its turn. \
+                Answer with exactly one word: DONE if it finished what it was asked and nothing is needed \
+                from the user (an optional offer of more work still counts as DONE); INPUT if it asks a \
+                question, needs a decision, is blocked, or asks the user to do something before it can \
+                continue; UNSURE otherwise.
+                """)
+            do {
+                let response = try await session.respond(to: String(lastReply.suffix(1500)))
+                let word = response.content.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                if word.hasPrefix("DONE") { return .done }
+                if word.hasPrefix("INPUT") { return .needsInput }
+                return nil
             } catch {
                 return nil
             }

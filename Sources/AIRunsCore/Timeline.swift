@@ -31,7 +31,8 @@ public struct ActivitySpan: Codable, Equatable, Sendable {
 extension SpanKind {
     init(_ session: Session) {
         switch session.state {
-        case .needsApproval, .yourTurn: self = .waiting
+        case .needsApproval: self = .waiting
+        case .yourTurn: self = session.isDone ? .background : .waiting
         case .working: self = session.isInBackground ? .background : .working
         }
     }

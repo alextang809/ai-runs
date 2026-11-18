@@ -73,6 +73,8 @@ public enum EventKind: String, Codable, Sendable {
     case turnEnd
     /// The session was closed.
     case sessionEnd
+    /// The AI asked the user a question with its "ask the user" tool.
+    case question
 }
 
 /// One hook event, translated from the tool-specific payload.
@@ -96,6 +98,10 @@ public struct AgentEvent: Equatable, Sendable {
     public var progress: RunProgress?
     /// Set when another agent sent the prompt (`<relay from="…">`).
     public var drivenBy: String?
+    /// Wake-ups the agent scheduled for itself when the turn ended; it resumes on its own.
+    public var scheduled: Int = 0
+    /// The question, for `.question` events.
+    public var question: String?
 
     public init(tool: AgentTool, kind: EventKind, sessionId: String, at: Date, prompt: String? = nil,
                 lastMessage: String? = nil, approvalDetail: String? = nil, cwd: String? = nil,

@@ -37,6 +37,7 @@ final class AppModel: ObservableObject {
         store = JSONFile.load(SessionStore.self, from: paths.sessions) ?? SessionStore()
         board = JSONFile.load(PinBoard.self, from: paths.pins) ?? PinBoard()
         installHelper()
+        upgradeHooks()
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
@@ -92,6 +93,7 @@ final class AppModel: ObservableObject {
         try? JSONFile.save(Cursor(offset: reader.offset), to: paths.cursor)
         now = Date()
         suggestTitles()
+        refineOutcomes()
     }
 
     /// The reply each session was last checked at, so names are looked at
@@ -105,6 +107,26 @@ final class AppModel: ObservableObject {
     /// 2. the tool's own title, followed whenever the tool changes it;
     /// 3. otherwise one name chosen from what was asked (on-device model,
     ///    else the first request), kept from then on.
+    /// Messages already given to the on-device model, per session.
+    private var judged: [String: String] = [:]
+
+    /// When the wording of a finished turn doesn't say whether the agent is
+    /// done or needs the user, asks the on-device model (macOS 26). Without
+    /// it the session stays "Replied", which claims neither.
+    private func refineOutcomes() {
+        for session in store.sessions.values where session.state == .yourTurn
+            && session.outcome == .replied && session.outcomeSource == .message {
+            guard let message = session.lastMessage, judged[session.id] != message else { continue }
+            judged[session.id] = message
+            let id = session.id
+            Task { @MainActor [weak self] in
+                guard let outcome = await TitleModel.judge(lastReply: message), let self else { return }
+                self.store.setOutcome(id: id, outcome, source: .model, forMessage: message)
+                self.saveSessions()
+            }
+        }
+    }
+
     private func suggestTitles() {
         var desktop: [ClaudeDesktopSession]?
         for session in store.sessions.values where session.titleIsCustom != true {
@@ -195,6 +217,14 @@ final class AppModel: ObservableObject {
         } catch {
             helperMissing = !fm.isExecutableFile(atPath: paths.hookHelper.path)
         }
+    }
+
+    /// When a new version listens to more Claude Code events (such as its
+    /// "ask the user" tool), adds them to hooks the user already set up.
+    /// Codex is left alone: it asks the user to approve every hook change.
+    private func upgradeHooks() {
+        guard installer.status(for: .claudeCode) == .partiallyInstalled else { return }
+        try? installer.install(tool: .claudeCode, helper: paths.hookHelper)
     }
 
     func hookStatus(_ tool: AgentTool) -> HookInstaller.Status { installer.status(for: tool) }

@@ -675,3 +675,108 @@ final class CodexThreadIndexTests: XCTestCase {
     }
 }
 #endif
+
+final class TurnOutcomeTests: XCTestCase {
+    private func judge(_ text: String, plan: RunProgress? = nil) -> TurnOutcome {
+        TurnClassifier.classify(message: text, progress: plan).0
+    }
+
+    func testQuestionsNeedInput() {
+        XCTAssertEqual(judge("I found two ways to fix this.\n\nWhich one do you prefer: A or B?"), .needsInput)
+        XCTAssertEqual(judge("两个方案都可以。\n\n你想用哪一个？"), .needsInput)
+        XCTAssertEqual(judge("Should I delete the old migration files first?"), .needsInput)
+    }
+
+    func testBlockedNeedsInput() {
+        XCTAssertEqual(judge("I couldn't push: permission denied for the remote."), .needsInput)
+        XCTAssertEqual(judge("构建失败了，需要你在 Xcode 里登录开发者账号。"), .needsInput)
+    }
+
+    func testFinishedWorkIsDoneEvenWithAnOffer() {
+        XCTAssertEqual(judge("Pushed the fix and all tests pass.\n\nWant me to also update the README?"), .done)
+        XCTAssertEqual(judge("已推送到 main，CI 通过。\n\n要不要我顺便更新 README？"), .done)
+        XCTAssertEqual(judge("Done. The build succeeded."), .done)
+    }
+
+    func testOfferWithoutFinishedWorkStillNeedsInput() {
+        XCTAssertEqual(judge("I've read the code.\n\nWant me to go ahead and refactor it?"), .needsInput)
+    }
+
+    func testNegatedCompletionIsNotDone() {
+        XCTAssertEqual(judge("The migration is not finished yet; I'll pick it up next."), .replied)
+        XCTAssertEqual(judge("还没完成，接下来会继续。"), .replied)
+    }
+
+    func testUnclearIsReplied() {
+        XCTAssertEqual(judge("Here is a summary of the module structure and how the pieces fit."), .replied)
+        XCTAssertEqual(judge(""), .replied)
+    }
+
+    func testFinishedPlanIsDone() {
+        let (outcome, source) = TurnClassifier.classify(message: "Summary of changes.",
+                                                        progress: RunProgress(done: 3, total: 3, current: nil))
+        XCTAssertEqual(outcome, .done)
+        XCTAssertEqual(source, .plan)
+    }
+
+    func testLastQuestion() {
+        XCTAssertEqual(TurnClassifier.lastQuestion(in: "Fixed it. Should I push? Thanks."), "Should I push?")
+    }
+
+    private func ev(_ kind: EventKind, _ s: Double, message: String? = nil, question: String? = nil,
+                    scheduled: Int = 0) -> AgentEvent {
+        var event = AgentEvent(tool: .claudeCode, kind: kind, sessionId: "q", at: Date(timeIntervalSince1970: s),
+                               lastMessage: message)
+        event.question = question
+        event.scheduled = scheduled
+        return event
+    }
+
+    func testStoreOutcomesAndCounts() {
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0))
+        store.apply(ev(.turnEnd, 5, message: "Done. All tests pass."))
+        XCTAssertEqual(store.sessions["claude-code:q"]?.isDone, true)
+        XCTAssertEqual(store.needsUserCount, 0)
+        XCTAssertEqual(store.doneCount, 1)
+
+        store.apply(ev(.promptStart, 6))
+        store.apply(ev(.question, 7, question: "Which database?"))
+        var session = store.sessions["claude-code:q"]!
+        XCTAssertEqual(session.outcome, .needsInput)
+        XCTAssertEqual(session.outcomeSource, .asked)
+        XCTAssertEqual(session.approvalDetail, "Which database?")
+        XCTAssertEqual(store.needsUserCount, 1)
+        store.apply(ev(.toolActivity, 9))
+        XCTAssertEqual(store.sessions["claude-code:q"]?.state, .working)
+
+        store.apply(ev(.turnEnd, 12, message: "Here is what I looked at."))
+        session = store.sessions["claude-code:q"]!
+        XCTAssertEqual(session.outcome, .replied)
+        store.setOutcome(id: session.id, .done, source: .model, forMessage: "Here is what I looked at.")
+        XCTAssertEqual(store.sessions["claude-code:q"]?.outcomeSource, .model)
+        XCTAssertEqual(store.needsUserCount, 0)
+    }
+
+    func testScheduledWakeUpKeepsItWorking() {
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0))
+        store.apply(ev(.turnEnd, 5, message: "I'll check CI again in 10 minutes.", scheduled: 1))
+        let session = store.sessions["claude-code:q"]!
+        XCTAssertEqual(session.state, .working)
+        XCTAssertTrue(session.isInBackground)
+        XCTAssertEqual(store.needsUserCount, 0)
+    }
+
+    func testParserReadsQuestionAndCrons() {
+        let pre: [String: Any] = ["session_id": "q", "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion",
+                                  "tool_input": ["questions": [["question": "Which one?"]]]]
+        let question = EventParser.parse(tool: .claudeCode, payload: pre, at: Date(), terminal: TerminalContext())
+        XCTAssertEqual(question?.kind, .question)
+        XCTAssertEqual(question?.question, "Which one?")
+        let other: [String: Any] = ["session_id": "q", "hook_event_name": "PreToolUse", "tool_name": "Bash"]
+        XCTAssertNil(EventParser.parse(tool: .claudeCode, payload: other, at: Date(), terminal: TerminalContext()))
+        let stop: [String: Any] = ["session_id": "q", "hook_event_name": "Stop", "session_crons": [["id": "c"]]]
+        XCTAssertEqual(EventParser.parse(tool: .claudeCode, payload: stop, at: Date(), terminal: TerminalContext())?.scheduled, 1)
+    }
+}

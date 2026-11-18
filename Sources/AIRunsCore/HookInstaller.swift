@@ -40,7 +40,8 @@ public struct HookInstaller {
         switch tool {
         case .claudeCode:
             return [("UserPromptSubmit", nil), ("Stop", nil), ("PermissionRequest", nil),
-                    ("Notification", "permission_prompt"), ("PostToolUse", nil), ("SessionEnd", nil)]
+                    ("Notification", "permission_prompt"), ("PostToolUse", nil), ("SessionEnd", nil),
+                    ("PreToolUse", "AskUserQuestion")]
         case .codex:
             return [("UserPromptSubmit", nil), ("Stop", nil), ("PermissionRequest", nil), ("PostToolUse", nil)]
         }

@@ -27,6 +27,12 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var approvalDetail: String?
     public var transcriptPath: String?
     public var terminal: TerminalContext
+    /// What the last finished turn means: needs input, done, or just replied.
+    public var outcome: TurnOutcome?
+    /// How AI Runs knows `outcome`.
+    public var outcomeSource: OutcomeSource?
+    /// Wake-ups it scheduled for itself; it continues on its own.
+    public var scheduled: Int?
     /// Set while the agent waits on its own background tasks; it continues by itself.
     public var backgroundTasks: Int?
     /// The first thing the user typed (tags removed), for naming the session.
@@ -43,7 +49,11 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// Another agent that sends this session its prompts, e.g. "coordinator".
     public var drivenBy: String?
 
-    public var isInBackground: Bool { state == .working && (backgroundTasks ?? 0) > 0 }
+    public var isInBackground: Bool { state == .working && ((backgroundTasks ?? 0) > 0 || (scheduled ?? 0) > 0) }
+    /// Finished its work: shown, but not counted as needing the user.
+    public var isDone: Bool { state == .yourTurn && outcome == .done }
+    /// Waiting on the user: approval, a question, or a reply AI Runs can't classify.
+    public var needsUser: Bool { state.needsUser && !isDone }
 
     public var project: String { TextUtils.projectName(fromPath: cwd) }
 
@@ -130,6 +140,9 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.waitingSince = nil
             current.approvalDetail = nil
             current.backgroundTasks = nil
+            current.scheduled = nil
+            current.outcome = nil
+            current.outcomeSource = nil
             current.activity = "Thinking"
             if let driver = event.drivenBy { current.drivenBy = driver }
             if current.firstPrompt == nil, let prompt = event.prompt, let cleaned = TextUtils.cleanPrompt(prompt) {
@@ -145,26 +158,44 @@ public struct SessionStore: Codable, Equatable, Sendable {
         case .toolActivity:
             if let activity = event.activity { current.activity = activity }
             if let progress = event.progress { current.progress = progress }
-            if current.state == .needsApproval {
+            if current.state != .working {
+                // A tool ran, so the approval or question was answered.
                 current.state = .working
                 current.waitingSince = nil
                 current.approvalDetail = nil
+                current.outcome = nil
+                current.outcomeSource = nil
             }
+        case .question:
+            current.state = .yourTurn
+            current.waitingSince = event.at
+            current.approvalDetail = event.question
+            current.outcome = .needsInput
+            current.outcomeSource = .asked
         case .turnEnd:
             current.approvalDetail = nil
             current.activity = nil
-            if current.progress?.isFinished == true { current.progress = nil }
             if let message = event.lastMessage, !message.isEmpty { current.lastMessage = message }
-            if event.backgroundTasks > 0 {
-                // Still busy: it will resume on its own when the tasks finish.
+            if event.backgroundTasks > 0 || event.scheduled > 0 {
+                // Still busy: it resumes on its own when its background tasks
+                // finish or its scheduled wake-up fires.
                 current.state = .working
                 current.waitingSince = nil
-                current.backgroundTasks = event.backgroundTasks
+                current.backgroundTasks = event.backgroundTasks > 0 ? event.backgroundTasks : nil
+                current.scheduled = event.scheduled > 0 ? event.scheduled : nil
+                current.outcome = nil
+                current.outcomeSource = nil
             } else {
                 current.state = .yourTurn
                 current.waitingSince = event.at
                 current.backgroundTasks = nil
+                current.scheduled = nil
+                let (outcome, source) = TurnClassifier.classify(message: event.lastMessage, progress: current.progress)
+                current.outcome = outcome
+                current.outcomeSource = source
+                if outcome == .needsInput { current.approvalDetail = TurnClassifier.lastQuestion(in: event.lastMessage) }
             }
+            if current.progress?.isFinished == true { current.progress = nil }
         case .sessionEnd:
             break
         }
@@ -235,22 +266,42 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// Sessions that need the user first, longest-waiting first; then working
     /// sessions, most recently started first.
     public func ordered() -> [Session] {
-        func rank(_ state: SessionState) -> Int {
-            switch state {
+        func rank(_ session: Session) -> Int {
+            switch session.state {
             case .needsApproval: return 0
-            case .yourTurn: return 1
-            case .working: return 2
+            case .yourTurn:
+                switch session.outcome {
+                case .needsInput: return 1
+                case .done: return 4
+                default: return 2
+                }
+            case .working: return 3
             }
         }
         return sessions.values.sorted { a, b in
-            if rank(a.state) != rank(b.state) { return rank(a.state) < rank(b.state) }
-            if a.state.needsUser {
+            if rank(a) != rank(b) { return rank(a) < rank(b) }
+            if a.needsUser {
                 return (a.waitingSince ?? a.lastEventAt) < (b.waitingSince ?? b.lastEventAt)
             }
+            if a.isDone { return (a.waitingSince ?? a.lastEventAt) > (b.waitingSince ?? b.lastEventAt) }
             return a.turnStartedAt > b.turnStartedAt
         }
     }
 
-    public var needsUserCount: Int { sessions.values.filter { $0.state.needsUser }.count }
+    /// Records a better judgement of a finished turn (from the on-device model),
+    /// unless the turn has moved on since.
+    public mutating func setOutcome(id: String, _ outcome: TurnOutcome, source: OutcomeSource, forMessage message: String?) {
+        guard var session = sessions[id], session.state == .yourTurn, session.lastMessage == message,
+              session.outcomeSource != .asked else { return }
+        session.outcome = outcome
+        session.outcomeSource = source
+        if outcome == .needsInput, session.approvalDetail == nil {
+            session.approvalDetail = TurnClassifier.lastQuestion(in: message)
+        }
+        sessions[id] = session
+    }
+
+    public var needsUserCount: Int { sessions.values.filter { $0.needsUser }.count }
+    public var doneCount: Int { sessions.values.filter { $0.isDone }.count }
     public var workingCount: Int { sessions.values.filter { $0.state == .working }.count }
 }

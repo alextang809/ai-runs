@@ -81,6 +81,14 @@ public enum EventParser {
             event.lastMessage = payload["last_assistant_message"] as? String
             let tasks = payload["background_tasks"] as? [[String: Any]] ?? []
             event.backgroundTasks = tasks.filter { ($0["status"] as? String).map { $0 == "running" || $0 == "pending" } ?? true }.count
+            event.scheduled = (payload["session_crons"] as? [Any])?.count ?? 0
+        case "PreToolUse":
+            // Only the "ask the user" tool is hooked before it runs.
+            guard (payload["tool_name"] as? String) == "AskUserQuestion" else { return nil }
+            event.kind = .question
+            let input = payload["tool_input"] as? [String: Any]
+            let first = (input?["questions"] as? [[String: Any]])?.first
+            event.question = (first?["question"] as? String) ?? (input?["question"] as? String)
         case "PermissionRequest":
             event.kind = .needsApproval
             event.approvalDetail = approvalDetail(from: payload)

@@ -178,8 +178,9 @@ struct MenuColumn: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
             } else {
-                let needs = sessions.filter { $0.state.needsUser }
-                let working = sessions.filter { !$0.state.needsUser }
+                let needs = sessions.filter { $0.needsUser }
+                let working = sessions.filter { $0.state == .working }
+                let done = sessions.filter { $0.isDone }
                 if !needs.isEmpty {
                     SectionLabel(title: "Needs you", count: needs.count)
                     rows(needs)
@@ -187,6 +188,10 @@ struct MenuColumn: View {
                 if !working.isEmpty {
                     SectionLabel(title: "Working", count: working.count)
                     rows(working)
+                }
+                if !done.isEmpty {
+                    SectionLabel(title: "Done", count: done.count)
+                    rows(done)
                 }
                 LifelineLegend()
             }
@@ -464,8 +469,8 @@ struct FlyoutBody: View {
                         Text(chip.text)
                             .font(.system(size: 11.5, weight: .semibold))
                             .padding(.horizontal, 8).padding(.vertical, 2)
-                            .background(Capsule().fill(chip.waiting ? Palette.waitingFill.opacity(0.18) : Color.accentColor.opacity(0.15)))
-                            .foregroundStyle(chip.waiting ? Palette.waiting : Color.accentColor)
+                            .background(Capsule().fill(chip.waiting ? Palette.waitingFill.opacity(0.18) : Color.primary.opacity(0.08)))
+                            .foregroundStyle(chip.waiting ? Palette.waiting : Color.secondary)
                             .padding(.top, 4)
                     }
                 }
@@ -543,7 +548,12 @@ struct SessionFlyout: View {
         case .needsApproval:
             chip = ("Needs approval · waiting \(TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now)))", true)
         case .yourTurn:
-            chip = ("Your turn · waiting \(TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now)))", true)
+            let since = TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now))
+            switch session.outcome {
+            case .needsInput: chip = ("Needs your input · waiting \(since)", true)
+            case .done: chip = ("Done · \(since) ago", false)
+            default: chip = ("Replied · \(since) ago", true)
+            }
         case .working:
             if session.isInBackground {
                 let tasks = session.backgroundTasks ?? 1
@@ -564,9 +574,18 @@ struct SessionFlyout: View {
         if let driver = session.drivenBy {
             rows.append(("Prompted by", driver))
         }
+        if session.state == .yourTurn, let source = session.outcomeSource {
+            let verdict: String
+            switch session.outcome {
+            case .needsInput: verdict = "Needs your input"
+            case .done: verdict = "Finished"
+            default: verdict = "Can’t tell if it’s done"
+            }
+            rows.append(("Status", "\(verdict) · \(source.explanation.lowercased())"))
+        }
         rows.append(("Started", Self.clock.string(from: session.startedAt)))
         // Only when AI Runs saw the turn start; otherwise the number means nothing.
-        if session.state.needsUser, let since = session.waitingSince, since.timeIntervalSince(session.turnStartedAt) >= 60 {
+        if session.needsUser, let since = session.waitingSince, since.timeIntervalSince(session.turnStartedAt) >= 60 {
             rows.append(("Last turn took", TextUtils.duration(since.timeIntervalSince(session.turnStartedAt))))
         }
 

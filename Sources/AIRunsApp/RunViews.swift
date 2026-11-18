@@ -93,8 +93,14 @@ enum RunText {
     static func stateWord(_ session: Session, now: Date) -> String {
         switch session.state {
         case .needsApproval: return "APPROVE"
-        case .yourTurn: return "YOUR TURN"
+        case .yourTurn:
+            switch session.outcome {
+            case .needsInput: return "NEEDS INPUT"
+            case .done: return "DONE"
+            default: return "REPLIED"
+            }
         case .working:
+            if (session.scheduled ?? 0) > 0, (session.backgroundTasks ?? 0) == 0 { return "SCHEDULED" }
             if session.isInBackground { return "BACKGROUND" }
             return session.isQuiet(now: now) ? "NO UPDATE" : "WORKING"
         }
@@ -113,9 +119,12 @@ enum RunText {
         case .needsApproval:
             return "Wants to run " + (session.approvalDetail ?? "a tool")
         case .yourTurn:
-            if let progress = session.progress, progress.isFinished { return "Done" }
+            if session.outcome == .needsInput, let question = session.approvalDetail { return question }
             return TextUtils.preview(of: session.lastMessage, limit: 90) ?? "Finished its turn"
         case .working:
+            if (session.scheduled ?? 0) > 0, (session.backgroundTasks ?? 0) == 0 {
+                return "Scheduled a wake-up · continues by itself"
+            }
             if session.isInBackground {
                 let tasks = session.backgroundTasks ?? 1
                 return "Waiting on \(tasks) background task\(tasks == 1 ? "" : "s") · continues by itself"
@@ -134,13 +143,21 @@ struct StatePill: View {
         let (fill, text): (Color, Color) = {
             switch session.state {
             case .needsApproval: return (Palette.waitingFill, .white)
-            case .yourTurn: return (Palette.waitingFill.opacity(0.16), Palette.waiting)
+            case .yourTurn:
+                switch session.outcome {
+                case .needsInput: return (Palette.waitingFill, .white)
+                case .done: return (Color.primary.opacity(0.07), .secondary)
+                default: return (Palette.waitingFill.opacity(0.16), Palette.waiting)
+                }
             case .working:
                 if session.isInBackground || session.isQuiet(now: now) { return (Color.primary.opacity(0.07), .secondary) }
                 return (Palette.working.opacity(0.13), Palette.working)
             }
         }()
         HStack(spacing: 5) {
+            if session.isDone {
+                Image(systemName: "checkmark").font(.system(size: 8.5, weight: .heavy))
+            }
             Text(RunText.stateWord(session, now: now))
                 .font(.system(size: 9.5, weight: .bold))
                 .tracking(0.6)
@@ -169,9 +186,9 @@ struct LiveLine: View {
                     .font(.system(size: 11, design: .monospaced))
                     .lineLimit(1).truncationMode(.middle)
             case .yourTurn:
-                if let progress = session.progress, progress.isFinished {
-                    Text("Done")
-                    StepsBar(progress: progress, color: Palette.waitingFill)
+                if session.outcome == .needsInput {
+                    Text(session.outcomeSource == .asked ? "asks" : "asks you").foregroundStyle(.secondary)
+                    Text(RunText.liveText(session, now: now)).lineLimit(1)
                 } else {
                     Text(RunText.liveText(session, now: now)).foregroundStyle(.secondary).lineLimit(1)
                 }
