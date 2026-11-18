@@ -17,30 +17,55 @@ enum ClaudeThreadsReader {
     /// On unless the user turned it off in Settings.
     static var isEnabled: Bool { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
 
-    /// The running Claude app, when reading is on and allowed.
-    static func target() -> pid_t? {
-        guard isEnabled, AXIsProcessTrusted() else { return nil }
-        return NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.processIdentifier
+    /// Whether a read can happen now, and if not, why.
+    enum Availability {
+        case off
+        case claudeNotRunning
+        case needsPermission
+        case ready(pid_t)
     }
 
+    static func availability() -> Availability {
+        guard isEnabled else { return .off }
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first else {
+            return .claudeNotRunning
+        }
+        // After a rebuild an ad-hoc signed app can look ticked in System
+        // Settings and still not be trusted; this is the only true answer.
+        guard AXIsProcessTrusted() else { return .needsPermission }
+        return .ready(app.processIdentifier)
+    }
+
+    /// What one look at Claude's window found.
+    struct Reading: Sendable {
+        var sightings: [ThreadSighting]
+        /// False when the node budget ran out before the whole tree was read.
+        var complete: Bool
+    }
+
+    /// Elements read on the regular 5 s look, and on a refresh the user asked for.
+    static let regularBudget = 5000
+    static let refreshBudget = 20000
+
     /// Reads off the main thread; calls `completion` on the main thread.
-    static func read(pid: pid_t, completion: @escaping @Sendable ([ThreadSighting]) -> Void) {
+    static func read(pid: pid_t, budget: Int = regularBudget, completion: @escaping @Sendable (Reading) -> Void) {
         DispatchQueue.global(qos: .utility).async {
-            let found = sightings(pid: pid)
+            let found = reading(pid: pid, budget: budget)
             DispatchQueue.main.async { completion(found) }
         }
     }
 
-    private static func sightings(pid: pid_t) -> [ThreadSighting] {
+    private static func reading(pid: pid_t, budget start: Int) -> Reading {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.5)
         // Electron apps only build their accessibility tree when asked
         // (SidebarClicker asks the same way).
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         let windows = (copy(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
-        var budget = 5000
+        var budget = start
         let children = windows.compactMap { node($0, depth: 0, budget: &budget) }
-        return ClaudeThreadsView.sightings(in: AXNode(role: "AXApplication", children: children))
+        let sightings = ClaudeThreadsView.sightings(in: AXNode(role: "AXApplication", children: children))
+        return Reading(sightings: sightings, complete: budget > 0)
     }
 
     /// Copies the part of the tree that matters, with limits so a huge window can't stall.

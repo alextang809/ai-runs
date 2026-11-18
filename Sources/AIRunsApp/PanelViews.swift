@@ -152,6 +152,8 @@ struct MenuColumn: View {
                             .keyboardShortcut("z", modifiers: .command)
                     }
                 }
+                RefreshButton(model: model)
+                    .padding(.leading, 4)
             }
             HeaderDashboard(needs: model.store.needsUserCount, working: model.store.workingCount,
                             stats: model.store.stats(now: model.now))
@@ -162,6 +164,7 @@ struct MenuColumn: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            ThreadsHint(model: model)
         }
         .padding(.horizontal, 14)
         .padding(.top, 9)
