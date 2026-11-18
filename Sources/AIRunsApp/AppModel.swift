@@ -289,7 +289,7 @@ final class AppModel: ObservableObject {
 
     func open(sessionId: String) {
         guard let session = store.sessions[sessionId] else { return }
-        Jumper.open(session: session, show: show)
+        Jumper.open(session: session, show: { [weak self] in self?.show($0) })
     }
 
     func resolve(sessionId: String) {
@@ -331,7 +331,7 @@ final class AppModel: ObservableObject {
             show("This note isn’t linked to a conversation.")
             return
         }
-        Jumper.open(link: link, show: show)
+        Jumper.open(link: link, show: { [weak self] in self?.show($0) })
     }
 
     func addNote(title: String, next: String = "", group: String = PinBoard.inbox) {
