@@ -9,7 +9,8 @@ See which ones need you, what the rest are doing, and jump back to any of them i
 
 <p align="center"><a href="README.zh-CN.md">中文说明</a></p>
 
-<p align="center"><img src="docs/panel.png" width="446" alt="The AI Runs panel with sample sessions"></p>
+<p align="center"><img src="docs/panel.png" width="500" alt="The AI Runs panel with sample sessions"></p>
+<p align="center"><sub><i>Illustration with made-up sessions.</i></sub></p>
 
 When five agents are running in three apps, it's hard to tell which one finished,
 which one is waiting for an answer, and which one quietly stopped. AI Runs puts
@@ -79,7 +80,12 @@ notification when the reply is ready, and a click brings back that exact tab.
 
 The icon is an arc over a dot, a musical *fermata*: "hold until the conductor gives
 the cue". Arc alone: nothing running. Arc and dot: runs in progress. Amber dot and a
-number: that many are holding for you. If you don't see it:
+number: that many are holding for you.
+
+<p align="center"><img src="docs/menubar.png" width="560" alt="Menu bar icon states and the floating window capsule"></p>
+<p align="center"><sub><i>Illustration.</i></sub></p>
+
+If you don't see it:
 
 - **Press ⌥⌘A** — it opens the panel from anywhere.
 - **MacBooks with a notch:** icons that don't fit beside the notch are hidden by
@@ -146,6 +152,9 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
   or the floating window. It moves to an **Ignored** group, isn't counted and
   doesn't remind you, and comes back by itself when it does something new.
   **Stop Ignoring** undoes it.
+
+  <p align="center"><img src="docs/flyout.png" width="560" alt="Hovering a row shows its details and Ignore for Now"></p>
+  <p align="center"><sub><i>Illustration: hover a row for its details and actions.</i></sub></p>
 - **Rename**, **Pin to Board** and more: right-click a row, or hover it for details.
 - **Floating window:** click **Show Floating Window** at the bottom of the panel. A small capsule stays on
   top of every app, Space and full-screen window, showing how many sessions need
