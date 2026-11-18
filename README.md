@@ -42,7 +42,8 @@ On an Intel Mac, [build it from source](#build-from-source).
 
 ## Set up (2 minutes)
 
-AI Runs opens its settings on first launch.
+AI Runs opens its settings on first launch. To open them again later, click the
+menu bar icon (or press ⌥⌘A) and choose **Hooks & Settings…** at the bottom of the panel.
 
 1. **Claude Code: click Install.** This adds AI Runs to `~/.claude/settings.json`.
    It works for Claude Code in the terminal, in VS Code and in the Claude desktop app.
@@ -98,6 +99,7 @@ it's doing, and a small timeline of its last hour.
 | **NEEDS INPUT** (solid) | It asked you a question, or said it's blocked |
 | **REPLIED** (light) | It finished a turn, and AI Runs can't tell whether it needs you |
 | **WORKING** (outline) | It's running; the line below says what it's doing |
+| **NO UPDATE** (grey) | It was working, but nothing has arrived for 30 minutes; it may have stopped |
 | **SCHEDULED / BACKGROUND** (grey) | It's waiting on its own timer or background task and continues by itself |
 | **DONE ✓** (grey) | It finished what you asked |
 
@@ -122,9 +124,10 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 **Other things you can do**
 
 - **Remove** a session: hover and click **×**, or right-click → Remove from List.
-  **Undo** (⌘Z) for a few seconds. It comes back only when you message it again.
+  **Undo** (⌘Z) for a few seconds. It comes back when you message it again, or
+  when it asks for approval.
 - **Rename**, **Pin to Board** and more: right-click a row, or hover it for details.
-- **Floating window:** menu → **Show Floating Window**. A small capsule stays on
+- **Floating window:** click **Show Floating Window** at the bottom of the panel. A small capsule stays on
   top of every app, Space and full-screen window, showing how many sessions need
   you. Click it for your runs and the pinned board; drag it anywhere (it snaps to
   edges). It can open by itself when something needs you (Settings).
@@ -133,7 +136,8 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
   make cards.
 - **Notifications:** a banner when a session asks for approval or input, with
   Open and Snooze. Choose which moments in Settings.
-- **Pin Front AI Window:** pins the browser tab or app you were just in.
+- **Pin Front AI Window** (bottom of the panel): pins the browser tab or app you
+  were just in to the board.
 
 ## Privacy
 
@@ -165,7 +169,8 @@ Open an [issue](https://github.com/alextang809/ai-runs/issues) or just message m
 
 ## Uninstall
 
-1. Open AI Runs settings and click **Remove** for Claude Code and for Codex.
+1. Open AI Runs settings (**Hooks & Settings…** in the panel) and click **Remove**
+   for Claude Code and for Codex.
    If you added the browser extension, remove it in your browser's extensions page.
 2. Quit AI Runs and drag it from Applications to the Trash.
 3. Delete its data: `rm -rf ~/.airuns`
@@ -184,7 +189,7 @@ Open an [issue](https://github.com/alextang809/ai-runs/issues) or just message m
 
 ## Build from source
 
-Requires macOS 14 or later and Xcode 16 (or the Swift 6 toolchain).
+Requires macOS 14 or later and Xcode 16.3 or later (Swift 6.1 or later).
 
 ```sh
 git clone https://github.com/alextang809/ai-runs.git

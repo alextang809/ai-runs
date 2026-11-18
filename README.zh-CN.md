@@ -36,7 +36,7 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 
 ## 设置（2 分钟）
 
-第一次打开时，AI Runs 会自动弹出设置窗口。
+第一次打开时，AI Runs 会自动弹出设置窗口。以后想再打开，点菜单栏图标（或按 ⌥⌘A），在面板最下面选 **Hooks & Settings…**。
 
 1. **Claude Code：点 Install。**这会在 `~/.claude/settings.json` 里加上 AI Runs。终端里、VS Code 里、Claude 桌面版里的 Claude Code 都能被识别。
 2. **Codex：点 Install，然后打开 Codex。**它会弹出 **Review hooks**，里面有 4 个 AI Runs 的 hook，点 **Allow all**。不点的话，Codex 什么都不会发过来。
@@ -78,6 +78,7 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 | **NEEDS INPUT**（实心） | 它问了你问题，或者说自己卡住了 |
 | **REPLIED**（浅色） | 它结束了这一轮，但 AI Runs 判断不出它是否需要你 |
 | **WORKING**（描边） | 它在跑，下面一行写着它在做什么 |
+| **NO UPDATE**（灰色） | 它本来在跑，但已经 30 分钟没有任何动静，可能已经停了 |
 | **SCHEDULED / BACKGROUND**（灰色） | 它在等自己定的唤醒任务或后台任务，会自己接着跑 |
 | **DONE ✓**（灰色） | 你交代的事它做完了 |
 
@@ -103,12 +104,12 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 
 **其他功能**
 
-- **移除会话：**鼠标移上去点 **×**，或者右键 → Remove from List。之后几秒内可以点 **Undo**（⌘Z）撤销。移除后，只有你在那个会话里再发消息，它才会回来。
+- **移除会话：**鼠标移上去点 **×**，或者右键 → Remove from List。之后几秒内可以点 **Undo**（⌘Z）撤销。移除后，只有你在那个会话里再发消息，或者它请求你批准时，它才会回来。
 - **改名、置顶到钉板**等：右键某一行，或者把鼠标停在上面看详情。
-- **悬浮窗：**菜单里点 **Show Floating Window**。一个小胶囊会停在所有 App、所有桌面、全屏窗口的上面，显示有几个会话在等你。点一下展开，能看到会话列表和钉板；可以拖到任何地方，靠近屏幕边缘会自动吸附。在设置里可以让它在有会话等你时自动展开。
+- **悬浮窗：**在面板最下面点 **Show Floating Window**。一个小胶囊会停在所有 App、所有桌面、全屏窗口的上面，显示有几个会话在等你。点一下展开，能看到会话列表和钉板；可以拖到任何地方，靠近屏幕边缘会自动吸附。在设置里可以让它在有会话等你时自动展开。
 - **钉板：**在悬浮窗的 Pinned 标签里，按项目分组，记下不想丢的线程和随手的笔记。往里拖文字或链接就会生成卡片。
 - **通知：**有会话等你批准或回答时弹出横幅，可以直接点 Open 跳过去，或点 Snooze 稍后提醒。在设置里选择哪些情况要通知。
-- **Pin Front AI Window：**把你刚才在用的浏览器标签页或 App 钉住。
+- **Pin Front AI Window**（面板最下面）：把你刚才在用的浏览器标签页或 App 钉到钉板上。
 
 ## 隐私
 
@@ -133,7 +134,7 @@ AI Runs 只读写你 Mac 上的文件：
 
 ## 卸载
 
-1. 打开 AI Runs 的设置，分别在 Claude Code 和 Codex 那一行点 **Remove**。装了浏览器插件的话，在浏览器的扩展程序页面把它移除。
+1. 打开 AI Runs 的设置（面板里的 **Hooks & Settings…**），分别在 Claude Code 和 Codex 那一行点 **Remove**。装了浏览器插件的话，在浏览器的扩展程序页面把它移除。
 2. 退出 AI Runs，把它从「应用程序」拖到废纸篓。
 3. 删除它的数据：`rm -rf ~/.airuns`
 
@@ -147,7 +148,7 @@ AI Runs 只读写你 Mac 上的文件：
 
 ## 从源码构建
 
-需要 macOS 14 或更新版本，以及 Xcode 16（或 Swift 6 工具链）。
+需要 macOS 14 或更新版本，以及 Xcode 16.3 或更新版本（Swift 6.1 或更新）。
 
 ```sh
 git clone https://github.com/alextang809/ai-runs.git
@@ -157,6 +158,11 @@ open "build/AI Runs.app"
 ```
 
 用 `swift test` 运行测试。
+
+- `Sources/AIRunsCore`：事件解析、会话状态机、判断做完还是要你输入、钉板和 hook 安装。没有界面，有单元测试。
+- `Sources/airuns-hook`：hook 调用的小工具。
+- `Sources/AIRunsApp`：菜单栏 App 本身（AppKit + SwiftUI）。
+- `collab/`：Claude 和 Codex 一起做这个项目时留下的笔记。
 
 ## 许可证
 
