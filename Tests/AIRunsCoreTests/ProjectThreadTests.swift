@@ -56,6 +56,11 @@ final class PromptWrapperTests: XCTestCase {
         XCTAssertEqual(TextUtils.cleanPrompt(two), "Two")
     }
 
+    func testUnclosedWakeIsLeftToPlainCleaning() {
+        XCTAssertNil(PromptWrapper.wake(in: "<wake reason=\"mention\"> fix flaky test"))
+        XCTAssertEqual(TextUtils.cleanPrompt("<wake reason=\"mention\"> fix flaky test"), "fix flaky test")
+    }
+
     func testWakeQuotedInsideARequestIsIgnored() {
         let prompt = "Why does this break? " + wake("Inner")
         XCTAssertNil(PromptWrapper.wake(in: prompt))

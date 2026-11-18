@@ -47,16 +47,21 @@ public struct WakePrompt: Equatable, Sendable {
 /// several wakes, `<relay>` blocks and system notes next to each other.
 public enum PromptWrapper {
     /// The wake(s) a prompt starts with. Nil when the prompt doesn't start with
-    /// one (after other tagged blocks), so a wake pasted into a request is ignored.
+    /// a complete one (after other tagged blocks), so a wake pasted into a
+    /// request is ignored.
     public static func wake(in prompt: String) -> WakePrompt? {
         guard let first = prompt.range(of: #"<wake[\s>]"#, options: .regularExpression) else { return nil }
         let before = String(prompt[..<first.lowerBound])
         guard TextUtils.removingTaggedBlocks(before).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
 
+        // A bare opening tag with the request after it is an older shape; plain cleaning handles it.
+        let wakes = matches(#"(?s)<wake(?:\s[^>]*)?>(.*?)</wake>"#, in: prompt)
+        guard !wakes.isEmpty else { return nil }
+
         var addresses: Set<ProjectThread> = []
         var invalid = false
         var messages: [(attributes: String, body: String)] = []
-        for wake in matches(#"(?s)<wake(?:\s[^>]*)?>(.*?)</wake>"#, in: prompt) {
+        for wake in wakes {
             let body = wake[1]
             let project = matches(#"<project(\s[^>]*)?>"#, in: body).first.flatMap { attribute("id", in: $0[1]) }
             let thread = matches(#"<thread(\s[^>]*)?>"#, in: body).first.flatMap { attribute("ts", in: $0[1]) }
