@@ -33,6 +33,10 @@
 
 ## Did
 
+- Fixed floating-window persistence requested in a follow-up: status-bar window level,
+  explicit all-Spaces/all-applications/full-screen/stationary behavior, and event-driven
+  recovery after Space/app changes and wake. User visibility is independent of transient
+  window visibility; explicit hiding cancels queued recovery without stealing focus.
 - Took day-to-day ownership of `Sources/`, `Tests/`, `Scripts/`, and docs under
   Alex's round 5 handover. Read the shared rules, decisions and both briefs;
   fetched PR #7 and based `codex/round-05` on `c270f2f`.
@@ -61,6 +65,14 @@
 
 Validation:
 
+- Floating-window local installation completed after system keychain authorization.
+  Strict installed-bundle verification passed; the signing certificate requirement
+  matches the previous installation. A counts-only WindowServer check found one
+  running installed instance and one on-screen panel at status-bar level.
+- Floating-window follow-up: **173 tests, zero failures** in the current build worktree;
+  six new AppKit regressions pass, with **98.11%** line coverage for `FloatingPanel`.
+  Tests exercise actual panel presentation and notification delivery; interactive
+  Spaces/full-screen/Stage Manager compositor verification remains unverified.
 - Full `swift test --enable-code-coverage`: **128 tests, zero failures** on
   macOS 26 / Swift 6.2.1. AIRunsCore line coverage: **91.79%**; new queue:
   **100%** lines/functions/regions. AppModel callback wiring was compiled and
