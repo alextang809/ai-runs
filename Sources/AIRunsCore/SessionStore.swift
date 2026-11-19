@@ -611,11 +611,11 @@ public struct SessionStore: Codable, Equatable, Sendable {
         ignored = set
     }
 
-    /// Older versions mistook voice chats for internal helpers. Replay only
+    /// Older versions mistook voice and app-created conversations for helpers. Replay only
     /// their retained hook events, without reviving archived or user-removed rows.
-    public func recoveringCodexVoiceThreads(_ threads: [CodexThread], events: [AgentEvent]) -> SessionStore {
+    public func recoveringCodexConversations(_ threads: [CodexThread], events: [AgentEvent]) -> SessionStore {
         let keys = Set(threads.filter {
-            $0.threadSource?.lowercased() == "voice_chat" && !$0.archived
+            $0.wasMisclassifiedAsInternal && !$0.archived
         }.map { Session.key(tool: .codex, sessionId: $0.id) })
             .intersection(ignored ?? [])
             .subtracting(dismissed ?? [])

@@ -49,7 +49,7 @@ final class CodexVoiceRecoveryTests: XCTestCase {
                           event("removed"), event("missing"), event("typed"),
                           event("voice", tool: .claudeCode), event("existing", name: "Stop"),
                           event("voice", name: "Stop", seconds: 10)]
-        let recovered = store.recoveringCodexVoiceThreads(metadata, events: events)
+        let recovered = store.recoveringCodexConversations(metadata, events: events)
         let row = try XCTUnwrap(recovered.sessions["codex:voice"])
         XCTAssertEqual(row.state, .yourTurn)
         XCTAssertEqual(row.title, "Voice session")
@@ -59,7 +59,7 @@ final class CodexVoiceRecoveryTests: XCTestCase {
         XCTAssertEqual(recovered.dismissed, store.dismissed)
         XCTAssertEqual(recovered.ignored, store.ignored?.subtracting(["codex:voice"]))
         XCTAssertEqual(Set(recovered.sessions.keys), ["codex:voice", "codex:existing"])
-        XCTAssertEqual(recovered.recoveringCodexVoiceThreads(metadata, events: events), recovered)
+        XCTAssertEqual(recovered.recoveringCodexConversations(metadata, events: events), recovered)
         let saved = try JSONEncoder().encode(recovered)
         XCTAssertEqual(try JSONDecoder().decode(SessionStore.self, from: saved), recovered)
     }
@@ -67,7 +67,7 @@ final class CodexVoiceRecoveryTests: XCTestCase {
     func testWithoutRetainedEventsNextHookRestoresVoiceWithoutInventingState() throws {
         var store = SessionStore()
         store.ignore(id: "codex:voice")
-        store = store.recoveringCodexVoiceThreads([thread("voice")], events: [])
+        store = store.recoveringCodexConversations([thread("voice")], events: [])
         XCTAssertFalse(store.ignored?.contains("codex:voice") == true)
         XCTAssertTrue(store.sessions.isEmpty)
         store.apply(try event("voice"))
@@ -78,8 +78,8 @@ final class CodexVoiceRecoveryTests: XCTestCase {
         var store = SessionStore()
         store.ignore(id: "codex:voice")
         let events = try [event("voice")]
-        XCTAssertEqual(store.recoveringCodexVoiceThreads([], events: events), store)
-        XCTAssertEqual(store.recoveringCodexVoiceThreads([thread("voice", archived: true)], events: events), store)
+        XCTAssertEqual(store.recoveringCodexConversations([], events: events), store)
+        XCTAssertEqual(store.recoveringCodexConversations([thread("voice", archived: true)], events: events), store)
     }
     func testRecoveryPrefixLeavesUnreadPlanAdvanceForLiveReader() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -100,7 +100,7 @@ final class CodexVoiceRecoveryTests: XCTestCase {
         store.ignore(id: "codex:voice")
         let retained = EventLogReader(url: url).readNewLines(upTo: cursor).compactMap { EventParser.parse(line: $0) }
         XCTAssertEqual(retained.count, 1)
-        store = store.recoveringCodexVoiceThreads([thread("voice")], events: retained)
+        store = store.recoveringCodexConversations([thread("voice")], events: retained)
         for event in EventLogReader(url: url, offset: cursor).readNewLines().compactMap({ EventParser.parse(line: $0) }) {
             store.apply(event)
         }

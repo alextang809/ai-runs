@@ -8,8 +8,8 @@ public struct CodexThread: Equatable, Sendable {
     public var id: String
     /// The name the Codex sidebar shows (`threads.name`). Nil when unnamed.
     public var name: String?
-    /// `user` or `voice_chat` for threads a person started; `subagent`, `guardian_review`
-    /// and others for Codex's own helpers.
+    /// `user`, `voice_chat` or `agent_created_thread` for user conversations;
+    /// `subagent`, `guardian_review` and others for Codex's own helpers.
     public var threadSource: String?
     public var archived: Bool
 
@@ -20,11 +20,18 @@ public struct CodexThread: Equatable, Sendable {
         self.archived = archived
     }
 
+    /// User conversations that older source filters mistook for internal helpers.
+    /// Share this decision with startup recovery so it cannot diverge again.
+    public var wasMisclassifiedAsInternal: Bool {
+        guard let source = threadSource?.lowercased() else { return false }
+        return source == "voice_chat" || source == "agent_created_thread"
+    }
+
     /// Codex's own helper threads: naming, reviews, subagents. Rows without a
     /// source are older user threads.
     public var isInternal: Bool {
         guard let source = threadSource?.lowercased(), !source.isEmpty else { return false }
-        return source != "user" && source != "voice_chat"
+        return source != "user" && !wasMisclassifiedAsInternal
     }
 }
 
