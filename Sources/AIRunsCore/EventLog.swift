@@ -58,18 +58,23 @@ public final class EventLogReader {
 
     /// Complete lines written since the last call. A trailing line without a
     /// newline is kept until it is finished.
-    public func readNewLines() -> [Data] {
+    /// A bounded recovery read leaves the unread tail to the live reader. If
+    /// compaction invalidated the boundary, the live reader handles the new log.
+    public func readNewLines(upTo endOffset: UInt64? = nil) -> [Data] {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0
+        if let endOffset, endOffset > size { return [] }
+        let readEnd = min(size, endOffset ?? size)
         if size < offset {
             // The log was truncated or replaced: start over.
             offset = 0
             partial = Data()
         }
-        guard size > offset else { return [] }
+        guard readEnd > offset else { return [] }
         try? handle.seek(toOffset: offset)
-        let chunk = (try? handle.readToEnd()) ?? Data()
+        let count = Int(min(readEnd - offset, UInt64(Int.max)))
+        let chunk = (try? handle.read(upToCount: count)) ?? Data()
         offset += UInt64(chunk.count)
 
         var buffer = partial + chunk

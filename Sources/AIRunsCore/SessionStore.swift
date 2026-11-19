@@ -611,6 +611,29 @@ public struct SessionStore: Codable, Equatable, Sendable {
         ignored = set
     }
 
+    /// Older versions mistook voice chats for internal helpers. Replay only
+    /// their retained hook events, without reviving archived or user-removed rows.
+    public func recoveringCodexVoiceThreads(_ threads: [CodexThread], events: [AgentEvent]) -> SessionStore {
+        let keys = Set(threads.filter {
+            $0.threadSource?.lowercased() == "voice_chat" && !$0.archived
+        }.map { Session.key(tool: .codex, sessionId: $0.id) })
+            .intersection(ignored ?? [])
+            .subtracting(dismissed ?? [])
+        guard !keys.isEmpty else { return self }
+        var recovered = self
+        recovered.ignored = ignored?.subtracting(keys)
+        for event in events where event.tool == .codex
+            && keys.contains(Session.key(tool: event.tool, sessionId: event.sessionId)) {
+            recovered.apply(event)
+        }
+        for thread in threads where keys.contains(Session.key(tool: .codex, sessionId: thread.id)) {
+            if let name = thread.name {
+                recovered.settleTitle(id: Session.key(tool: .codex, sessionId: thread.id), to: name)
+            }
+        }
+        return recovered
+    }
+
     /// "Ignore for Now" and "Stop Ignoring". Only a question or a reply can be
     /// ignored: an approval request blocks the agent until it is answered.
     public mutating func setIgnored(id: String, _ ignored: Bool, at: Date = Date()) {
