@@ -22,8 +22,7 @@ them all in one list in your menu bar:
 
 Everything stays on your Mac. No account, no server, nothing is sent anywhere.
 
-> **This is an early build for friends to try.** Expect rough edges, and please
-> tell me what breaks — see [Feedback](#feedback).
+> **Version 1.0.0.** For bugs and feature requests, see [Feedback](#feedback).
 
 ## Install
 
