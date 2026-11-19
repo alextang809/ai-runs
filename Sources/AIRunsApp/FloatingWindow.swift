@@ -356,9 +356,9 @@ struct FloatingCard: View {
 
     @ViewBuilder private var runs: some View {
         let sessions = model.store.ordered()
-        // Everything still running is listed, background work included;
-        // finished and ignored runs fold into one line.
-        let active = sessions.filter { !$0.isDone && !$0.isIgnored }
+        // Keep unknown and currently open conversations in the same list.
+        // Other finished and ignored runs fold into one line.
+        let active = sessions.filter { (!$0.isDone || $0.nativeView?.isOpen == true) && !$0.isIgnored }
         let quiet = sessions.count - active.count
         ThreadsHint(model: model)
             .padding(.horizontal, 14).padding(.bottom, 8)

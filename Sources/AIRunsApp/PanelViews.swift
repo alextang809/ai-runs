@@ -203,6 +203,7 @@ struct MenuColumn: View {
             } else {
                 let needs = sessions.filter { $0.needsUser }
                 let working = sessions.filter { $0.state == .working }
+                let unknown = sessions.filter { $0.state == .unknown }
                 let done = sessions.filter { $0.isDone }
                 let ignored = sessions.filter { $0.isIgnored }
                 if !needs.isEmpty {
@@ -212,6 +213,10 @@ struct MenuColumn: View {
                 if !working.isEmpty {
                     SectionLabel(title: "Working", count: working.count)
                     rows(working, overlap: overlap)
+                }
+                if !unknown.isEmpty {
+                    SectionLabel(title: "State unknown", count: unknown.count)
+                    rows(unknown, overlap: overlap)
                 }
                 if !done.isEmpty {
                     SectionLabel(title: "Done", count: done.count)
@@ -580,7 +585,8 @@ struct SessionFlyout: View {
 
     var body: some View {
         let appName = session.terminal.appName
-        var subtitle = session.thread == nil ? session.tool.displayName : "Claude project"
+        var subtitle = session.isProjectConversation ? "Claude project" : session.tool.displayName
+        if session.projectMainId != nil { subtitle += " · Main conversation" }
         if !session.project.isEmpty { subtitle += " · \(session.project)" }
         subtitle += " · \(appName)"
 
@@ -600,6 +606,8 @@ struct SessionFlyout: View {
             }
         } else {
         switch session.state {
+        case .unknown:
+            chip = ("State unknown", nil)
         case .needsApproval:
             chip = ("Needs approval · waiting \(TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? now)))", tint)
         case .yourTurn:
@@ -622,6 +630,7 @@ struct SessionFlyout: View {
         }
 
         var rows: [(String, String)] = []
+        if session.nativeView?.isOpen == true { rows.append(("View", "Open in Claude")) }
         if session.state == .working, let progress = session.progress {
             rows.append(("Steps", progress.summary))
         }

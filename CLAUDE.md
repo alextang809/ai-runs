@@ -41,6 +41,18 @@ two minutes outranks the list; a thread missing from the tree is left alone
 instead of a state, except Waiting on you, which is kept; idle threads AI Runs
 never saw active get no row.
 
+**Opened conversations:** `ClaudeCurrentView` also reads validated
+`AXWebArea.AXURL` routes for an opened child thread and a project's main
+conversation. A main uses its own `Session.projectMainId` and `:main` row key;
+child keys and hook executor links remain unchanged. Both appear in One list.
+`Session.nativeView` records identity observation separately from
+`Session.native` state observation. An open page never refreshes an older state
+or supplies a guessed one. Newly identified conversations without state are
+`SessionState.unknown`: no Working/Needs you/Done counts, alerts or activity
+spans. Unknown and stale rows remain visible. Pin/open links address the main
+or child conversation directly. Titles come from scoped project/thread headers,
+not conversation messages.
+
 ## Layout
 
 - `Sources/AIRunsCore` — no UI, unit tested. Models, `EventParser`,

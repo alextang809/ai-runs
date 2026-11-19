@@ -342,7 +342,8 @@ final class NativeThreadStoreTests: XCTestCase {
         XCTAssertNil(store.sessions[key(2)]?.native?.stale)
         store.expireSightings(now: at(11 * 60))
         XCTAssertEqual(store.sessions[key(2)]?.native?.stale, true)
-        XCTAssertEqual(store.sessions[key(2)]?.state, .yourTurn)
+        XCTAssertEqual(store.sessions[key(2)]?.state, .unknown)
+        XCTAssertNil(store.sessions[key(2)]?.outcome)
         XCTAssertEqual(store.workingCount, 0, "an unseen thread isn't counted as working")
         XCTAssertNil(store.sessions[key(2)]?.alertKind(now: at(11 * 60)))
         // Waiting on you stays true until it is seen as something else.

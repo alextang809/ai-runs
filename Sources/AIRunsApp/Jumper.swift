@@ -40,9 +40,8 @@ enum Jumper {
             openWebChat(url: session.webURL, browser: session.terminal.bundleId, show: show)
             return
         }
-        // A Claude project thread opens on the thread itself, not on whichever
-        // local session last worked for it.
-        if let url = session.thread?.appLink, NSWorkspace.shared.urlForApplication(toOpen: url) != nil,
+        // Open a project main conversation or child thread at its own address.
+        if let url = session.claudeAppLink, NSWorkspace.shared.urlForApplication(toOpen: url) != nil,
            NSWorkspace.shared.open(url) {
             return
         }

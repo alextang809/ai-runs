@@ -4,8 +4,8 @@ import ApplicationServices
 
 /// Reads the Claude desktop app's window through the Accessibility API to
 /// find project threads and the section Claude files them under ("Waiting on
-/// you", "Idle", …). This is the only way AI Runs can see threads that work
-/// in the cloud: they fire no local hooks.
+/// you", "Idle", …), plus the current project conversations identified by their
+/// web-area routes. Cloud-only conversations fire no local hooks.
 ///
 /// It only reads: nothing is pressed, typed or focused. It needs the
 /// Accessibility permission and never asks for it by itself; without it,
@@ -39,6 +39,7 @@ enum ClaudeThreadsReader {
     /// What one look at Claude's window found.
     struct Reading: Sendable {
         var sightings: [ThreadSighting]
+        var currentViews: [CurrentClaudeView] = []
         /// False when the node budget ran out before the whole tree was read.
         var complete: Bool
     }
@@ -66,9 +67,10 @@ enum ClaudeThreadsReader {
         let children = windows.compactMap { node($0, depth: 0, budget: &budget) }
         let root = AXNode(role: "AXApplication", children: children)
         let sightings = ClaudeThreadsView.sightings(in: root)
+        let currentViews = ClaudeCurrentView.sightings(in: root)
         let complete = budget > 0
-        writeReport(windows: windows.count, root: root, sightings: sightings, complete: complete)
-        return Reading(sightings: sightings, complete: complete)
+        writeReport(windows: windows.count, root: root, sightings: sightings, currentViews: currentViews, complete: complete)
+        return Reading(sightings: sightings, currentViews: currentViews, complete: complete)
     }
 
     /// Counts only, never titles or ids: what the last look at Claude's window
@@ -86,13 +88,19 @@ enum ClaudeThreadsReader {
         var sections: [String: Int]
         var sightings: Int
         var sightingsWithState: Int
+        var currentViews: Int
+        var currentThreads: Int
+        var projectMainViews: Int
         var complete: Bool
     }
 
-    private static func writeReport(windows: Int, root: AXNode, sightings: [ThreadSighting], complete: Bool) {
+    private static func writeReport(windows: Int, root: AXNode, sightings: [ThreadSighting],
+                                    currentViews: [CurrentClaudeView], complete: Bool) {
         var report = Report(at: Date(), windows: windows, nodes: 0, links: 0, threadLinks: 0, otherLinkShapes: [:],
                             sections: [:], sightings: sightings.count,
-                            sightingsWithState: sightings.filter { $0.state != nil }.count, complete: complete)
+                            sightingsWithState: sightings.filter { $0.state != nil }.count, currentViews: currentViews.count,
+                            currentThreads: currentViews.filter { $0.conversation.threadId != nil }.count,
+                            projectMainViews: currentViews.filter { $0.conversation.threadId == nil }.count, complete: complete)
         func visit(_ node: AXNode) {
             report.nodes += 1
             if node.role == "AXLink" {
@@ -130,6 +138,10 @@ enum ClaudeThreadsReader {
             result.title = copy(element, kAXTitleAttribute) as? String
             // Only thread links are worth going into.
             guard ClaudeThreadsView.thread(fromLink: result.url) != nil else { return result }
+        case "AXWebArea":
+            let url = copy(element, kAXURLAttribute)
+            result.url = (url as? URL)?.absoluteString ?? (url as? String)
+            result.title = copy(element, kAXTitleAttribute) as? String
         case "AXHeading", "AXButton":
             result.title = copy(element, kAXTitleAttribute) as? String
         case "AXStaticText":

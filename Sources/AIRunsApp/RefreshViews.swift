@@ -1,7 +1,7 @@
 import AIRunsCore
 import SwiftUI
 
-/// Reads hook events and Claude's Threads list right now, for when a run
+/// Reads hook events, open Claude projects and the Threads list right now, for when a run
 /// changed and AI Runs hasn't caught up yet.
 struct RefreshButton: View {
     @ObservedObject var model: AppModel
@@ -12,7 +12,7 @@ struct RefreshButton: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-        .help("Refresh: read new events and Claude’s Threads list now")
+        .help("Refresh: read new events, open Claude projects and the Threads list now")
         .accessibilityLabel("Refresh")
     }
 }
@@ -25,7 +25,7 @@ struct ThreadsHint: View {
     var body: some View {
         if model.threadsStatus == .needsPermission {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Claude threads need Accessibility. If AI Runs is already ticked in System Settings, remove it and add it again.")
+                Text("Claude conversations need Accessibility. If AI Runs is already ticked in System Settings, remove it and add it again.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.claude)
                     .fixedSize(horizontal: false, vertical: true)

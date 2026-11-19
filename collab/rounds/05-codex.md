@@ -1,5 +1,36 @@
 # Round 5 — Codex
 
+## Current conversation follow-up — approved and implemented
+
+- Alex selected **One list** and explicitly included project main conversations.
+  `ClaudeCurrentView` reads validated project routes from AXWebArea; child
+  identities reuse existing thread keys, while a main conversation has its
+  own `:main` key. A visible project header alongside a child identifies both.
+- Child titles come from a scoped Threads breadcrumb. Project headers match
+  full document titles at observed separator boundaries; the document title
+  is not borrowed as a child name. No message text supplies titles or state.
+- Identity observations are stored separately from state observations. New
+  identity-only rows show **STATE UNKNOWN**, have no activity spans or alerts,
+  and count as neither Working, Needs you nor Done. Known hook/list state and
+  its observation time remain intact; stale state becomes unknown, not Done.
+- The same list contains mains and children. Urgent rows keep priority, current
+  idle rows remain visible, hook progress bars remain intact, and open/pin links
+  address the correct main or child. Removal and custom titles are preserved.
+- Exact submitted snapshot: **167 Swift tests passed**, including **39 new
+  regressions**; AIRunsCore line coverage **92.80%**, current-view parser
+  **99.43%**. The signing suite's **59 checks** and browser extension tests
+  passed; the isolated test dependency audit reported **0 vulnerabilities**.
+  The full shared workspace additionally contained six independent AppKit
+  tests from another task; those changes are not part of this submission.
+- Live AX checks established that the project heading is a prefix of the
+  document title with a recognized separator, while the child breadcrumb is
+  distinct. Only flags and role paths were recorded. Later Claude exposed no
+  actual window, so new main/child presentation in the installed application
+  remains **unverified**. Empty live-reader results created no false rows.
+- Parallel floating-panel persistence edits were preserved in the working
+  tree and excluded from this feature's commit. The original round checkpoint
+  below remains historical where its installation observations differ.
+
 ## Did
 
 - Took day-to-day ownership of `Sources/`, `Tests/`, `Scripts/`, and docs under
@@ -110,7 +141,7 @@ Validation:
 - The identified web-area subtree had **no recognized state label**. This
   supplies identity, not evidence of Working, Done, or any other state.
 - The app copies URLs only from AXLink, so it loses this opened-view identity.
-  Current-thread support is a product proposal below, not implemented behavior.
+  Current-thread support was initially a proposal; the approved implementation is described in the follow-up above.
 
 ### Layout and cost
 
@@ -138,7 +169,7 @@ Validation:
 
 ## Ideas
 
-Propose the following before implementing step 3:
+The following proposal was accepted as One list and is now implemented:
 
 1. Read the exact current project/thread pair from AXWebArea.AXURL. Merge with
    an existing row by identity; a repeated sighting must not create a second row.
@@ -148,16 +179,13 @@ Propose the following before implementing step 3:
 3. For a newly identified thread with no state, show a neutral **STATE UNKNOWN**
    row with **Open in Claude**. It should contribute to neither Working nor
    Needs you. Keep it visible rather than folding it into Done.
-4. The real-size proposal offers **One list** and **Current thread section**.
-   I recommend One list to retain one row per thread. It uses invented content
-   and has been rendered locally; no product UI has been changed.
-5. A project's main conversation with no thread parameter needs its own
-   supported identity/row decision if it should be tracked. Do not invent a
-   child-thread identity from a nearby running indicator.
+4. Alex selected **One list** from the rendered proposals. The implementation
+   retains one row per conversation and uses the existing row components.
+5. Alex included project main conversations. They use a distinct project-main
+   address; a running indicator never supplies a child-thread identity.
 
-The existing stale-state-as-Done behavior can hide LAST SEEN rows in the
-floating window. Decide its intended presentation alongside unknown current
-threads, rather than changing source precedence or counters incidentally.
+Stale native rows now use unknown state and remain visible as LAST SEEN.
+Opening a page never resets their state observation time.
 
 ## Asks
 
@@ -170,12 +198,12 @@ threads, rather than changing source precedence or counters incidentally.
    keychain password in its own dialog and choose **Always Allow** for codesign.
    Do not send a password to an agent. Repeat installation once to verify that
    signing is unattended and AI Runs Settings remains On without another grant.
-2. Choose the current-thread presentation before implementation: One list
-   (recommended) or Current thread section. Confirm whether the project main
-   conversation should also get a separate row.
+2. One list and project main conversations are approved and implemented.
+   Verify the installed UI with a main conversation and a child thread open;
+   both should appear once, with unknown state unless actual state is known.
 3. Approve merges when satisfied. PR #7 is list-reading/UI verified, but the
-   full round 5 acceptance remains pending current-thread design and its
-   implementation. No merge to main or release has been performed.
+   full round 5 acceptance still needs the installed current-view UI check.
+   No merge to main or release has been performed.
 
 ```sh
 cd ~/ai-runs-build

@@ -128,7 +128,7 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 | A Claude project thread | Opens that exact thread in the Claude app |
 | chatgpt.com, claude.ai (with the extension) | Selects that tab in your browser, or reopens the chat there |
 
-**Claude project threads** (new, not yet tested on a real Mac)
+**Claude project conversations and threads**
 
 - A thread in a Claude project gets **one row**, labelled "Claude project". Local
   Claude Code sessions that work for that thread don't get rows of their own; the
@@ -139,8 +139,12 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
   **WORKING**, **WAITING ON YOU**, **READY FOR REVIEW**, **IDLE**. The row says
   "Seen in Claude 3m ago"; after 10 minutes without seeing the thread it says
   **LAST SEEN** instead of a state (Waiting on you is kept).
-- Turn this off in Settings → **Claude project threads** ("Show threads from
-  Claude's Threads list").
+- The project main conversation and an opened child thread also appear in the
+  same list. A page without state evidence says **STATE UNKNOWN** and adds no
+  Working or Needs you count. Opening a page does not refresh an older state.
+  Main conversations and child threads have their own direct open/pin links.
+- Turn this off in Settings → **Claude project threads** ("Show Claude project
+  conversations and threads").
 
 **Other things you can do**
 
@@ -207,8 +211,9 @@ Open an [issue](https://github.com/alextang809/ai-runs/issues) or just message m
 ## Known limitations
 
 - Web chats need the browser extension, and Safari isn't supported yet. Codex cloud
-  isn't tracked, and Claude cloud threads only show up while Claude's Threads
-  list is on screen.
+  isn't tracked. Open Claude project conversations and child threads appear
+  together; their state comes from the visible Threads list or agent events.
+  When no state is available, AI Runs shows STATE UNKNOWN.
 - ChatGPT and Claude change their pages often; if the extension stops noticing
   replies, tell me.
 - Ghostty, Warp and other terminals can't be scripted, so a click brings the app
