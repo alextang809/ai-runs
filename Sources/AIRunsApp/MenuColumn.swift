@@ -26,6 +26,11 @@ struct MenuColumn: View {
     @ObservedObject var ui: PanelUIState
     let actions: PanelActions
     @State private var heights: [MenuPart: CGFloat] = [:]
+    @State private var showRecent = false
+
+    private var hasActiveSessions: Bool {
+        MenuSessionPresentation(sessions: model.store.ordered()).hasActiveSessions
+    }
 
     private var sessionHeight: CGFloat {
         let available = ui.menuHeightLimit - (heights[.header] ?? 0) - (heights[.footer] ?? 0) - 8
@@ -83,16 +88,11 @@ struct MenuColumn: View {
                 RefreshButton(model: model)
                     .padding(.leading, 4)
             }
-            HeaderDashboard(needs: model.store.needsUserCount, working: model.store.workingCount,
-                            stats: model.store.stats(now: model.now))
-            ForEach(model.silentTools, id: \.self) { tool in
-                Text(silentHint(tool))
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(Palette.tool(tool))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+            if hasActiveSessions {
+                HeaderDashboard(needs: model.store.needsUserCount, working: model.store.workingCount,
+                                stats: model.store.stats(now: model.now))
             }
-            ThreadsHint(model: model)
+            ObservedUsageSummary(monitor: model.usage)
         }
         .padding(.horizontal, 14)
         .padding(.top, 9)
@@ -111,52 +111,79 @@ struct MenuColumn: View {
 
     @ViewBuilder private var activeSection: some View {
         let sessions = model.store.ordered()
+        let menu = MenuSessionPresentation(sessions: sessions)
         let overlap = Overlap.sameRepo(sessions)
         VStack(alignment: .leading, spacing: 0) {
-            if sessions.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(model.needsHookSetup
-                         ? "Set up hooks so Claude Code and Codex sessions show up here."
-                         : "Nothing running. Start a session in Claude Code or Codex and it shows up here.")
-                        .font(AppTypography.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if model.needsHookSetup {
-                        Button("Set Up Hooks…") { actions.showSettings() }
-                            .controlSize(.small)
+            // Setup notices scroll with content so the fixed header and footer
+            // still fit when permissions and both providers need attention.
+            VStack(alignment: .leading, spacing: 6) {
+                if menu.hasActiveSessions {
+                    ForEach(model.silentTools, id: \.self) { tool in
+                        Text(silentHint(tool))
+                            .font(AppTypography.metadata)
+                            .foregroundStyle(Palette.tool(tool))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                ThreadsHint(model: model)
+            }
+            .padding(.horizontal, 14)
+            if menu.hasActiveSessions {
+                if !menu.needs.isEmpty {
+                    SectionLabel(title: "Needs you", count: menu.needs.count)
+                    rows(menu.needs, overlap: overlap)
+                }
+                if !menu.working.isEmpty {
+                    SectionLabel(title: "Working", count: menu.working.count)
+                    rows(menu.working, overlap: overlap)
+                }
             } else {
-                let needs = sessions.filter { $0.needsUser }
-                let working = sessions.filter { $0.state == .working }
-                let unknown = sessions.filter { $0.state == .unknown }
-                let done = sessions.filter { $0.isDone }
-                let ignored = sessions.filter { $0.isIgnored }
-                if !needs.isEmpty {
-                    SectionLabel(title: "Needs you", count: needs.count)
-                    rows(needs, overlap: overlap)
+                homeActions
+            }
+            if !menu.unknown.isEmpty {
+                SectionLabel(title: "State unknown", count: menu.unknown.count)
+                rows(menu.unknown, overlap: overlap)
+            }
+            if menu.hasActiveSessions {
+                if !menu.done.isEmpty {
+                    sessionDisclosure("Done", count: menu.done.count, expanded: $ui.expandedDone)
+                    if ui.expandedDone { rows(menu.done, overlap: overlap) }
                 }
-                if !working.isEmpty {
-                    SectionLabel(title: "Working", count: working.count)
-                    rows(working, overlap: overlap)
+                if !menu.ignored.isEmpty {
+                    sessionDisclosure("Ignored", count: menu.ignored.count, expanded: $ui.expandedIgnored)
+                    if ui.expandedIgnored { rows(menu.ignored, overlap: overlap) }
                 }
-                if !unknown.isEmpty {
-                    SectionLabel(title: "State unknown", count: unknown.count)
-                    rows(unknown, overlap: overlap)
-                }
-                if !done.isEmpty {
-                    sessionDisclosure("Done", count: done.count, expanded: $ui.expandedDone)
-                    if ui.expandedDone { rows(done, overlap: overlap) }
-                }
-                if !ignored.isEmpty {
-                    sessionDisclosure("Ignored", count: ignored.count, expanded: $ui.expandedIgnored)
-                    if ui.expandedIgnored { rows(ignored, overlap: overlap) }
+            } else if !menu.recent.isEmpty {
+                sessionDisclosure("Recent Sessions", count: menu.recent.count, expanded: $showRecent)
+                if showRecent {
+                    if !menu.done.isEmpty {
+                        SectionLabel(title: "Done", count: menu.done.count)
+                        rows(menu.done, overlap: overlap)
+                    }
+                    if !menu.ignored.isEmpty {
+                        SectionLabel(title: "Ignored", count: menu.ignored.count)
+                        rows(menu.ignored, overlap: overlap)
+                    }
                 }
             }
         }
         .padding(.vertical, 3)
+    }
+
+    private var homeActions: some View {
+        VStack(spacing: 0) {
+            ObservedPlanEntry(manager: model.accounts, open: { actions.showAccounts() })
+            MenuRow(title: "Add Account…", systemImage: "plus") { actions.showAccounts() }
+            MenuRow(title: "Usage Dashboard", systemImage: "chart.bar") { actions.showUsageDashboard() }
+            MenuRow(title: ui.boardVisible ? "Hide Floating Window" : "Show Floating Window",
+                    systemImage: "rectangle.on.rectangle") { actions.toggleBoard() }
+            if model.needsHookSetup {
+                MenuRow(title: "Set Up Session Tracking…", systemImage: "link") { actions.showSettings() }
+            }
+        }
+        .padding(.horizontal, 5)
+        .onHover { if $0 { ui.hoverOff() } }
     }
 
     private func sessionDisclosure(_ title: String, count: Int, expanded: Binding<Bool>) -> some View {
@@ -209,7 +236,23 @@ struct MenuColumn: View {
         return { model.setIgnored(sessionId: id, !ignored) }
     }
 
-    private var bottomMenu: some View {
+    @ViewBuilder private var bottomMenu: some View {
+        if hasActiveSessions {
+            activeFooter
+        } else {
+            VStack(spacing: 0) {
+                MenuRow(title: "Settings…", systemImage: "slider.horizontal.3") { actions.showSettings() }
+                MenuRow(title: "About AI Runs", systemImage: "info.circle") { actions.showAbout() }
+                MenuRow(title: "Quit AI Runs", shortcut: "⌘Q", systemImage: "power") { NSApp.terminate(nil) }
+                    .keyboardShortcut("q", modifiers: .command)
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+            .onHover { if $0 { ui.hoverOff() } }
+        }
+    }
+
+    private var activeFooter: some View {
         HStack(spacing: 14) {
             Button {
                 actions.toggleBoard()
@@ -222,7 +265,12 @@ struct MenuColumn: View {
             Button("Settings…") { actions.showSettings() }
                 .help("Hooks & Settings")
             Menu {
+                Button("Add Account…", systemImage: "plus") { actions.showAccounts() }
+                Button("Usage Dashboard", systemImage: "chart.bar") { actions.showUsageDashboard() }
+                Button("Plan Usage & Accounts…", systemImage: "person.crop.circle") { actions.showAccounts() }
+                Divider()
                 Button("Pin Front AI Window", systemImage: "pin") { model.pinFrontWindow() }
+                Button("About AI Runs", systemImage: "info.circle") { actions.showAbout() }
                 Divider()
                 Button("Quit AI Runs", systemImage: "power") { NSApp.terminate(nil) }
                     .keyboardShortcut("q", modifiers: .command)

@@ -10,6 +10,9 @@ protocol PanelActions: AnyObject {
     func toggleBoard()
     var isBoardVisible: Bool { get }
     func showSettings()
+    func showAccounts()
+    func showUsageDashboard()
+    func showAbout()
     func renameSession(_ id: String)
     func editCard(_ card: PinCard)
 }
@@ -32,6 +35,8 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
     private var monitors: [Any] = []
     private var cancellables = Set<AnyCancellable>()
     private var settingsWindow: NSWindow?
+    private var accountsWindow: NSWindow?
+    private var usageWindow: NSWindow?
     private lazy var floating = FloatingController(model: model, actions: self)
     private let toast = ToastController()
 
@@ -249,6 +254,49 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func showAccounts() {
+        closePanel()
+        model.accounts.start()
+        model.accounts.refreshAll()
+        if accountsWindow == nil {
+            accountsWindow = Self.auxiliaryWindow(title: "AI Runs Accounts",
+                content: ManagedAccountsView(manager: model.accounts))
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        accountsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func showUsageDashboard() {
+        closePanel()
+        model.usage.refreshNow()
+        if usageWindow == nil {
+            usageWindow = Self.auxiliaryWindow(title: "AI Runs Usage",
+                content: ObservedUsageDashboard(monitor: model.usage))
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        usageWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func showAbout() {
+        closePanel()
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "AI Runs"])
+    }
+
+    private static func auxiliaryWindow<Content: View>(title: String, content: Content) -> NSWindow {
+        let hosting = NSHostingController(rootView: content)
+        hosting.sizingOptions = [.preferredContentSize]
+        let window = NSWindow(contentViewController: hosting)
+        window.title = title
+        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.titlebarAppearsTransparent = true
+        window.isReleasedWhenClosed = false
+        window.center()
+        return window
     }
 
     func renameSession(_ id: String) {
