@@ -409,7 +409,7 @@ struct ToastView: View {
     var body: some View {
         GlassSurface(cornerRadius: 14, fallbackMaterial: .hudWindow) {
             Text(text)
-                .font(.system(size: 12, weight: .medium))
+                .font(AppTypography.body)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: 320, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)

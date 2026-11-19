@@ -32,17 +32,20 @@ struct SessionRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
                         Text(session.title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(AppTypography.rowTitle)
                             .lineLimit(1)
                         Spacer(minLength: 4)
-                        StatePill(session: session, now: now)
                         // Always reserved, so nothing moves when the × appears.
                         Color.clear.frame(width: RemoveZone.slot, height: 18)
                     }
-                    Text(RunText.place(session))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(RunText.place(session))
+                            .font(AppTypography.metadata)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        StatePill(session: session, now: now)
+                    }
                     HStack(spacing: 10) {
                         LiveLine(session: session, now: now)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -52,7 +55,7 @@ struct SessionRow: View {
                     .padding(.top, 2)
                     if let warning = RunText.alsoHere(alsoHere) {
                         Label(warning, systemImage: "arrow.triangle.branch")
-                            .font(.system(size: 11))
+                            .font(AppTypography.metadata)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -61,7 +64,7 @@ struct SessionRow: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 7)
+            .padding(.vertical, 9)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
@@ -69,7 +72,7 @@ struct SessionRow: View {
         .overlay(alignment: .topTrailing) {
             if highlighted {
                 RemoveZone(label: "Remove \(session.title) from the list", action: remove)
-                    .padding(.top, 7 + 9 - RemoveZone.size.height / 2)
+                    .padding(.top, 9 + 9 - RemoveZone.size.height / 2)
                     .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
         }
@@ -232,11 +235,11 @@ struct StatePill: View {
                 Image(systemName: "checkmark").font(.system(size: 8.5, weight: .heavy))
             }
             Text(RunText.stateWord(session, now: now))
-                .font(.system(size: 9.5, weight: .bold))
-                .tracking(0.6)
+                .font(AppTypography.badge)
+                .tracking(0.2)
             if session.state != .unknown {
                 Text(RunText.stateTime(session, now: now))
-                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .font(AppTypography.elapsed)
             }
         }
         .foregroundStyle(style.text)
@@ -263,7 +266,7 @@ struct LiveLine: View {
                 hookLine
             }
         }
-        .font(.system(size: 11.5, weight: .medium))
+        .font(AppTypography.body)
     }
 
     @ViewBuilder private var hookLine: some View {
@@ -317,7 +320,7 @@ struct StepsBar: View {
                 .frame(width: 60, height: 5)
             }
             Text("\(progress.done)/\(progress.total)")
-                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                .font(AppTypography.elapsed)
                 .foregroundStyle(.secondary)
                 .padding(.leading, 3)
         }
@@ -393,7 +396,7 @@ struct AppIcon: View {
             } else {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.primary.opacity(0.1))
-                    .overlay(Image(systemName: "terminal").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary))
+                    .overlay(Image(systemName: "terminal").font(AppTypography.section).foregroundStyle(.secondary))
                     .padding(2)
             }
         }
@@ -429,18 +432,18 @@ struct HeaderDashboard: View {
         HStack(spacing: 0) {
             Text("Agents waited on you ")
             Text(waited == "now" ? "0m" : waited)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .font(AppTypography.elapsed)
                 .foregroundStyle(stats.waitedToday >= 60 ? Color.primary : .secondary)
             Text(" today")
             if let average = stats.averageReply {
                 Text(" · you replied in ")
                 Text(Self.short(average))
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .font(AppTypography.elapsed)
                     .foregroundStyle(.primary)
                 Text(" on average")
             }
         }
-        .font(.system(size: 11))
+        .font(AppTypography.metadata)
         .foregroundStyle(.secondary)
         .lineLimit(1)
     }
@@ -462,11 +465,11 @@ private struct Metric: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("\(value)")
-                .font(.system(size: 22, weight: .semibold, design: .rounded)).monospacedDigit()
+                .font(AppTypography.metric)
                 .foregroundStyle(color)
             Text(label.uppercased())
-                .font(.system(size: 9, weight: .semibold))
-                .tracking(0.7)
+                .font(AppTypography.section)
+                .tracking(0.4)
                 .foregroundStyle(.secondary)
                 .fixedSize()
         }
@@ -510,7 +513,7 @@ private struct Histogram: View {
                 Spacer()
                 Text("now")
             }
-            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+            .font(AppTypography.elapsed)
             .foregroundStyle(.secondary)
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -524,8 +527,8 @@ struct SectionLabel: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Text(title.uppercased()).font(.system(size: 10, weight: .bold)).tracking(0.9)
-            Text("\(count)").font(.system(size: 10, weight: .bold, design: .monospaced))
+            Text(title.uppercased()).font(AppTypography.section).tracking(0.4)
+            Text("\(count)").font(AppTypography.elapsed)
         }
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14)
@@ -536,7 +539,7 @@ struct SectionLabel: View {
 
 struct LifelineLegend: View {
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7) {
             swatch(Palette.claude, "Claude")
             swatch(Palette.codex, "Codex")
             Text("·")
@@ -545,7 +548,7 @@ struct LifelineLegend: View {
             Spacer(minLength: 4)
             Text("last 60 min")
         }
-        .font(.system(size: 10, weight: .medium))
+        .font(AppTypography.metadata)
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .padding(.horizontal, 14)

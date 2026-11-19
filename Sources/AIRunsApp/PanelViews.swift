@@ -135,17 +135,17 @@ struct MenuColumn: View {
             HStack(alignment: .firstTextBaseline) {
                 Image(nsImage: Icons.statusImage(Icons.Status(store: model.store)))
                     .accessibilityHidden(true)
-                Text("AI Runs").font(.system(size: 16, weight: .semibold))
+                Text("AI Runs").font(AppTypography.appTitle)
                 Spacer()
                 if let message = model.message {
                     Text(message)
-                        .font(.system(size: 11.5, weight: .semibold))
+                        .font(AppTypography.metadata)
                         .foregroundStyle(Color.secondary)
                         .lineLimit(1)
                     if model.undo != nil {
                         Button("Undo") { model.performUndo() }
                             .buttonStyle(.plain)
-                            .font(.system(size: 11.5, weight: .bold))
+                            .font(AppTypography.section)
                             .foregroundStyle(Color.primary)
                             .keyboardShortcut("z", modifiers: .command)
                     }
@@ -157,7 +157,7 @@ struct MenuColumn: View {
                             stats: model.store.stats(now: model.now))
             ForEach(model.silentTools, id: \.self) { tool in
                 Text(silentHint(tool))
-                    .font(.system(size: 11.5))
+                    .font(AppTypography.metadata)
                     .foregroundStyle(Palette.tool(tool))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -188,7 +188,7 @@ struct MenuColumn: View {
                     Text(model.needsHookSetup
                          ? "Set up hooks so Claude Code and Codex sessions show up here."
                          : "Nothing running. Start a session in Claude Code or Codex and it shows up here.")
-                        .font(.system(size: 12))
+                        .font(AppTypography.body)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if model.needsHookSetup {
@@ -292,14 +292,14 @@ struct CardRow: View {
         Button(action: open) {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(card.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Text(card.title).font(AppTypography.rowTitle).lineLimit(1)
                     Text(card.next.isEmpty ? "No next step yet" : "Next: \(card.next)")
-                        .font(.system(size: 11.5)).lineLimit(1)
+                        .font(AppTypography.metadata).lineLimit(1)
                         .foregroundStyle(Color.secondary)
                 }
                 Spacer(minLength: 8)
                 Text(TextUtils.age(now.timeIntervalSince(card.touchedAt)))
-                    .font(.system(size: 11).monospacedDigit())
+                    .font(AppTypography.elapsed)
                     .foregroundStyle(Color.secondary)
                     .opacity(highlighted && remove != nil ? 0 : 1)
             }
@@ -340,15 +340,15 @@ struct MenuRow: View {
             HStack(spacing: 10) {
                 if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: 12))
+                        .font(AppTypography.body)
                         .frame(width: 16)
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                 }
-                Text(title).font(.system(size: 13.5))
+                Text(title).font(AppTypography.action)
                 Spacer()
                 if !shortcut.isEmpty {
-                    Text(shortcut).font(.system(size: 12))
+                    Text(shortcut).font(AppTypography.body)
                         .foregroundStyle(Color.secondary)
                 }
             }
@@ -375,12 +375,12 @@ struct PinnedSection: View {
         let stale = model.board.staleCards(now: model.now)
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 2) {
-                Text("Pinned").font(.system(size: 13, weight: .bold))
+                Text("Pinned").font(AppTypography.rowTitle)
                 Spacer()
                 Button {
                     ui.addingNote.toggle()
                 } label: {
-                    Label("Note", systemImage: "plus").font(.system(size: 12, weight: .semibold))
+                    Label("Note", systemImage: "plus").font(AppTypography.section)
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Color.primary)
@@ -403,7 +403,7 @@ struct PinnedSection: View {
 
             if groups.isEmpty && stale.isEmpty && !ui.addingNote {
                 Text("Nothing pinned yet. Pin a session from its details, or use “Pin Front AI Window” below.")
-                    .font(.system(size: 12))
+                    .font(AppTypography.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 9)
@@ -461,9 +461,9 @@ struct GroupHeader: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .rotationEffect(.degrees(collapsed ? 0 : 90))
-                Text(name).font(.system(size: 12, weight: .semibold))
+                Text(name).font(AppTypography.section)
                 Spacer()
-                Text("\(count)").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("\(count)").font(AppTypography.body).foregroundStyle(.secondary)
             }
             .foregroundStyle(Color.secondary)
             .padding(.horizontal, 9)
@@ -508,11 +508,11 @@ struct FlyoutBody: View {
         FlyoutSurface {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
-                    Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(title).font(AppTypography.detailTitle).fixedSize(horizontal: false, vertical: true)
+                    Text(subtitle).font(AppTypography.body).foregroundStyle(.secondary)
                     if let chip {
                         Text(chip.text)
-                            .font(.system(size: 11.5, weight: .semibold))
+                            .font(AppTypography.metadata)
                             .padding(.horizontal, 8).padding(.vertical, 2)
                             .background(Capsule().fill((chip.color ?? Color.primary).opacity(chip.color == nil ? 0.08 : 0.16)))
                             .foregroundStyle(chip.color ?? Color.secondary)
@@ -529,7 +529,7 @@ struct FlyoutBody: View {
                                 Spacer(minLength: 12)
                                 Text(row.1).multilineTextAlignment(.trailing)
                             }
-                            .font(.system(size: 12))
+                            .font(AppTypography.body)
                         }
                     }
                     .padding(.horizontal, 14).padding(.bottom, 8)
@@ -537,18 +537,18 @@ struct FlyoutBody: View {
 
                 if let note {
                     VStack(alignment: .leading, spacing: 2) {
-                        if let noteLabel { Text(noteLabel).font(.system(size: 11)).foregroundStyle(.secondary) }
-                        Text(note).font(.system(size: 12)).lineLimit(8).fixedSize(horizontal: false, vertical: true)
+                        if let noteLabel { Text(noteLabel).font(AppTypography.metadata).foregroundStyle(.secondary) }
+                        Text(note).font(AppTypography.body).lineLimit(8).fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal, 14).padding(.bottom, 8)
                 }
 
                 if let quote, !quote.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
-                        if let quoteLabel { Text(quoteLabel).font(.system(size: 11)).foregroundStyle(.secondary) }
+                        if let quoteLabel { Text(quoteLabel).font(AppTypography.metadata).foregroundStyle(.secondary) }
                         // Not selectable: once clicked, selectable text forgets its
                         // line limit and is drawn past the box, over the actions.
-                        Text(quote).font(.system(size: 12)).lineLimit(8).truncationMode(.tail)
+                        Text(quote).font(AppTypography.body).lineLimit(8).truncationMode(.tail)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -8,7 +8,7 @@ struct RefreshButton: View {
 
     var body: some View {
         Button { model.refreshNow() } label: {
-            Image(systemName: "arrow.clockwise").font(.system(size: 11, weight: .semibold))
+            Image(systemName: "arrow.clockwise").font(AppTypography.section)
                 .frame(width: 24, height: 24).contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -27,7 +27,7 @@ struct ThreadsHint: View {
         if model.threadsStatus == .needsPermission {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Claude conversations need Accessibility. If AI Runs is already ticked in System Settings, remove it and add it again.")
-                    .font(.system(size: 11.5))
+                    .font(AppTypography.metadata)
                     .foregroundStyle(Palette.claude)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)

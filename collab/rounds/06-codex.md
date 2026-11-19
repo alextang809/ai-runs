@@ -2,6 +2,18 @@
 
 ## Did
 
+- Refined the selected design toward stronger frosting and a consistent SF type
+  hierarchy, using the ECC liquid-glass-design, design-system, and swiftui-patterns
+  skills. Added a regular-material backdrop beneath the native glass rim and
+  a restrained semantic wash; text and controls remain unblurred.
+- Added AppTypography roles: 17-point app title, 13–13.5-point row titles,
+  12-point body, 11.5-point metadata, 10.5-point state labels, and 24-point
+  aligned metric digits. Reduced state-label tracking and moved badges below
+  titles to preserve title width. Compact lists scroll after five rows.
+- Re-rendered light/dark previews with long English and Chinese titles.
+  Final refinement: 183 local tests and optimized Release build passed.
+  The user requested manual local build/install commands for this refinement;
+  installation is not performed automatically.
 - Drafted a shared native glass surface for the menu, floating capsule/card,
   flyouts, toast, and settings. Tool colors and state labels remain intact.
 - Used macOS 26 Liquid Glass with compiler/runtime guards and a macOS 14/15

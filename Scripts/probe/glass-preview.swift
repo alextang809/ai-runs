@@ -1,6 +1,6 @@
 // macOS 26 native preview with fictitious sessions; does not initialize AppModel.
 // From the repository root:
-// swiftc -parse-as-library Sources/AIRunsApp/GlassSurface.swift Scripts/probe/glass-preview.swift -o /tmp/airuns-glass-preview
+// swiftc -parse-as-library Sources/AIRunsApp/GlassSurface.swift Sources/AIRunsApp/AppTypography.swift Scripts/probe/glass-preview.swift -o /tmp/airuns-glass-preview
 // /tmp/airuns-glass-preview /tmp/airuns-glass-preview-images
 
 import AppKit
@@ -20,8 +20,8 @@ struct PreviewRun: Identifiable {
 
 let previewRuns = [
     PreviewRun(id: 1, title: "Export report", tool: "Claude Code", activity: "Waiting for permission to save", state: "APPROVE", needs: true, claude: true),
-    PreviewRun(id: 2, title: "Research notes", tool: "Claude project", activity: "Which sources should I include?", state: "NEEDS INPUT", needs: true, claude: true),
-    PreviewRun(id: 3, title: "Polish settings", tool: "Codex", activity: "Refining the preferences panel", state: "WORKING", needs: false, claude: false),
+    PreviewRun(id: 2, title: "调研笔记与跨项目参考资料整理", tool: "Claude project", activity: "Which sources should I include?", state: "NEEDS INPUT", needs: true, claude: true),
+    PreviewRun(id: 3, title: "Refine preferences and quick-note controls", tool: "Codex", activity: "Refining the preferences panel", state: "WORKING", needs: false, claude: false),
     PreviewRun(id: 4, title: "Voice conversation", tool: "Codex", activity: "Preparing the next response", state: "WORKING", needs: false, claude: false),
 ]
 
@@ -35,24 +35,42 @@ struct PreviewLogo: View {
     }
 }
 
+struct PreviewBadge: View {
+    let run: PreviewRun
+    private var unknown: Bool { run.state == "STATE UNKNOWN" }
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(run.state).font(AppTypography.badge).tracking(0.2)
+            if !unknown { Text("2m").font(AppTypography.elapsed) }
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .foregroundStyle(unknown ? Color.secondary : (run.needs ? Color.white : run.tint))
+        .background(Capsule().fill(unknown ? Color.primary.opacity(0.06) : (run.needs ? run.tint : .clear)))
+        .overlay(Capsule().strokeBorder(run.needs || unknown ? .clear : run.tint.opacity(0.65), lineWidth: 0.8))
+        .fixedSize()
+    }
+}
+
 struct PreviewRow: View {
     let run: PreviewRun
     var compact = false
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
-            RoundedRectangle(cornerRadius: 2).fill(run.tint).frame(width: 3, height: compact ? 31 : 44)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Text(run.title).font(.system(size: compact ? 12.5 : 13, weight: .semibold)).lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(run.state).font(.system(size: 9, weight: .semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 3)
-                        .foregroundStyle(run.needs ? Color.white : run.tint)
-                        .background(Capsule().fill(run.needs ? run.tint : Color.primary.opacity(0.035)))
-                        .overlay(Capsule().strokeBorder(run.needs ? .clear : run.tint.opacity(0.65), lineWidth: 0.8))
+            RoundedRectangle(cornerRadius: 2).fill(run.tint).frame(width: 3)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(run.title).font(compact ? AppTypography.compactTitle : AppTypography.rowTitle)
+                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                if !compact {
+                    HStack(spacing: 6) {
+                        Text(run.tool).font(AppTypography.metadata).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer(minLength: 4)
+                        PreviewBadge(run: run)
+                    }
                 }
-                if !compact { Text(run.tool + " · just now").font(.system(size: 10.5)).foregroundStyle(.secondary) }
-                Text(run.activity).font(.system(size: compact ? 10.5 : 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                Text(run.activity).font(AppTypography.body).foregroundStyle(.secondary).lineLimit(1)
+                if compact {
+                    HStack { PreviewBadge(run: run); Spacer(minLength: 0) }.padding(.top, 3)
+                }
             }
         }.padding(.horizontal, 12).padding(.vertical, compact ? 8 : 9)
     }
@@ -65,14 +83,14 @@ struct PreviewMenu: View {
                 VStack(alignment: .leading, spacing: 13) {
                     HStack {
                         PreviewLogo()
-                        Text("AI Runs").font(.system(size: 16, weight: .semibold))
+                        Text("AI Runs").font(AppTypography.appTitle)
                         Spacer()
                         Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                     }
                     HStack(alignment: .bottom, spacing: 20) {
                         metric("2", "NEED YOU")
                         metric("2", "WORKING")
-                        metric("6", "TODAY")
+                        metric("12", "TODAY")
                         Spacer()
                         HStack(alignment: .bottom, spacing: 3) {
                             ForEach(0..<12) { index in
@@ -81,26 +99,26 @@ struct PreviewMenu: View {
                             }
                         }.frame(height: 34)
                     }
-                    Text("Agents waited on you 8m today").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("Agents waited on you 8m today").font(AppTypography.metadata).foregroundStyle(.secondary)
                 }.padding(16)
                 Divider().padding(.horizontal, 16)
-                Text("ACTIVE · 4").font(.system(size: 10, weight: .semibold)).tracking(0.7)
+                Text("ACTIVE · 4").font(AppTypography.section).tracking(0.4)
                     .foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 2)
                 ForEach(previewRuns) { PreviewRow(run: $0) }
                 Divider().padding(.horizontal, 16).padding(.vertical, 8)
                 HStack {
-                    Text("PINNED").font(.system(size: 10, weight: .semibold)).tracking(0.7)
+                    Text("PINNED").font(AppTypography.section).tracking(0.4)
                     Spacer()
-                    Text("1").font(.system(size: 11)).monospacedDigit()
+                    Text("1").font(AppTypography.metadata).monospacedDigit()
                 }.foregroundStyle(.secondary).padding(.horizontal, 16).padding(.bottom, 7)
                 HStack(spacing: 10) {
                     Image(systemName: "pin").foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Weekly release").font(.system(size: 12.5, weight: .semibold))
-                        Text("Next: Review final notes").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text("Weekly release").font(AppTypography.rowTitle)
+                        Text("Next: Review final notes").font(AppTypography.metadata).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text("3m").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("3m").font(AppTypography.metadata).foregroundStyle(.secondary)
                 }.padding(.horizontal, 16).padding(.vertical, 8)
                 Divider().padding(.horizontal, 16).padding(.vertical, 8)
                 menuItem("Pin Front AI Window", "pin")
@@ -112,8 +130,8 @@ struct PreviewMenu: View {
     }
     private func metric(_ value: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(value).font(.system(size: 22, weight: .semibold, design: .rounded)).monospacedDigit()
-            Text(label).font(.system(size: 9, weight: .semibold)).tracking(0.5).foregroundStyle(.secondary)
+            Text(value).font(AppTypography.metric)
+            Text(label).font(AppTypography.section).tracking(0.5).foregroundStyle(.secondary)
         }
     }
     private func menuItem(_ title: String, _ symbol: String, shortcut: String = "") -> some View {
@@ -122,7 +140,7 @@ struct PreviewMenu: View {
             Text(title)
             Spacer()
             Text(shortcut).foregroundStyle(.secondary)
-        }.font(.system(size: 12.5)).padding(.horizontal, 16).frame(height: 30)
+        }.font(AppTypography.action).padding(.horizontal, 16).frame(height: 30)
     }
 }
 
@@ -132,8 +150,8 @@ struct PreviewFloating: View {
             GlassSurface(cornerRadius: 22) {
                 HStack(spacing: 9) {
                     PreviewLogo()
-                    Text("2").font(.system(size: 13, weight: .semibold, design: .rounded))
-                    Text("NEED YOU").font(.system(size: 10, weight: .semibold)).tracking(0.5).foregroundStyle(.secondary)
+                    Text("2").font(AppTypography.capsuleCount)
+                    Text("NEED YOU").font(AppTypography.section).tracking(0.5).foregroundStyle(.secondary)
                     Divider().frame(height: 16)
                     ForEach(0..<4) { index in
                         Circle().fill(index < 2 ? Color(red: 0.851, green: 0.467, blue: 0.341) : Color.primary.opacity(0.2)).frame(width: 7, height: 7)
@@ -155,18 +173,18 @@ struct PreviewFloating: View {
                     }.font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                         .padding(.horizontal, 14).padding(.vertical, 14)
                     ForEach(previewRuns) { PreviewRow(run: $0, compact: true) }
-                    Text("+ 2 done or ignored").font(.system(size: 10.5)).foregroundStyle(.secondary)
+                    Text("+ 2 done or ignored").font(AppTypography.metadata).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 12)
                 }.frame(width: 310)
             }
             GlassSurface(cornerRadius: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Export report").font(.system(size: 14, weight: .semibold))
-                    Text("Claude Code · Waiting for approval").font(.system(size: 11.5)).foregroundStyle(.secondary)
-                    Text("Save the generated report to your project.").font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Text("Export report").font(AppTypography.detailTitle)
+                    Text("Claude Code · Waiting for approval").font(AppTypography.metadata).foregroundStyle(.secondary)
+                    Text("Save the generated report to your project.").font(AppTypography.body).fixedSize(horizontal: false, vertical: true)
                     Divider().padding(.vertical, 2)
                     HStack { Image(systemName: "arrow.up.forward.app"); Text("Open in Claude"); Spacer(); Text("↩").foregroundStyle(.secondary) }
-                        .font(.system(size: 12))
+                        .font(AppTypography.body)
                 }.padding(16).frame(width: 284, alignment: .leading)
             }
         }.frame(width: 310, alignment: .leading)
@@ -184,7 +202,7 @@ struct PreviewCanvas: View {
                 HStack {
                     Text(dark ? "DARK" : "LIGHT").font(.system(size: 11, weight: .semibold)).tracking(1.5)
                     Spacer()
-                    Text("Native glass preview · fictitious sessions").font(.system(size: 11))
+                    Text("Frosted SF typography · fictitious sessions").font(AppTypography.metadata)
                 }.foregroundStyle(.secondary)
                 HStack(alignment: .top, spacing: 28) { PreviewMenu(); PreviewFloating() }
                 Spacer(minLength: 0)
@@ -224,7 +242,7 @@ struct GlassPreviewRunner {
             configuration.ignoreShadowsSingleWindow = true
             let capture = try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: own), configuration: configuration)
             let bitmap = NSBitmapImageRep(cgImage: capture)
-            try bitmap.representation(using: .png, properties: [:])!.write(to: output.appendingPathComponent("glass-\(name).png"))
+            try bitmap.representation(using: .png, properties: [:])!.write(to: output.appendingPathComponent("frosted-\(name).png"))
             window.orderOut(nil)
             print("Rendered", name)
         }

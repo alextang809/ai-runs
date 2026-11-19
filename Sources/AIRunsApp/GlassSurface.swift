@@ -67,7 +67,7 @@ struct GlassSurface<Content: View>: View {
             // Older toolchains cannot name Liquid Glass, even inside a runtime check.
             #if compiler(>=6.2)
             if #available(macOS 26.0, *) {
-                content.clipShape(shape).glassEffect(.regular, in: shape)
+                softenedGlassContent.glassEffect(.regular, in: shape)
             } else {
                 frostedSurface
             }
@@ -77,10 +77,31 @@ struct GlassSurface<Content: View>: View {
         }
     }
 
+    /// Frost only the backdrop; text and controls stay sharp above the material.
+    private var softenedGlassContent: some View {
+        content
+            .background {
+                shape.fill(.regularMaterial)
+                    .overlay { backgroundWash }
+                    .allowsHitTesting(false)
+            }
+            .clipShape(shape)
+    }
+
     private var frostedSurface: some View {
         content
-            .background(LegacyGlassBackdrop(material: fallbackMaterial).allowsHitTesting(false))
+            .background {
+                LegacyGlassBackdrop(material: fallbackMaterial)
+                    .overlay { backgroundWash }
+                    .allowsHitTesting(false)
+            }
             .clipShape(shape)
+    }
+
+    private var backgroundWash: some View {
+        shape.fill(Color(nsColor: .windowBackgroundColor)
+            .opacity(colorScheme == .dark ? 0.16 : 0.1))
+            .allowsHitTesting(false)
     }
 
     private static var supportsLiquidGlass: Bool {
