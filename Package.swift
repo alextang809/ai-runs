@@ -14,5 +14,6 @@ let package = Package(
         .executableTarget(name: "airuns-hook", dependencies: ["AIRunsCore"]),
         .executableTarget(name: "AIRunsApp", dependencies: ["AIRunsCore"]),
         .testTarget(name: "AIRunsCoreTests", dependencies: ["AIRunsCore"]),
+        .testTarget(name: "AIRunsAppTests", dependencies: ["AIRunsApp"]),
     ]
 )

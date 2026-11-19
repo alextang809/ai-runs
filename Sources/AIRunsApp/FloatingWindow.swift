@@ -23,13 +23,6 @@ final class FloatingState: ObservableObject {
     var autoExpanded = false
 }
 
-/// A borderless panel that can take keyboard focus (the quick-note field)
-/// without activating AI Runs.
-final class FloatingPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
-}
-
 /// A small window that floats above everything, on every Space and over
 /// full-screen apps: a capsule with the count, or a card with the runs and
 /// the pinned board. Drag it anywhere; it snaps to screen edges.
@@ -54,20 +47,20 @@ final class FloatingController: NSObject {
             .store(in: &cancellables)
     }
 
-    var isVisible: Bool { panel?.isVisible == true }
+    var isVisible: Bool { panel?.isPresented == true }
 
     func toggle() { isVisible ? hide() : show() }
 
     func show() {
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        panel.orderFrontRegardless()
+        panel.present()
         UserDefaults.standard.set(true, forKey: FloatingSettings.visibleKey)
         onVisibilityChange?(true)
     }
 
     func hide() {
-        panel?.orderOut(nil)
+        panel?.dismiss()
         UserDefaults.standard.set(false, forKey: FloatingSettings.visibleKey)
         onVisibilityChange?(false)
     }
@@ -78,18 +71,10 @@ final class FloatingController: NSObject {
     }
 
     private func makePanel() -> FloatingPanel {
-        let panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 44),
-                                  styleMask: [.borderless, .nonactivatingPanel],
-                                  backing: .buffered, defer: true)
-        panel.level = .floating
-        panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = false
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.isReleasedWhenClosed = false
+        let panel = FloatingPanel()
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let root = FloatingRoot(model: model, state: state, controller: self)
         let hosting = NSHostingView(rootView: root)
         hosting.frame = panel.contentRect(forFrameRect: panel.frame)
