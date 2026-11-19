@@ -4,10 +4,11 @@ import SwiftUI
 
 // MARK: - Session row
 
-/// One run: its real host icon, title, state and elapsed time. Only an actual
-/// approval, input question or current plan adds a line; hover reveals evidence.
+/// A run's host icon, title, state, readable activity and observed history.
+/// Source/project metadata stays in the details; repository overlap stays visible.
 struct SessionRow: View {
     let session: Session
+    let lifeline: [ActivitySpan]
     let now: Date
     /// Titles of other runs working in the same repository right now.
     var alsoHere: [String] = []
@@ -40,9 +41,17 @@ struct SessionRow: View {
                         StatePill(session: session, now: now)
                         Spacer(minLength: 0)
                     }
-                    if let detail = CompactRunDetail.resolve(session, now: now) {
-                        CompactRunDetailLine(detail: detail)
+                    HStack(spacing: 10) {
+                        LiveLine(session: session, now: now)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        // Requests get the full line; history must not squeeze their target.
+                        if session.state != .needsApproval && session.outcome != .needsInput {
+                            LifelineView(spans: lifeline, now: now, color: Palette.tool(session.tool))
+                                .frame(width: 104, height: 9)
+                                .help("Observed activity over the last hour")
+                        }
                     }
+                    .padding(.top, 2)
                     if let warning = RunText.alsoHere(alsoHere) {
                         Label(warning, systemImage: "arrow.triangle.branch")
                             .font(AppTypography.metadata)
@@ -79,7 +88,7 @@ struct SessionRow: View {
         .reportFrame(key.key)
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
-        .accessibilityLabel("\(session.title), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.liveText(session, now: now))\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
+        .accessibilityLabel("\(session.title), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
         .accessibilityAddTraits(.isButton)
     }
 }
@@ -171,6 +180,33 @@ enum RunText {
         }
         let detail = stateDetail(session, now: now)
         return session.nativeView?.isOpen == true ? "Open in Claude · \(detail)" : detail
+    }
+
+    /// Main-menu summary; raw activity remains available in the flyout.
+    static func rowActivity(_ session: Session, now: Date) -> String {
+        guard session.native == nil, session.state == .working,
+              !session.isInBackground, !session.isQuiet(now: now) else {
+            return liveText(session, now: now)
+        }
+        let detail: String
+        if case .progress(let plan) = CompactRunDetail.resolve(session, now: now) {
+            detail = RunProgress(done: plan.done, total: plan.total,
+                                 current: readableActivity(plan.current)).summary
+        } else {
+            detail = readableActivity(session.activity) ?? "Working"
+        }
+        return session.nativeView?.isOpen == true ? "Open in Claude · \(detail)" : detail
+    }
+
+    private static func readableActivity(_ activity: String?) -> String? {
+        guard let text = activity?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return nil }
+        if text.hasPrefix("mcp__") || text.hasPrefix("functions.") { return nil }
+        let parts = text.split(whereSeparator: { $0.isWhitespace })
+        let identifier = parts.count == 1 ? parts.first
+            : (parts.count == 2 && parts[0] == "Using" ? parts.last : nil)
+        if let identifier, identifier.contains("_") || identifier.contains(".") { return nil }
+        return text
     }
 
     private static func stateDetail(_ session: Session, now: Date) -> String {
@@ -265,10 +301,11 @@ struct LiveLine: View {
             case .unknown:
                 Text(RunText.liveText(session, now: now)).foregroundStyle(.secondary).lineLimit(1)
             case .needsApproval:
-                Text("wants to run").foregroundStyle(.secondary)
-                Text(session.approvalDetail ?? "a tool")
-                    .font(.system(size: 11, design: .monospaced))
-                    .lineLimit(1).truncationMode(.middle)
+                if case .approval(let action) = CompactRunDetail.resolve(session, now: now) {
+                    Text("Allow: \(action)").lineLimit(1).truncationMode(.middle)
+                } else {
+                    Text("Waiting for approval").foregroundStyle(.secondary).lineLimit(1)
+                }
             case .yourTurn:
                 if session.outcome == .needsInput {
                     Text(session.outcomeSource == .asked ? "asks" : "asks you").foregroundStyle(.secondary)
@@ -277,12 +314,9 @@ struct LiveLine: View {
                     Text(RunText.liveText(session, now: now)).foregroundStyle(.secondary).lineLimit(1)
                 }
             case .working:
-                Text(RunText.liveText(session, now: now))
+                Text(RunText.rowActivity(session, now: now))
                     .foregroundStyle(session.isInBackground || session.isQuiet(now: now) ? .secondary : .primary)
                     .lineLimit(1)
-                if let progress = session.progress, !session.isInBackground {
-                    StepsBar(progress: progress, color: Palette.tool(session.tool))
-                }
             }
     }
 }

@@ -13,7 +13,7 @@ enum AppTypography {
     static let section = Font.system(size: 11)
     static let badge = Font.system(size: 10.5)
     static let elapsed = Font.system(size: 11).monospacedDigit()
-    static let metric = Font.system(size: 24, weight: .medium).monospacedDigit()
+    static let metric = Font.system(size: 24).monospacedDigit()
     static let capsuleCount = Font.system(size: 14, weight: .semibold).monospacedDigit()
     static let controlIcon = Font.system(size: 11, weight: .medium)
 }

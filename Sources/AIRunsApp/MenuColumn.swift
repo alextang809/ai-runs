@@ -83,6 +83,8 @@ struct MenuColumn: View {
                 RefreshButton(model: model)
                     .padding(.leading, 4)
             }
+            HeaderDashboard(needs: model.store.needsUserCount, working: model.store.workingCount,
+                            stats: model.store.stats(now: model.now))
             ForEach(model.silentTools, id: \.self) { tool in
                 Text(silentHint(tool))
                     .font(AppTypography.metadata)
@@ -184,7 +186,7 @@ struct MenuColumn: View {
     private func rows(_ sessions: [Session], overlap: [String: [Session]]) -> some View {
         VStack(spacing: 0) {
             ForEach(sessions) { session in
-                SessionRow(session: session, now: model.now,
+                SessionRow(session: session, lifeline: model.store.lifeline(for: session.id, now: model.now), now: model.now,
                            alsoHere: (overlap[session.id] ?? []).map(\.title), ui: ui,
                            rename: { actions.renameSession(session.id) },
                            pin: { model.pin(sessionId: session.id) },
