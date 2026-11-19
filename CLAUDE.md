@@ -19,8 +19,9 @@ once a second (`EventLogReader`, offset in `cursor.json`), folds events into
 
 Names come from the tools themselves: Claude desktop's session list
 (`ClaudeDesktopIndex`, joined on `cliSessionId`), Codex's `~/.codex/state_5.sqlite`
-(`CodexThreadIndex`, `threads.name`; `user` and `voice_chat` are user
-conversations; other nonempty sources are internal helpers and are ignored),
+(`CodexThreadIndex`, `threads.name`; `user`, `voice_chat` and
+`agent_created_thread` are user conversations; other nonempty sources are
+internal helpers and are ignored),
 the web page title for web chats.
 
 **Claude project threads:** a project thread runs in the cloud and fires no

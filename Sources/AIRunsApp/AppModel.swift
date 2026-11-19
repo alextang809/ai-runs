@@ -39,7 +39,7 @@ final class AppModel: ObservableObject {
         store = JSONFile.load(SessionStore.self, from: paths.sessions) ?? SessionStore()
         store.tidy()
         board = JSONFile.load(PinBoard.self, from: paths.pins) ?? PinBoard()
-        recoverCodexVoiceThreads()
+        recoverCodexConversations()
         installHelper()
         upgradeHooks()
         Notifier.shared.open = { [weak self] id in self?.open(sessionId: id) }
@@ -60,18 +60,18 @@ final class AppModel: ObservableObject {
 
     /// Migrate the old internal-thread filter once, using a separate reader so
     /// the normal event cursor and unrelated sessions stay untouched.
-    private func recoverCodexVoiceThreads() {
+    private func recoverCodexConversations() {
         let threads = (store.ignored ?? []).compactMap { key -> CodexThread? in
             guard key.hasPrefix("codex:"), store.dismissed?.contains(key) != true else { return nil }
             let id = String(key.dropFirst("codex:".count))
             guard let thread = CodexThreadIndex.thread(id: id, database: CodexThreadIndex.database()),
-                  thread.threadSource?.lowercased() == "voice_chat", !thread.archived else { return nil }
+                  thread.wasMisclassifiedAsInternal, !thread.archived else { return nil }
             return thread
         }
         guard !threads.isEmpty else { return }
         let events = EventLogReader(url: paths.events).readNewLines(upTo: reader.offset)
             .compactMap { EventParser.parse(line: $0) }
-        store = store.recoveringCodexVoiceThreads(threads, events: events)
+        store = store.recoveringCodexConversations(threads, events: events)
         try? JSONFile.save(store, to: paths.sessions)
     }
 
