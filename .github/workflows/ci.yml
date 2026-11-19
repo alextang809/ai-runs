@@ -19,7 +19,14 @@ jobs:
       - name: Build
         run: swift build
       - name: Test
+        timeout-minutes: 5
         run: swift test
+      - name: Test account processes with constrained concurrency
+        timeout-minutes: 2
+        run: |
+          account_test_bundle="$(swift build --show-bin-path)/AIRunsPackageTests.xctest"
+          env LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 xcrun xctest \
+            -XCTest AIRunsAppTests.ManagedAccountClientTests "$account_test_bundle"
       - name: Test local signing scripts
         run: bash Tests/Scripts/local_signing.test.sh
       - name: Package app and check its icon

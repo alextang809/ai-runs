@@ -18,7 +18,7 @@ final class ManagedAccountClientTests: XCTestCase {
     }
 
     private func client(_ mode: String, provider: AccountProvider = .codex,
-                        timeout: TimeInterval = 2) throws -> (ManagedAccountClient, URL) {
+                        timeout: TimeInterval = 10) throws -> (ManagedAccountClient, URL) {
         let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
             .appendingPathComponent("airuns-account-client-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
@@ -28,7 +28,7 @@ final class ManagedAccountClientTests: XCTestCase {
         try Data(Self.fakeCLI.utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         let client = ManagedAccountClient(account: account, profileURL: profile, executableURL: executable,
-                                          requestTimeout: timeout, authorizationTimeout: 2)
+                                          requestTimeout: timeout, authorizationTimeout: 10)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         addTeardownBlock { await client.cancel() }
         return (client, profile)
@@ -85,7 +85,7 @@ final class ManagedAccountClientTests: XCTestCase {
     func testCancelStopsPendingLoginAndRejectsLateCompletion() async throws {
         let (client, profile) = try client("rpc_pending"), opened = expectation(description: "Authorization URL")
         let task = Task { try await client.connect { _ in opened.fulfill() } }
-        await fulfillment(of: [opened], timeout: 2)
+        await fulfillment(of: [opened], timeout: 10)
         await client.cancel()
         do { _ = try await task.value; XCTFail("A cancelled login must not become connected") }
         catch { XCTAssertEqual(error as? ManagedAccountClientError, .cancelled) }
@@ -135,7 +135,7 @@ final class ManagedAccountClientTests: XCTestCase {
         let (client, _) = try client("claude_manual", provider: .claude)
         let opened = expectation(description: "Claude URL")
         let task = Task { try await client.connect { _ in opened.fulfill() } }
-        await fulfillment(of: [opened], timeout: 2)
+        await fulfillment(of: [opened], timeout: 10)
         do { try await client.submitCode("fixture-code\nextra"); XCTFail("Expected single code") }
         catch { XCTAssertEqual(error as? ManagedAccountClientError, .invalidCode) }
         try await client.submitCode("fixture-code")
@@ -146,7 +146,7 @@ final class ManagedAccountClientTests: XCTestCase {
     func testSynchronousShutdownStopsOnlyTrackedAccountProcesses() async throws {
         let (client, profile) = try client("rpc_pending"), opened = expectation(description: "Owned login")
         let task = Task { try await client.connect { _ in opened.fulfill() } }
-        await fulfillment(of: [opened], timeout: 2)
+        await fulfillment(of: [opened], timeout: 10)
         let executable = profile.deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("observer_sleep")
         try Data(Self.fakeCLI.utf8).write(to: executable)

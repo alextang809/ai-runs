@@ -39,7 +39,6 @@ actor ManagedAccountProcess {
     private let process = Process()
     private let input = Pipe(), output = Pipe(), errors = Pipe()
     private let id = UUID()
-    private var readers: [Task<Void, Never>] = []
     private var outputEnded = false
     private var exitStatus: Int32?
     private var finished = false
@@ -67,16 +66,13 @@ actor ManagedAccountProcess {
         }
         do { try process.run() } catch { throw ManagedAccountClientError.launchFailed }
         OwnedAccountProcesses.shared.insert(process, id: id)
-        let stdout = output.fileHandleForReading, stderr = errors.fileHandleForReading
-        readers = [
-            Task.detached(priority: .utility) { [weak self] in
-                while let data = Self.readChunk(stdout.fileDescriptor) { await self?.received(data) }
-                await self?.endedOutput()
-            },
-            Task.detached(priority: .utility) { [weak self] in
-                while let data = Self.readChunk(stderr.fileDescriptor) { await self?.receivedErrors(data.count) }
-            }
-        ]
+        Self.pump(output.fileHandleForReading) { [weak self] data in
+            if let data { await self?.received(data) }
+            else { await self?.endedOutput() }
+        }
+        Self.pump(errors.fileHandleForReading) { [weak self] data in
+            if let data { await self?.receivedErrors(data.count) }
+        }
     }
 
     func send(_ data: Data) throws {
@@ -92,7 +88,6 @@ actor ManagedAccountProcess {
         continuation.finish()
         try? input.fileHandleForWriting.close()
         if process.isRunning { process.terminate() }
-        for reader in readers { reader.cancel() }
         // Retain the owner until its bounded SIGKILL fallback has completed.
         Task { [self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -134,6 +129,23 @@ actor ManagedAccountProcess {
     private func forceStop() {
         if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         OwnedAccountProcesses.shared.remove(id)
+    }
+
+    /// Blocking pipe reads must not occupy Swift's cooperative executor. Acknowledge
+    /// each chunk before reading again to preserve ordering and bounded buffering.
+    private nonisolated static func pump(_ handle: FileHandle,
+        receive: @escaping @Sendable (Data?) async -> Void) {
+        DispatchQueue(label: "io.github.alextang809.airuns.account-pipe.\(UUID().uuidString)", qos: .utility).async {
+            let acknowledged = DispatchSemaphore(value: 0)
+            while let data = readChunk(handle.fileDescriptor) {
+                Task {
+                    await receive(data)
+                    acknowledged.signal()
+                }
+                acknowledged.wait()
+            }
+            Task { await receive(nil) }
+        }
     }
 
     private nonisolated static func readChunk(_ descriptor: Int32) -> Data? {

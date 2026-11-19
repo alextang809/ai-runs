@@ -42,6 +42,12 @@
   paths are committed; no real sign-in or native credentials were accessed.
 - Code/security review findings were fixed and rereviewed. Live provider login
   still requires the user to sign in from Add Account after installation.
+- Initial hosted CI exposed blocking pipe reads on Swift's cooperative executor.
+  Moved them to dedicated dispatch workers with per-chunk acknowledgement, and
+  added a constrained-executor CI regression. The original fixture failed under
+  that executor; all 18 fake CLI tests passed after the transport fix. Ordinary
+  fixture deadlines allow cold interpreter startup; the explicit 0.1-second
+  timeout regression and production deadlines remain unchanged.
 
 ## Ideas
 
