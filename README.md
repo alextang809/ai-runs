@@ -161,9 +161,12 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
   <p align="center"><sub><i>Illustration: hover a row for its details and actions.</i></sub></p>
 - **Rename**, **Pin to Board** and more: right-click a row, or hover it for details.
 - **Floating window:** click **Show Floating Window** at the bottom of the panel. A small capsule stays on
-  top of every app, Space and full-screen window, showing how many sessions need
-  you. Click it for your runs and the pinned board; drag it anywhere (it snaps to
-  edges). It can open by itself when something needs you (Settings).
+  top of every app, Space and full-screen window, including Stage Manager sets,
+  showing how many sessions need you. Switching apps or waking your Mac restores
+  it without taking keyboard focus. Click it for your runs and the pinned board;
+  drag it anywhere (it snaps to edges). **Hide Floating Window** keeps it hidden
+  until you show it again. Automatic expansion when something needs you is off
+  by default (Settings) and applies only while the window is already shown.
 - **Pinned board:** keep threads and quick notes you don't want to lose, grouped
   by project, in the floating window's Pinned tab. Drag text or links onto it to
   make cards.
