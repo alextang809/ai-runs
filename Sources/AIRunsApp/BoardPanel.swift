@@ -29,13 +29,13 @@ struct BoardView: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if groups.isEmpty && stale.isEmpty {
                         Text("Nothing pinned yet. Drag text or a link here, or type a quick note above.")
-                            .font(.system(size: 12))
+                            .font(AppTypography.body)
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 8)
                     }
                     ForEach(groups, id: \.name) { group in
                         Text(group.name.uppercased())
-                            .font(.system(size: 10.5, weight: .semibold))
+                            .font(AppTypography.section)
                             .foregroundStyle(.secondary)
                             .padding(.top, 8)
                             .padding(.bottom, 2)
@@ -52,7 +52,7 @@ struct BoardView: View {
                                     .font(.system(size: 9, weight: .semibold))
                                     .rotationEffect(.degrees(showStale ? 90 : 0))
                                 Text("MAYBE DONE · \(stale.count)")
-                                    .font(.system(size: 10.5, weight: .semibold))
+                                    .font(AppTypography.section)
                             }
                             .foregroundStyle(.secondary)
                         }
@@ -120,19 +120,19 @@ struct BoardCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(card.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
+                Text(card.title).font(AppTypography.rowTitle).lineLimit(2)
                 Spacer(minLength: 4)
                 Text(TextUtils.age(now.timeIntervalSince(card.touchedAt)))
-                    .font(.system(size: 11).monospacedDigit())
+                    .font(AppTypography.elapsed)
                     .foregroundStyle(.secondary)
             }
             Text(card.next.isEmpty ? "No next step yet" : "Next: \(card.next)")
-                .font(.system(size: 12))
+                .font(AppTypography.body)
                 .foregroundStyle(.secondary)
                 .lineLimit(expanded ? nil : 2)
             if expanded, let excerpt = card.excerpt, !excerpt.isEmpty {
                 Text(excerpt)
-                    .font(.system(size: 12))
+                    .font(AppTypography.body)
                     .textSelection(.enabled)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -140,7 +140,7 @@ struct BoardCard: View {
             }
         }
         .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
         .opacity(stale ? 0.6 : 1)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }

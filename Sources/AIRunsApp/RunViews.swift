@@ -4,12 +4,10 @@ import SwiftUI
 
 // MARK: - Session row
 
-/// One run: where it lives (app icon + words), its state as a word with a
-/// time, what it is doing now, and its last hour as a lifeline. Everything
-/// important is visible without hovering; hovering adds the details flyout.
+/// One run: its real host icon, title, state and elapsed time. Only an actual
+/// approval, input question or current plan adds a line; hover reveals evidence.
 struct SessionRow: View {
     let session: Session
-    let lifeline: [ActivitySpan]
     let now: Date
     /// Titles of other runs working in the same repository right now.
     var alsoHere: [String] = []
@@ -29,30 +27,25 @@ struct SessionRow: View {
             HStack(alignment: .top, spacing: 10) {
                 AppIcon(bundleId: Jumper.hostBundle(for: session))
                     .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         Text(session.title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(AppTypography.rowTitle)
                             .lineLimit(1)
                         Spacer(minLength: 4)
-                        StatePill(session: session, now: now)
                         // Always reserved, so nothing moves when the × appears.
                         Color.clear.frame(width: RemoveZone.slot, height: 18)
                     }
-                    Text(RunText.place(session))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    HStack(spacing: 10) {
-                        LiveLine(session: session, now: now)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        LifelineView(spans: lifeline, now: now, color: Palette.tool(session.tool))
-                            .frame(width: 104, height: 9)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        StatePill(session: session, now: now)
+                        Spacer(minLength: 0)
                     }
-                    .padding(.top, 2)
+                    if let detail = CompactRunDetail.resolve(session, now: now) {
+                        CompactRunDetailLine(detail: detail)
+                    }
                     if let warning = RunText.alsoHere(alsoHere) {
                         Label(warning, systemImage: "arrow.triangle.branch")
-                            .font(.system(size: 11))
+                            .font(AppTypography.metadata)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -61,15 +54,15 @@ struct SessionRow: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .overlay(alignment: .topTrailing) {
             if highlighted {
                 RemoveZone(label: "Remove \(session.title) from the list", action: remove)
-                    .padding(.top, 7 + 9 - RemoveZone.size.height / 2)
+                    .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
                     .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
         }
@@ -82,6 +75,7 @@ struct SessionRow: View {
             Button("Remove from List", action: remove)
         }
         .onHover { inside in inside ? ui.hoverOn(key) : ui.hoverOff() }
+        .help(RunText.place(session))
         .reportFrame(key.key)
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
@@ -232,11 +226,11 @@ struct StatePill: View {
                 Image(systemName: "checkmark").font(.system(size: 8.5, weight: .heavy))
             }
             Text(RunText.stateWord(session, now: now))
-                .font(.system(size: 9.5, weight: .bold))
-                .tracking(0.6)
+                .font(AppTypography.badge)
+                .tracking(0.2)
             if session.state != .unknown {
                 Text(RunText.stateTime(session, now: now))
-                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .font(AppTypography.elapsed)
             }
         }
         .foregroundStyle(style.text)
@@ -263,7 +257,7 @@ struct LiveLine: View {
                 hookLine
             }
         }
-        .font(.system(size: 11.5, weight: .medium))
+        .font(AppTypography.body)
     }
 
     @ViewBuilder private var hookLine: some View {
@@ -317,7 +311,7 @@ struct StepsBar: View {
                 .frame(width: 60, height: 5)
             }
             Text("\(progress.done)/\(progress.total)")
-                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                .font(AppTypography.elapsed)
                 .foregroundStyle(.secondary)
                 .padding(.leading, 3)
         }
@@ -393,7 +387,7 @@ struct AppIcon: View {
             } else {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.primary.opacity(0.1))
-                    .overlay(Image(systemName: "terminal").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary))
+                    .overlay(Image(systemName: "terminal").font(AppTypography.section).foregroundStyle(.secondary))
                     .padding(2)
             }
         }
@@ -429,18 +423,18 @@ struct HeaderDashboard: View {
         HStack(spacing: 0) {
             Text("Agents waited on you ")
             Text(waited == "now" ? "0m" : waited)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .font(AppTypography.elapsed)
                 .foregroundStyle(stats.waitedToday >= 60 ? Color.primary : .secondary)
             Text(" today")
             if let average = stats.averageReply {
                 Text(" · you replied in ")
                 Text(Self.short(average))
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .font(AppTypography.elapsed)
                     .foregroundStyle(.primary)
                 Text(" on average")
             }
         }
-        .font(.system(size: 11))
+        .font(AppTypography.metadata)
         .foregroundStyle(.secondary)
         .lineLimit(1)
     }
@@ -462,11 +456,11 @@ private struct Metric: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("\(value)")
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                .font(AppTypography.metric)
                 .foregroundStyle(color)
             Text(label.uppercased())
-                .font(.system(size: 9, weight: .semibold))
-                .tracking(0.7)
+                .font(AppTypography.section)
+                .tracking(0.4)
                 .foregroundStyle(.secondary)
                 .fixedSize()
         }
@@ -510,7 +504,7 @@ private struct Histogram: View {
                 Spacer()
                 Text("now")
             }
-            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+            .font(AppTypography.elapsed)
             .foregroundStyle(.secondary)
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -524,8 +518,8 @@ struct SectionLabel: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Text(title.uppercased()).font(.system(size: 10, weight: .bold)).tracking(0.9)
-            Text("\(count)").font(.system(size: 10, weight: .bold, design: .monospaced))
+            Text(title).font(AppTypography.section)
+            Text("\(count)").font(AppTypography.elapsed)
         }
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14)
@@ -536,7 +530,7 @@ struct SectionLabel: View {
 
 struct LifelineLegend: View {
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7) {
             swatch(Palette.claude, "Claude")
             swatch(Palette.codex, "Codex")
             Text("·")
@@ -545,7 +539,7 @@ struct LifelineLegend: View {
             Spacer(minLength: 4)
             Text("last 60 min")
         }
-        .font(.system(size: 10, weight: .medium))
+        .font(AppTypography.metadata)
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .padding(.horizontal, 14)

@@ -17,8 +17,8 @@ which one is waiting for an answer, and which one quietly stopped. AI Runs puts
 them all in one list in your menu bar:
 
 - **Needs you** — sessions that ask for approval or for your input, with how long they have waited.
-- **Working** — what each one is doing right now ("Building", "Editing routes.ts", step 3 of 7).
-- **Done** — finished sessions, out of the way but still there.
+- **Working** — running sessions, with elapsed time and plan progress when available.
+- **Done** — finished sessions, folded away until you expand the group.
 
 Everything stays on your Mac. No account, no server, nothing is sent anywhere.
 
@@ -43,7 +43,7 @@ On an Intel Mac, [build it from source](#build-from-source).
 ## Set up (2 minutes)
 
 AI Runs opens its settings on first launch. To open them again later, click the
-menu bar icon (or press ⌥⌘A) and choose **Hooks & Settings…** at the bottom of the panel.
+menu bar icon (or press ⌥⌘A) and choose **Settings…** at the bottom of the panel.
 
 1. **Claude Code: click Install.** This adds AI Runs to `~/.claude/settings.json`.
    It works for Claude Code in the terminal, in VS Code and in the Claude desktop app.
@@ -94,16 +94,19 @@ If you don't see it:
 
 ## Using it
 
-**Each row** shows the app the session runs in (its real icon), its name (the
-same one Claude or Codex shows in its sidebar), its state, where it runs, what
-it's doing, and a small timeline of its last hour.
+**Each row** shows the app's real icon, the session name (the same one Claude or
+Codex shows in its sidebar), its state and elapsed time. An approval request,
+input question or current plan adds a short line. Hover for source, project and
+activity details. Done and Ignored groups start collapsed; long lists scroll
+while Settings and the floating-window control stay visible. The pinned board
+lives in the floating window, leaving the main menu for sessions.
 
 | You see | Means |
 |---|---|
 | **APPROVE** (solid) | It wants to run a command or edit a file and is waiting for your OK |
 | **NEEDS INPUT** (solid) | It asked you a question, or said it's blocked |
 | **REPLIED** (light) | It finished a turn, and AI Runs can't tell whether it needs you |
-| **WORKING** (outline) | It's running; the line below says what it's doing |
+| **WORKING** (outline) | It's running; a current plan appears below when available |
 | **NO UPDATE** (grey) | It was working, but nothing has arrived for 30 minutes; it may have stopped |
 | **SCHEDULED / BACKGROUND** (grey) | It's waiting on its own timer or background task and continues by itself |
 | **DONE ✓** (grey) | It finished what you asked |
@@ -129,14 +132,14 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 
 **Claude project conversations and threads**
 
-- A thread in a Claude project gets **one row**, labelled "Claude project". Local
+- A thread in a Claude project gets **one row**, with its source in the hover details. Local
   Claude Code sessions that work for that thread don't get rows of their own; the
   newest one tells the row what it's doing.
 - Threads that work only in the cloud send AI Runs nothing. While Claude's
   **Threads** list is on screen, AI Runs reads it through Accessibility (read-only,
   only the Claude app) and shows those threads with Claude's own words:
-  **WORKING**, **WAITING ON YOU**, **READY FOR REVIEW**, **IDLE**. The row says
-  "Seen in Claude 3m ago"; after 10 minutes without seeing the thread it says
+  **WORKING**, **WAITING ON YOU**, **READY FOR REVIEW**, **IDLE**. The hover details
+  say when it was seen; after 10 minutes without seeing the thread it says
   **LAST SEEN** instead of a state (Waiting on you is kept).
 - The project main conversation and an opened child thread also appear in the
   same list. A page without state evidence says **STATE UNKNOWN** and adds no
@@ -159,11 +162,11 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
   <p align="center"><img src="docs/flyout.png" width="560" alt="Hovering a row shows its details and Ignore for Now"></p>
   <p align="center"><sub><i>Illustration: hover a row for its details and actions.</i></sub></p>
 - **Rename**, **Pin to Board** and more: right-click a row, or hover it for details.
-- **Floating window:** click **Show Floating Window** at the bottom of the panel. A small capsule stays on
+- **Floating window:** click **Floating Window** at the bottom of the panel. A small capsule stays on
   top of every app, Space and full-screen window, including Stage Manager sets,
   showing how many sessions need you. Switching apps or waking your Mac restores
   it without taking keyboard focus. Click it for your runs and the pinned board;
-  drag it anywhere (it snaps to edges). **Hide Floating Window** keeps it hidden
+  drag it anywhere (it snaps to edges). Click **Floating Window** again to keep it hidden
   until you show it again. Automatic expansion when something needs you is off
   by default (Settings) and applies only while the window is already shown.
 - **Pinned board:** keep threads and quick notes you don't want to lose, grouped
@@ -171,7 +174,7 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
   make cards.
 - **Notifications:** a banner when a session asks for approval or input, with
   Open and Snooze. Choose which moments in Settings.
-- **Pin Front AI Window** (bottom of the panel): pins the browser tab or app you
+- **Pin Front AI Window** (the **…** menu at the bottom of the panel): pins the browser tab or app you
   were just in to the board.
 
 ## Privacy
@@ -204,7 +207,7 @@ Open an [issue](https://github.com/alextang809/ai-runs/issues) or just message m
 
 ## Uninstall
 
-1. Open AI Runs settings (**Hooks & Settings…** in the panel) and click **Remove**
+1. Open AI Runs settings (**Settings…** in the panel) and click **Remove**
    for Claude Code and for Codex.
    If you added the browser extension, remove it in your browser's extensions page.
 2. Quit AI Runs and drag it from Applications to the Trash.

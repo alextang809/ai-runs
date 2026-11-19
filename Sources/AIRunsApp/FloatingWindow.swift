@@ -212,11 +212,7 @@ private struct FloatingSurface<Content: View>: View {
     var radius: CGFloat
     @ViewBuilder var content: Content
     var body: some View {
-        content
-            .background(VisualEffectBackground(material: .menu))
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Color.primary.opacity(0.14)))
-            .shadow(color: .black.opacity(0.24), radius: 12, y: 6)
+        GlassSurface(cornerRadius: radius) { content }
     }
 }
 
@@ -233,9 +229,9 @@ struct FloatingCapsule: View {
                 Image(nsImage: Icons.statusImage(Icons.Status(store: model.store)))
                 HStack(spacing: 5) {
                     Text("\(needs > 0 ? needs : model.store.workingCount)")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .font(AppTypography.capsuleCount)
                     Text(needs > 0 ? "NEED YOU" : (model.store.workingCount > 0 ? "WORKING" : "ALL CLEAR"))
-                        .font(.system(size: 10.5, weight: .semibold)).tracking(0.6)
+                        .font(AppTypography.section).tracking(0.2)
                         .foregroundStyle(.secondary)
                 }
                 if !sessions.isEmpty {
@@ -283,12 +279,12 @@ struct FloatingCard: View {
     let controller: FloatingController
 
     var body: some View {
-        FloatingSurface(radius: 14) {
+        FloatingSurface(radius: 20) {
             VStack(spacing: 0) {
                 header
                 if let message = model.message {
                     Text(message)
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        .font(AppTypography.section).foregroundStyle(.secondary)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.bottom, 6)
@@ -318,11 +314,13 @@ struct FloatingCard: View {
             Spacer()
             RefreshButton(model: model)
             Button { state.expanded = false } label: {
-                Image(systemName: "chevron.up").font(.system(size: 10, weight: .bold))
+                Image(systemName: "chevron.up").font(AppTypography.controlIcon)
+                    .frame(width: 24, height: 24).contentShape(Circle())
             }
             .buttonStyle(.plain).foregroundStyle(.secondary).help("Fold into the capsule")
             Button { controller.hide() } label: {
-                Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+                Image(systemName: "xmark").font(AppTypography.controlIcon)
+                    .frame(width: 24, height: 24).contentShape(Circle())
             }
             .buttonStyle(.plain).foregroundStyle(.secondary).help("Hide the floating window")
         }
@@ -349,7 +347,7 @@ struct FloatingCard: View {
             .padding(.horizontal, 14).padding(.bottom, 8)
         if active.isEmpty {
             Text(sessions.isEmpty ? "Nothing running." : "Nothing needs you; nothing is working right now.")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .font(AppTypography.body).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14).padding(.bottom, 12)
         } else {
@@ -366,15 +364,15 @@ struct FloatingCard: View {
             .padding(.horizontal, 4)
             // The window sizes itself to its content, so a scroll view only
             // appears (with a fixed height) once the list is long.
-            if active.count <= 8 {
+            if active.count <= 5 {
                 list
             } else {
-                ScrollView { list }.frame(height: 400)
+                ScrollView { list }.frame(height: 360)
             }
         }
         if quiet > 0 {
             Text("+ \(quiet) done or ignored")
-                .font(.system(size: 10.5, weight: .medium)).foregroundStyle(.secondary)
+                .font(AppTypography.metadata).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14).padding(.bottom, 9).padding(.top, 2)
         }
@@ -397,29 +395,32 @@ private struct FloatingRow: View {
     var body: some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 8) {
-                RoundedRectangle(cornerRadius: 1.5).fill(Palette.tool(session.tool)).frame(width: 3)
+                AppIcon(bundleId: Jumper.hostBundle(for: session))
+                    .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(session.title).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                        Text(session.title).font(AppTypography.compactTitle).lineLimit(1)
                         Spacer(minLength: 4)
-                        StatePill(session: session, now: now)
-                        Color.clear.frame(width: RemoveZone.slot, height: 16)
+                        Color.clear.frame(width: RemoveZone.slot, height: 18)
                     }
-                    Text(RunText.liveText(session, now: now))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack {
+                        StatePill(session: session, now: now)
+                        Spacer(minLength: 0)
+                    }
+                    if let detail = CompactRunDetail.resolve(session, now: now) {
+                        CompactRunDetailLine(detail: detail)
+                    }
                 }
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .overlay(alignment: .topTrailing) {
             if hovering {
                 RemoveZone(label: "Remove \(session.title) from the list", action: remove)
-                    .padding(.top, 6 + 8 - RemoveZone.size.height / 2)
+                    .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
                     .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
         }
@@ -429,7 +430,7 @@ private struct FloatingRow: View {
             if hovering, let ignore {
                 Button("Ignore", action: ignore)
                     .buttonStyle(.plain)
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(AppTypography.section)
                     .padding(.horizontal, 8).padding(.vertical, 2)
                     .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
                     .overlay(Capsule().strokeBorder(Color.primary.opacity(0.3), lineWidth: 1))

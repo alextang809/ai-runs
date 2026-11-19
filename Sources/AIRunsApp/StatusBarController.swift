@@ -150,6 +150,9 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
             // No visible icon to hang from: open at the top-right of the screen.
             anchorTopRight = NSPoint(x: screenFrame.maxX - 4, y: screenFrame.maxY - 2)
         }
+        if let anchor = anchorTopRight, screenFrame.height > 0 {
+            ui.menuHeightLimit = max(1, anchor.y - screenFrame.minY - 2 * PanelLayout.outerPadding - 4)
+        }
         placePanel()
         panel.makeKeyAndOrderFront(nil)
         installMonitors()
@@ -236,6 +239,9 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
             let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(
                 model: model, iconHidden: { [weak self] in self?.isIconHidden ?? false })))
             window.title = "AI Runs Settings"
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.titlebarAppearsTransparent = true
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
             window.center()
@@ -316,6 +322,10 @@ final class PanelUIState: ObservableObject {
     @Published var hover: Target?
     @Published var rowFrames: [String: CGRect] = [:]
     @Published var collapsed: Set<String> = [PanelUIState.staleGroup]
+    @Published var expandedDone = false
+    @Published var expandedIgnored = false
+    /// Available height below the menu-bar anchor, excluding the outer shadow margin.
+    @Published var menuHeightLimit: CGFloat = 600
     @Published var addingNote = false
     @Published var draft = ""
     @Published var boardVisible = false
@@ -353,10 +363,15 @@ final class PanelUIState: ObservableObject {
 
     func keepHover() { clearWork?.cancel() }
 
-    func reset() {
+    /// A collapsed section must not receive a previously scheduled flyout.
+    func cancelHover() {
         clearWork?.cancel()
         switchWork?.cancel()
         hover = nil
+    }
+
+    func reset() {
+        cancelHover()
         addingNote = false
         draft = ""
     }
@@ -404,17 +419,16 @@ final class ToastController {
 struct ToastView: View {
     let text: String
     var body: some View {
-        Text(text)
-            .font(.system(size: 12, weight: .medium))
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: 320, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(VisualEffectBackground(material: .hudWindow))
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.primary.opacity(0.1)))
-            .padding(6)
+        GlassSurface(cornerRadius: 14, fallbackMaterial: .hudWindow) {
+            Text(text)
+                .font(AppTypography.body)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: 320, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+        }
+        .padding(12)
     }
 }
 
@@ -461,21 +475,5 @@ enum Icons {
         }
         image.isTemplate = status != .needsYou
         return image
-    }
-}
-
-struct VisualEffectBackground: NSViewRepresentable {
-    var material: NSVisualEffectView.Material = .menu
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.material = material
     }
 }

@@ -15,11 +15,21 @@ struct SettingsView: View {
     @AppStorage(FloatingSettings.autoExpandKey) private var autoExpand = false
 
     var body: some View {
+        GlassSurface(cornerRadius: 16, fallbackMaterial: .windowBackground) {
+            ScrollView {
+                settingsContent
+            }
+            .frame(width: 480, height: min(720, max(360, (NSScreen.main?.visibleFrame.height ?? 900) - 100)))
+        }
+        .onAppear(perform: refresh)
+    }
+
+    private var settingsContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Hooks").font(.headline)
+                Text("Hooks").font(AppTypography.rowTitle)
                 Text("Hooks let Claude Code and Codex tell AI Runs when a session starts, finishes, or needs your approval. AI Runs only adds its own entries and keeps a backup of each file.")
-                    .font(.system(size: 12))
+                    .font(AppTypography.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -35,16 +45,16 @@ struct SettingsView: View {
 
             if statuses[.codex] == .installed, model.store.lastSeen(.codex) == nil {
                 Label("Codex asks you to approve new hooks (Review hooks → Allow all, or /hooks). Until then it sends nothing.", systemImage: "info.circle")
-                    .font(.system(size: 12))
+                    .font(AppTypography.body)
                     .foregroundStyle(.secondary)
             }
             if model.helperMissing {
                 Label("The airuns-hook helper is missing. Build the app with Scripts/package_app.sh.", systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 12))
+                    .font(AppTypography.body)
                     .foregroundStyle(.orange)
             }
             if let error {
-                Text(error).font(.system(size: 12)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                Text(error).font(AppTypography.body).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
@@ -62,21 +72,21 @@ struct SettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Floating window").font(.headline)
+                Text("Floating window").font(AppTypography.rowTitle)
                 Text("A capsule that stays on top of every app and Space. Open it from the menu: Show Floating Window. Click it to see your runs and the pinned board; drag it anywhere.")
-                    .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(AppTypography.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Toggle("Open it by itself when a session needs you", isOn: $autoExpand)
-                    .font(.system(size: 12.5))
+                    .font(AppTypography.body)
             }
 
             Divider()
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Open the panel from the menu bar icon or with \(HotKey.displayName) anywhere.")
-                    .font(.system(size: 12))
+                    .font(AppTypography.body)
                 if hidden {
                     Label("Your menu bar is full, so the icon is hidden (usually behind the camera notch). Use \(HotKey.displayName), or quit a menu bar app you rarely use.", systemImage: "eye.slash")
-                        .font(.system(size: 12))
+                        .font(AppTypography.body)
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -95,13 +105,13 @@ struct SettingsView: View {
             Toggle("Also show AI Runs in the Dock", isOn: $showInDock)
                 .onChange(of: showInDock) { _, enabled in AppSettings.showInDock = enabled }
             Text("Useful when the menu bar is full: click the Dock icon to open the panel.")
-                .font(.system(size: 11.5))
+                .font(AppTypography.metadata)
                 .foregroundStyle(.secondary)
                 .padding(.top, -10)
 
             HStack {
                 Text("Everything stays on this Mac in ~/.airuns.")
-                    .font(.system(size: 12))
+                    .font(AppTypography.body)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Show Data Folder") {
@@ -110,8 +120,7 @@ struct SettingsView: View {
             }
         }
         .padding(20)
-        .frame(width: 460)
-        .onAppear(perform: refresh)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func refresh() {
@@ -157,8 +166,8 @@ private struct HookRow: View {
             Image(systemName: status != .installed ? "circle" : (lastSeen == nil ? "clock" : "checkmark.circle.fill"))
                 .foregroundStyle(status != .installed ? Color.secondary : (lastSeen == nil ? Color.orange : Color.green))
             VStack(alignment: .leading, spacing: 2) {
-                Text(tool.displayName).font(.system(size: 13, weight: .semibold))
-                Text(statusText).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Text(tool.displayName).font(AppTypography.rowTitle)
+                Text(statusText).font(AppTypography.metadata).foregroundStyle(.secondary)
             }
             Spacer()
             switch status {
@@ -171,7 +180,7 @@ private struct HookRow: View {
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
     }
 }
 
@@ -183,18 +192,18 @@ struct ClaudeThreadsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Claude project threads").font(.headline)
+                Text("Claude project threads").font(AppTypography.rowTitle)
                 Spacer()
                 if enabled, trusted {
-                    Label("On", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.system(size: 12))
+                    Label("On", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(AppTypography.body)
                 } else if enabled {
                     Button("Allow Accessibility…") { _ = SidebarClicker.requestTrust() }.controlSize(.small)
                 }
             }
             Text("Open project conversations and threads appear in AI Runs. Claude’s Threads list supplies their state; when no state is available, the row says STATE UNKNOWN. AI Runs only reads the Claude app and needs Accessibility permission.")
-                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(AppTypography.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Show Claude project conversations and threads", isOn: $enabled)
-                .font(.system(size: 12.5))
+                .font(AppTypography.body)
         }
         .onAppear { trusted = SidebarClicker.isTrusted }
         // Permission is granted in System Settings while this window stays
@@ -218,11 +227,11 @@ struct NotificationSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Notifications").font(.headline)
+                Text("Notifications").font(AppTypography.rowTitle)
                 Spacer()
                 switch status {
                 case .authorized, .provisional:
-                    Label("On", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.system(size: 12))
+                    Label("On", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(AppTypography.body)
                 case .denied:
                     Button("Turn On in System Settings…") { Notifier.openSystemSettings() }.controlSize(.small)
                 default:
@@ -236,7 +245,7 @@ struct NotificationSection: View {
                 }
             }
             Text("A banner when a session needs you, so you can work elsewhere. None while you're already in that session's app.")
-                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(AppTypography.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Group {
                 Toggle("Approval requests (APPROVE)", isOn: $approval)
                 Toggle("Questions and blockers (NEEDS INPUT)", isOn: $input)
@@ -245,7 +254,7 @@ struct NotificationSection: View {
                 Toggle("Stalled runs (NO UPDATE)", isOn: $stalled)
                 Toggle("Remind me once if it's still waiting after 15 minutes", isOn: $remind)
             }
-            .font(.system(size: 12.5))
+            .font(AppTypography.body)
             .disabled(status == .denied)
         }
         .task { status = await Notifier.shared.authorizationStatus() }
@@ -260,17 +269,17 @@ struct BrowserSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Browser").font(.headline)
+            Text("Browser").font(AppTypography.rowTitle)
             Text("Follow chats on chatgpt.com and claude.ai in Chrome, Arc, Brave or Edge: what's still writing, what's done, and a notification when a reply is ready.")
-                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(AppTypography.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if browsers.isEmpty {
                 Text("No Chromium browser found (Chrome, Arc, Brave, Edge, Vivaldi). Safari isn't supported yet.")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .font(AppTypography.body).foregroundStyle(.secondary)
             } else {
                 HStack(spacing: 10) {
                     ForEach(browsers, id: \.browser.name) { item in
                         Label(item.browser.name, systemImage: item.connected ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 12))
+                            .font(AppTypography.body)
                             .foregroundStyle(item.connected ? Color.primary : Color.secondary)
                     }
                 }
@@ -288,10 +297,10 @@ struct BrowserSection: View {
                 }
                 .controlSize(.small)
                 Text("3. In the browser open chrome://extensions (arc://extensions, brave://extensions, edge://extensions), turn on Developer mode, click Load unpacked and choose the folder. Then reload your ChatGPT and Claude tabs.")
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(AppTypography.metadata).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
-            if let note { Text(note).font(.system(size: 11.5)).foregroundStyle(.secondary) }
+            if let note { Text(note).font(AppTypography.metadata).foregroundStyle(.secondary) }
         }
         .onAppear { browsers = model.browserStatus() }
     }

@@ -15,7 +15,7 @@
 三个 App 里同时跑着五个 agent 的时候，很难分清哪个做完了、哪个在等你回答、哪个其实已经停了。AI Runs 把它们放进菜单栏里的同一个列表：
 
 - **Needs you（等你）**：等你批准、等你回答的会话，并显示已经等了多久。
-- **Working（在跑）**：每个会话此刻在做什么，比如"正在编译"、"正在改 routes.ts"、"第 3/7 步"。
+- **Working（在跑）**：运行中的会话、已用时长，以及有依据的计划进度。
 - **Done（做完）**：已经完成的会话，放在最下面，不打扰你。
 
 所有数据只在你的 Mac 上。不用注册账号，没有服务器，不往外发任何东西。
@@ -37,7 +37,7 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 
 ## 设置（2 分钟）
 
-第一次打开时，AI Runs 会自动弹出设置窗口。以后想再打开，点菜单栏图标（或按 ⌥⌘A），在面板最下面选 **Hooks & Settings…**。
+第一次打开时，AI Runs 会自动弹出设置窗口。以后想再打开，点菜单栏图标（或按 ⌥⌘A），在面板最下面选 **Settings…**。
 
 1. **Claude Code：点 Install。**这会在 `~/.claude/settings.json` 里加上 AI Runs。终端里、VS Code 里、Claude 桌面版里的 Claude Code 都能被识别。
 2. **Codex：点 Install，然后打开 Codex。**它会弹出 **Review hooks**，里面有 4 个 AI Runs 的 hook，点 **Allow all**。不点的话，Codex 什么都不会发过来。
@@ -76,14 +76,14 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 
 ## 怎么用
 
-**每一行**会显示：会话所在 App 的真实图标；会话名字（和 Claude、Codex 侧边栏里的一样）；状态；在哪里跑；正在做什么；还有一条最近一小时的小时间线。
+**每一行**只显示会话所在 App 的真实图标、会话名字（和 Claude、Codex 侧边栏里的一样）、状态和时长。真实审批请求、输入问题或当前计划会多显示一行；来源、项目和活动细节放在悬停卡片里。Done 和 Ignored 默认折叠，会话较多时列表可滚动，底部设置和浮窗按钮保持可见。钉板只放在浮窗里，主菜单专注显示会话。
 
 | 你看到的 | 意思 |
 |---|---|
 | **APPROVE**（实心） | 它想执行命令或改文件，在等你批准 |
 | **NEEDS INPUT**（实心） | 它问了你问题，或者说自己卡住了 |
 | **REPLIED**（浅色） | 它结束了这一轮，但 AI Runs 判断不出它是否需要你 |
-| **WORKING**（描边） | 它在跑，下面一行写着它在做什么 |
+| **WORKING**（描边） | 它在跑，有当前计划时会在下面显示进度 |
 | **NO UPDATE**（灰色） | 它本来在跑，但已经 30 分钟没有任何动静，可能已经停了 |
 | **SCHEDULED / BACKGROUND**（灰色） | 它在等自己定的唤醒任务或后台任务，会自己接着跑 |
 | **DONE ✓**（灰色） | 你交代的事它做完了 |
@@ -111,8 +111,8 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 
 **Claude 项目主对话和 thread**
 
-- Claude 项目里的每个 thread 只占**一行**，标着 "Claude project"。替这个 thread 干活的本地 Claude Code 会话不再单独占行，由最新的那个告诉这一行它在做什么。
-- 只在云端跑的 thread 不会给 AI Runs 发任何东西。当 Claude 的 **Threads** 列表显示在屏幕上时，AI Runs 通过辅助功能读取它（只读，只读 Claude 这个 App），用 Claude 自己的词显示状态：**WORKING**、**WAITING ON YOU**、**READY FOR REVIEW**、**IDLE**。这一行会写"Seen in Claude 3m ago"；超过 10 分钟没再看到这个 thread，就显示 **LAST SEEN**，不再显示状态（Waiting on you 会保留）。
+- Claude 项目里的每个 thread 只占**一行**，来源放在悬停详情里。替这个 thread 干活的本地 Claude Code 会话不再单独占行，由最新的那个告诉这一行它在做什么。
+- 只在云端跑的 thread 不会给 AI Runs 发任何东西。当 Claude 的 **Threads** 列表显示在屏幕上时，AI Runs 通过辅助功能读取它（只读，只读 Claude 这个 App），用 Claude 自己的词显示状态：**WORKING**、**WAITING ON YOU**、**READY FOR REVIEW**、**IDLE**。悬停详情会说明上次看到它的时间；超过 10 分钟没再看到这个 thread，就显示 **LAST SEEN**，不再显示状态（Waiting on you 会保留）。
 - 项目主对话和当前打开的子线程也显示在同一列表中。页面没有提供状态时显示 **STATE UNKNOWN**，不增加 Working 或 Needs you 计数。打开页面不会刷新旧状态的观察时间。主对话和子线程都有独立的打开、钉选链接。
 - 可以在设置的 **Claude project threads** 里关掉（"Show Claude project conversations and threads"）。
 
@@ -124,10 +124,10 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
   <p align="center"><img src="docs/flyout.png" width="560" alt="鼠标停在某一行上会显示详情，里面有 Ignore for Now"></p>
   <p align="center"><sub><i>示意图：鼠标停在某一行上看详情和操作。</i></sub></p>
 - **改名、置顶到钉板**等：右键某一行，或者把鼠标停在上面看详情。
-- **悬浮窗：**在面板最下面点 **Show Floating Window**。一个小胶囊会停在所有 App、所有桌面、全屏窗口的上面，也支持台前调度（Stage Manager），显示有几个会话在等你。切换 App 或唤醒 Mac 后会恢复显示，不抢走键盘焦点。点一下展开，能看到会话列表和钉板；可以拖到任何地方，靠近屏幕边缘会自动吸附。点 **Hide Floating Window** 后会保持隐藏，直到你再次显示它。有会话等你时自动展开的功能默认关闭，可在设置里打开，只对已经显示的悬浮窗生效。
+- **悬浮窗：**在面板最下面点 **Floating Window**。一个小胶囊会停在所有 App、所有桌面、全屏窗口的上面，也支持台前调度（Stage Manager），显示有几个会话在等你。切换 App 或唤醒 Mac 后会恢复显示，不抢走键盘焦点。点一下展开，能看到会话列表和钉板；可以拖到任何地方，靠近屏幕边缘会自动吸附。点 **Floating Window** 后会保持隐藏，直到你再次显示它。有会话等你时自动展开的功能默认关闭，可在设置里打开，只对已经显示的悬浮窗生效。
 - **钉板：**在悬浮窗的 Pinned 标签里，按项目分组，记下不想丢的线程和随手的笔记。往里拖文字或链接就会生成卡片。
 - **通知：**有会话等你批准或回答时弹出横幅，可以直接点 Open 跳过去，或点 Snooze 稍后提醒。在设置里选择哪些情况要通知。
-- **Pin Front AI Window**（面板最下面）：把你刚才在用的浏览器标签页或 App 钉到钉板上。
+- **Pin Front AI Window**（面板底部 **…** 菜单）：把你刚才在用的浏览器标签页或 App 钉到钉板上。
 
 ## 隐私
 
@@ -152,7 +152,7 @@ AI Runs 只读写你 Mac 上的文件：
 
 ## 卸载
 
-1. 打开 AI Runs 的设置（面板里的 **Hooks & Settings…**），分别在 Claude Code 和 Codex 那一行点 **Remove**。装了浏览器插件的话，在浏览器的扩展程序页面把它移除。
+1. 打开 AI Runs 的设置（面板里的 **Settings…**），分别在 Claude Code 和 Codex 那一行点 **Remove**。装了浏览器插件的话，在浏览器的扩展程序页面把它移除。
 2. 退出 AI Runs，把它从「应用程序」拖到废纸篓。
 3. 删除它的数据：`rm -rf ~/.airuns`
 

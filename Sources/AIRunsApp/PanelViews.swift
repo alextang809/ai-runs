@@ -6,7 +6,11 @@ enum PanelLayout {
     static let menuWidth: CGFloat = 384
     static let flyoutWidth: CGFloat = 284
     static let gap: CGFloat = 8
-    static let outerPadding: CGFloat = 10
+    static let outerPadding: CGFloat = 14
+
+    static func flyoutOffset(rowTop: CGFloat, flyoutHeight: CGFloat, maximumHeight: CGFloat) -> CGFloat {
+        min(max(0, rowTop), max(0, maximumHeight - flyoutHeight))
+    }
 }
 
 /// Colour means "which tool": Claude's clay and Codex's ink (OpenAI's black,
@@ -68,6 +72,7 @@ struct PanelRootView: View {
         }
         .padding(PanelLayout.outerPadding)
         .coordinateSpace(name: "panel")
+        .environment(\.flyoutHeightLimit, ui.menuHeightLimit)
         .onPreferenceChange(RowFramePreference.self) { frames in
             if ui.rowFrames != frames { ui.rowFrames = frames }
         }
@@ -78,9 +83,12 @@ struct PanelRootView: View {
         ZStack(alignment: .topTrailing) {
             Color.clear.frame(width: PanelLayout.flyoutWidth, height: 1)
             if let target = ui.hover, let frame = ui.rowFrames[target.key] {
-                flyout(for: target)
-                    .padding(.top, max(0, frame.minY - PanelLayout.outerPadding - 6))
-                    .onHover { inside in inside ? ui.keepHover() : ui.hoverOff() }
+                PositionedFlyout(rowTop: frame.minY - PanelLayout.outerPadding - 6,
+                                 maximumHeight: ui.menuHeightLimit) {
+                    flyout(for: target)
+                }
+                .id(target.key)
+                .onHover { inside in inside ? ui.keepHover() : ui.hoverOff() }
             }
         }
     }
@@ -104,176 +112,15 @@ struct PanelRootView: View {
 struct PanelSurface<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
-        content
-            .background(VisualEffectBackground(material: .menu))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
-            .shadow(color: .black.opacity(0.22), radius: 14, y: 6)
+        GlassSurface(cornerRadius: 20) { content }
     }
 }
 
 // MARK: - Menu column
 
-struct MenuColumn: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject var ui: PanelUIState
-    let actions: PanelActions
-
-    var body: some View {
-        PanelSurface {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                SeparatorLine()
-                activeSection
-                SeparatorLine()
-                PinnedSection(model: model, ui: ui, actions: actions)
-                SeparatorLine()
-                bottomMenu
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("AI Runs").font(.system(size: 15, weight: .bold))
-                Spacer()
-                if let message = model.message {
-                    Text(message)
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(Color.secondary)
-                        .lineLimit(1)
-                    if model.undo != nil {
-                        Button("Undo") { model.performUndo() }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11.5, weight: .bold))
-                            .foregroundStyle(Color.primary)
-                            .keyboardShortcut("z", modifiers: .command)
-                    }
-                }
-                RefreshButton(model: model)
-                    .padding(.leading, 4)
-            }
-            HeaderDashboard(needs: model.store.needsUserCount, working: model.store.workingCount,
-                            stats: model.store.stats(now: model.now))
-            ForEach(model.silentTools, id: \.self) { tool in
-                Text(silentHint(tool))
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.tool(tool))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            ThreadsHint(model: model)
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 9)
-        .padding(.bottom, 8)
-        .contentShape(Rectangle())
-        .onHover { if $0 { ui.hoverOff() } }
-    }
-
-    private func silentHint(_ tool: AgentTool) -> String {
-        switch tool {
-        case .codex: return "Codex hasn’t reported yet — approve the AI Runs hooks in Codex."
-        case .claudeCode: return "Claude Code hasn’t reported yet — start or continue a session."
-        case .chatgpt, .claudeWeb: return ""
-        }
-    }
-
-    @ViewBuilder private var activeSection: some View {
-        let sessions = model.store.ordered()
-        let overlap = Overlap.sameRepo(sessions)
-        VStack(alignment: .leading, spacing: 0) {
-            if sessions.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(model.needsHookSetup
-                         ? "Set up hooks so Claude Code and Codex sessions show up here."
-                         : "Nothing running. Start a session in Claude Code or Codex and it shows up here.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if model.needsHookSetup {
-                        Button("Set Up Hooks…") { actions.showSettings() }
-                            .controlSize(.small)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-            } else {
-                let needs = sessions.filter { $0.needsUser }
-                let working = sessions.filter { $0.state == .working }
-                let unknown = sessions.filter { $0.state == .unknown }
-                let done = sessions.filter { $0.isDone }
-                let ignored = sessions.filter { $0.isIgnored }
-                if !needs.isEmpty {
-                    SectionLabel(title: "Needs you", count: needs.count)
-                    rows(needs, overlap: overlap)
-                }
-                if !working.isEmpty {
-                    SectionLabel(title: "Working", count: working.count)
-                    rows(working, overlap: overlap)
-                }
-                if !unknown.isEmpty {
-                    SectionLabel(title: "State unknown", count: unknown.count)
-                    rows(unknown, overlap: overlap)
-                }
-                if !done.isEmpty {
-                    SectionLabel(title: "Done", count: done.count)
-                    rows(done, overlap: overlap)
-                }
-                if !ignored.isEmpty {
-                    SectionLabel(title: "Ignored", count: ignored.count)
-                    rows(ignored, overlap: overlap)
-                }
-                LifelineLegend()
-            }
-        }
-        .padding(.vertical, 3)
-    }
-
-    private func rows(_ sessions: [Session], overlap: [String: [Session]]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(sessions) { session in
-                SessionRow(session: session, lifeline: model.store.lifeline(for: session.id, now: model.now),
-                           now: model.now, alsoHere: (overlap[session.id] ?? []).map(\.title), ui: ui,
-                           rename: { actions.renameSession(session.id) },
-                           pin: { model.pin(sessionId: session.id) },
-                           remove: {
-                               ui.hover = nil
-                               model.remove(sessionId: session.id)
-                           },
-                           ignore: ignoreAction(for: session)) {
-                    actions.closePanel()
-                    model.open(sessionId: session.id)
-                }
-            }
-        }
-        .padding(.horizontal, 5)
-    }
-
-    private func ignoreAction(for session: Session) -> (() -> Void)? {
-        guard RunText.canIgnore(session) else { return nil }
-        let id = session.id, ignored = session.isIgnored
-        return { model.setIgnored(sessionId: id, !ignored) }
-    }
-
-    private var bottomMenu: some View {
-        VStack(spacing: 0) {
-            MenuRow(title: "Pin Front AI Window") { model.pinFrontWindow() }
-            MenuRow(title: ui.boardVisible ? "Hide Floating Window" : "Show Floating Window") { actions.toggleBoard() }
-            MenuRow(title: "Hooks & Settings…") { actions.showSettings() }
-            MenuRow(title: "Quit AI Runs", shortcut: "⌘Q") { NSApp.terminate(nil) }
-        }
-        .padding(.horizontal, 5)
-        .padding(.vertical, 3)
-        .onHover { if $0 { ui.hoverOff() } }
-    }
-}
-
 struct SeparatorLine: View {
     var body: some View {
-        Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1).padding(.horizontal, 12).padding(.vertical, 3)
+        Divider().padding(.horizontal, 14).padding(.vertical, 5)
     }
 }
 
@@ -294,14 +141,14 @@ struct CardRow: View {
         Button(action: open) {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(card.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Text(card.title).font(AppTypography.rowTitle).lineLimit(1)
                     Text(card.next.isEmpty ? "No next step yet" : "Next: \(card.next)")
-                        .font(.system(size: 11.5)).lineLimit(1)
+                        .font(AppTypography.metadata).lineLimit(1)
                         .foregroundStyle(Color.secondary)
                 }
                 Spacer(minLength: 8)
                 Text(TextUtils.age(now.timeIntervalSince(card.touchedAt)))
-                    .font(.system(size: 11).monospacedDigit())
+                    .font(AppTypography.elapsed)
                     .foregroundStyle(Color.secondary)
                     .opacity(highlighted && remove != nil ? 0 : 1)
             }
@@ -309,7 +156,7 @@ struct CardRow: View {
             .padding(.trailing, 8)
             .frame(height: 44)
             .foregroundStyle(Color.primary)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
             .opacity(stale && !highlighted ? 0.55 : 1)
             .contentShape(Rectangle())
         }
@@ -332,24 +179,32 @@ struct CardRow: View {
 struct MenuRow: View {
     let title: String
     var shortcut: String = ""
+    var systemImage: String? = nil
     var tint: Color? = nil
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack {
-                Text(title).font(.system(size: 13.5))
+            HStack(spacing: 10) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(AppTypography.body)
+                        .frame(width: 16)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                Text(title).font(AppTypography.action)
                 Spacer()
                 if !shortcut.isEmpty {
-                    Text(shortcut).font(.system(size: 12))
+                    Text(shortcut).font(AppTypography.body)
                         .foregroundStyle(Color.secondary)
                 }
             }
             .padding(.horizontal, 9)
-            .frame(height: 26)
+            .frame(height: 28)
             .foregroundStyle(tint ?? Color.primary)
-            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -369,12 +224,12 @@ struct PinnedSection: View {
         let stale = model.board.staleCards(now: model.now)
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 2) {
-                Text("Pinned").font(.system(size: 13, weight: .bold))
+                Text("Pinned").font(AppTypography.rowTitle)
                 Spacer()
                 Button {
                     ui.addingNote.toggle()
                 } label: {
-                    Label("Note", systemImage: "plus").font(.system(size: 12, weight: .semibold))
+                    Label("Note", systemImage: "plus").font(AppTypography.section)
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Color.primary)
@@ -393,15 +248,6 @@ struct PinnedSection: View {
                 }
                 .padding(.horizontal, 9)
                 .padding(.bottom, 6)
-            }
-
-            if groups.isEmpty && stale.isEmpty && !ui.addingNote {
-                Text("Nothing pinned yet. Pin a session from its details, or use “Pin Front AI Window” below.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 9)
-                    .padding(.bottom, 6)
             }
 
             ForEach(groups, id: \.name) { group in
@@ -455,9 +301,9 @@ struct GroupHeader: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .rotationEffect(.degrees(collapsed ? 0 : 90))
-                Text(name).font(.system(size: 12, weight: .semibold))
+                Text(name).font(AppTypography.section)
                 Spacer()
-                Text("\(count)").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("\(count)").font(AppTypography.body).foregroundStyle(.secondary)
             }
             .foregroundStyle(Color.secondary)
             .padding(.horizontal, 9)
@@ -480,13 +326,13 @@ struct FlyoutAction: Identifiable {
 
 struct FlyoutSurface<Content: View>: View {
     @ViewBuilder var content: Content
+    @Environment(\.flyoutHeightLimit) private var maximumHeight
     var body: some View {
-        content
-            .frame(width: PanelLayout.flyoutWidth, alignment: .leading)
-            .background(VisualEffectBackground(material: .menu))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
-            .shadow(color: .black.opacity(0.2), radius: 12, y: 5)
+        GlassSurface(cornerRadius: 16) {
+            FittedVerticalScroll(maximumHeight: maximumHeight) {
+                content.frame(width: PanelLayout.flyoutWidth, alignment: .leading)
+            }
+        }
     }
 }
 
@@ -505,11 +351,11 @@ struct FlyoutBody: View {
         FlyoutSurface {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
-                    Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(title).font(AppTypography.detailTitle).fixedSize(horizontal: false, vertical: true)
+                    Text(subtitle).font(AppTypography.body).foregroundStyle(.secondary)
                     if let chip {
                         Text(chip.text)
-                            .font(.system(size: 11.5, weight: .semibold))
+                            .font(AppTypography.metadata)
                             .padding(.horizontal, 8).padding(.vertical, 2)
                             .background(Capsule().fill((chip.color ?? Color.primary).opacity(chip.color == nil ? 0.08 : 0.16)))
                             .foregroundStyle(chip.color ?? Color.secondary)
@@ -526,7 +372,7 @@ struct FlyoutBody: View {
                                 Spacer(minLength: 12)
                                 Text(row.1).multilineTextAlignment(.trailing)
                             }
-                            .font(.system(size: 12))
+                            .font(AppTypography.body)
                         }
                     }
                     .padding(.horizontal, 14).padding(.bottom, 8)
@@ -534,18 +380,18 @@ struct FlyoutBody: View {
 
                 if let note {
                     VStack(alignment: .leading, spacing: 2) {
-                        if let noteLabel { Text(noteLabel).font(.system(size: 11)).foregroundStyle(.secondary) }
-                        Text(note).font(.system(size: 12)).lineLimit(8).fixedSize(horizontal: false, vertical: true)
+                        if let noteLabel { Text(noteLabel).font(AppTypography.metadata).foregroundStyle(.secondary) }
+                        Text(note).font(AppTypography.body).lineLimit(8).fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal, 14).padding(.bottom, 8)
                 }
 
                 if let quote, !quote.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
-                        if let quoteLabel { Text(quoteLabel).font(.system(size: 11)).foregroundStyle(.secondary) }
+                        if let quoteLabel { Text(quoteLabel).font(AppTypography.metadata).foregroundStyle(.secondary) }
                         // Not selectable: once clicked, selectable text forgets its
                         // line limit and is drawn past the box, over the actions.
-                        Text(quote).font(.system(size: 12)).lineLimit(8).truncationMode(.tail)
+                        Text(quote).font(AppTypography.body).lineLimit(8).truncationMode(.tail)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
