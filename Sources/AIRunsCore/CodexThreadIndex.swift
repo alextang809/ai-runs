@@ -8,7 +8,7 @@ public struct CodexThread: Equatable, Sendable {
     public var id: String
     /// The name the Codex sidebar shows (`threads.name`). Nil when unnamed.
     public var name: String?
-    /// `user` for threads a person started; `subagent`, `guardian_review`
+    /// `user` or `voice_chat` for threads a person started; `subagent`, `guardian_review`
     /// and others for Codex's own helpers.
     public var threadSource: String?
     public var archived: Bool
@@ -24,7 +24,7 @@ public struct CodexThread: Equatable, Sendable {
     /// source are older user threads.
     public var isInternal: Bool {
         guard let source = threadSource?.lowercased(), !source.isEmpty else { return false }
-        return source != "user"
+        return source != "user" && source != "voice_chat"
     }
 }
 

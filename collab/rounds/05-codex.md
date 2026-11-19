@@ -238,3 +238,22 @@ copy in `/Applications/AI Runs.app`.
 - [Branch CI](https://github.com/alextang809/ai-runs/actions?query=branch%3Acodex%2Fround-05)
   is the source of truth for macOS 15 and 26 after each push. Check both jobs
   before merging. The original base run and local results are recorded above.
+
+### Version 1.0.1 — Codex voice conversations
+
+- **Did:** Treat `voice_chat` as a user conversation alongside `user`. On startup,
+  recover voice conversations previously hidden as internal helpers by replaying
+  their retained, already-consumed hook events and restoring Codex's native name.
+  Leave the live event cursor unchanged; unread events are applied exactly once.
+  Keep archived, explicitly removed, helper, and unrelated-tool rows unchanged.
+- **Found:** The old source filter incorrectly hid voice conversations even when
+  their hooks arrived normally. Live verification confirmed the affected row was
+  restored and its internal-ignore entry cleared by the application's migration.
+- **Validation:** 179 Swift tests passed, including source classification,
+  persistence, recovery idempotence, missing history, archived/removed metadata,
+  unread plan advancement, and log truncation. Core line coverage exceeds 92%.
+  Local signing scripts passed 59 checks; browser extension checks passed.
+- **Ideas:** Continue deriving recovered states from hook evidence; when retained
+  events are unavailable, unfilter the conversation and wait for its next hook.
+- **Asks / Needs from Alex:** None. Alex requested the fix, restoration, and the
+  1.0.1 release. App and browser extension versions are both 1.0.1.
