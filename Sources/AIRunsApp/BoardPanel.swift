@@ -140,7 +140,7 @@ struct BoardCard: View {
             }
         }
         .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
         .opacity(stale ? 0.6 : 1)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }

@@ -236,6 +236,9 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
             let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(
                 model: model, iconHidden: { [weak self] in self?.isIconHidden ?? false })))
             window.title = "AI Runs Settings"
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.titlebarAppearsTransparent = true
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
             window.center()
@@ -404,17 +407,16 @@ final class ToastController {
 struct ToastView: View {
     let text: String
     var body: some View {
-        Text(text)
-            .font(.system(size: 12, weight: .medium))
-            .multilineTextAlignment(.leading)
-            .frame(maxWidth: 320, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(VisualEffectBackground(material: .hudWindow))
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.primary.opacity(0.1)))
-            .padding(6)
+        GlassSurface(cornerRadius: 14, fallbackMaterial: .hudWindow) {
+            Text(text)
+                .font(.system(size: 12, weight: .medium))
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: 320, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+        }
+        .padding(12)
     }
 }
 
@@ -461,21 +463,5 @@ enum Icons {
         }
         image.isTemplate = status != .needsYou
         return image
-    }
-}
-
-struct VisualEffectBackground: NSViewRepresentable {
-    var material: NSVisualEffectView.Material = .menu
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.material = material
     }
 }

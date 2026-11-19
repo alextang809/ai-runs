@@ -8,7 +8,8 @@ struct RefreshButton: View {
 
     var body: some View {
         Button { model.refreshNow() } label: {
-            Image(systemName: "arrow.clockwise").font(.system(size: 10.5, weight: .bold))
+            Image(systemName: "arrow.clockwise").font(.system(size: 11, weight: .semibold))
+                .frame(width: 24, height: 24).contentShape(Circle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)

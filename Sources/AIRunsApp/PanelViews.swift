@@ -6,7 +6,7 @@ enum PanelLayout {
     static let menuWidth: CGFloat = 384
     static let flyoutWidth: CGFloat = 284
     static let gap: CGFloat = 8
-    static let outerPadding: CGFloat = 10
+    static let outerPadding: CGFloat = 14
 }
 
 /// Colour means "which tool": Claude's clay and Codex's ink (OpenAI's black,
@@ -104,11 +104,7 @@ struct PanelRootView: View {
 struct PanelSurface<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
-        content
-            .background(VisualEffectBackground(material: .menu))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
-            .shadow(color: .black.opacity(0.22), radius: 14, y: 6)
+        GlassSurface(cornerRadius: 20) { content }
     }
 }
 
@@ -137,7 +133,9 @@ struct MenuColumn: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
-                Text("AI Runs").font(.system(size: 15, weight: .bold))
+                Image(nsImage: Icons.statusImage(Icons.Status(store: model.store)))
+                    .accessibilityHidden(true)
+                Text("AI Runs").font(.system(size: 16, weight: .semibold))
                 Spacer()
                 if let message = model.message {
                     Text(message)
@@ -260,10 +258,10 @@ struct MenuColumn: View {
 
     private var bottomMenu: some View {
         VStack(spacing: 0) {
-            MenuRow(title: "Pin Front AI Window") { model.pinFrontWindow() }
-            MenuRow(title: ui.boardVisible ? "Hide Floating Window" : "Show Floating Window") { actions.toggleBoard() }
-            MenuRow(title: "Hooks & Settings…") { actions.showSettings() }
-            MenuRow(title: "Quit AI Runs", shortcut: "⌘Q") { NSApp.terminate(nil) }
+            MenuRow(title: "Pin Front AI Window", systemImage: "pin") { model.pinFrontWindow() }
+            MenuRow(title: ui.boardVisible ? "Hide Floating Window" : "Show Floating Window", systemImage: "rectangle.on.rectangle") { actions.toggleBoard() }
+            MenuRow(title: "Hooks & Settings…", systemImage: "slider.horizontal.3") { actions.showSettings() }
+            MenuRow(title: "Quit AI Runs", shortcut: "⌘Q", systemImage: "power") { NSApp.terminate(nil) }
         }
         .padding(.horizontal, 5)
         .padding(.vertical, 3)
@@ -273,7 +271,7 @@ struct MenuColumn: View {
 
 struct SeparatorLine: View {
     var body: some View {
-        Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1).padding(.horizontal, 12).padding(.vertical, 3)
+        Divider().padding(.horizontal, 14).padding(.vertical, 5)
     }
 }
 
@@ -309,7 +307,7 @@ struct CardRow: View {
             .padding(.trailing, 8)
             .frame(height: 44)
             .foregroundStyle(Color.primary)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
             .opacity(stale && !highlighted ? 0.55 : 1)
             .contentShape(Rectangle())
         }
@@ -332,13 +330,21 @@ struct CardRow: View {
 struct MenuRow: View {
     let title: String
     var shortcut: String = ""
+    var systemImage: String? = nil
     var tint: Color? = nil
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack {
+            HStack(spacing: 10) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 12))
+                        .frame(width: 16)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
                 Text(title).font(.system(size: 13.5))
                 Spacer()
                 if !shortcut.isEmpty {
@@ -347,9 +353,9 @@ struct MenuRow: View {
                 }
             }
             .padding(.horizontal, 9)
-            .frame(height: 26)
+            .frame(height: 28)
             .foregroundStyle(tint ?? Color.primary)
-            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -481,12 +487,9 @@ struct FlyoutAction: Identifiable {
 struct FlyoutSurface<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
-        content
-            .frame(width: PanelLayout.flyoutWidth, alignment: .leading)
-            .background(VisualEffectBackground(material: .menu))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
-            .shadow(color: .black.opacity(0.2), radius: 12, y: 5)
+        GlassSurface(cornerRadius: 16) {
+            content.frame(width: PanelLayout.flyoutWidth, alignment: .leading)
+        }
     }
 }
 

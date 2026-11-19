@@ -15,6 +15,16 @@ struct SettingsView: View {
     @AppStorage(FloatingSettings.autoExpandKey) private var autoExpand = false
 
     var body: some View {
+        GlassSurface(cornerRadius: 16, fallbackMaterial: .windowBackground) {
+            ScrollView {
+                settingsContent
+            }
+            .frame(width: 480, height: min(720, max(360, (NSScreen.main?.visibleFrame.height ?? 900) - 100)))
+        }
+        .onAppear(perform: refresh)
+    }
+
+    private var settingsContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Hooks").font(.headline)
@@ -110,8 +120,7 @@ struct SettingsView: View {
             }
         }
         .padding(20)
-        .frame(width: 460)
-        .onAppear(perform: refresh)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func refresh() {
@@ -171,7 +180,7 @@ private struct HookRow: View {
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
     }
 }
 

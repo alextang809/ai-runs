@@ -212,11 +212,7 @@ private struct FloatingSurface<Content: View>: View {
     var radius: CGFloat
     @ViewBuilder var content: Content
     var body: some View {
-        content
-            .background(VisualEffectBackground(material: .menu))
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Color.primary.opacity(0.14)))
-            .shadow(color: .black.opacity(0.24), radius: 12, y: 6)
+        GlassSurface(cornerRadius: radius) { content }
     }
 }
 
@@ -283,7 +279,7 @@ struct FloatingCard: View {
     let controller: FloatingController
 
     var body: some View {
-        FloatingSurface(radius: 14) {
+        FloatingSurface(radius: 20) {
             VStack(spacing: 0) {
                 header
                 if let message = model.message {
@@ -318,11 +314,13 @@ struct FloatingCard: View {
             Spacer()
             RefreshButton(model: model)
             Button { state.expanded = false } label: {
-                Image(systemName: "chevron.up").font(.system(size: 10, weight: .bold))
+                Image(systemName: "chevron.up").font(.system(size: 10, weight: .semibold))
+                    .frame(width: 24, height: 24).contentShape(Circle())
             }
             .buttonStyle(.plain).foregroundStyle(.secondary).help("Fold into the capsule")
             Button { controller.hide() } label: {
-                Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+                Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+                    .frame(width: 24, height: 24).contentShape(Circle())
             }
             .buttonStyle(.plain).foregroundStyle(.secondary).help("Hide the floating window")
         }
@@ -412,7 +410,7 @@ private struct FloatingRow: View {
                 }
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

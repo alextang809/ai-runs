@@ -62,7 +62,7 @@ struct SessionRow: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -462,7 +462,7 @@ private struct Metric: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("\(value)")
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                .font(.system(size: 22, weight: .semibold, design: .rounded)).monospacedDigit()
                 .foregroundStyle(color)
             Text(label.uppercased())
                 .font(.system(size: 9, weight: .semibold))
