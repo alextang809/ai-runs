@@ -301,6 +301,13 @@ struct FloatingCard: View {
         FloatingSurface(radius: 14) {
             VStack(spacing: 0) {
                 header
+                if let message = model.message {
+                    Text(message)
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.bottom, 6)
+                }
                 switch state.tab {
                 case .runs: runs
                 case .pinned:
@@ -324,6 +331,7 @@ struct FloatingCard: View {
             .frame(width: 130)
             .controlSize(.small)
             Spacer()
+            RefreshButton(model: model)
             Button { state.expanded = false } label: {
                 Image(systemName: "chevron.up").font(.system(size: 10, weight: .bold))
             }
@@ -348,8 +356,12 @@ struct FloatingCard: View {
 
     @ViewBuilder private var runs: some View {
         let sessions = model.store.ordered()
-        let active = sessions.filter { !$0.isDone && !$0.isIgnored && !($0.state == .working && $0.isInBackground) }
+        // Keep unknown and currently open conversations in the same list.
+        // Other finished and ignored runs fold into one line.
+        let active = sessions.filter { (!$0.isDone || $0.nativeView?.isOpen == true) && !$0.isIgnored }
         let quiet = sessions.count - active.count
+        ThreadsHint(model: model)
+            .padding(.horizontal, 14).padding(.bottom, 8)
         if active.isEmpty {
             Text(sessions.isEmpty ? "Nothing running." : "Nothing needs you; nothing is working right now.")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
@@ -376,7 +388,7 @@ struct FloatingCard: View {
             }
         }
         if quiet > 0 {
-            Text("+ \(quiet) done, ignored or in the background")
+            Text("+ \(quiet) done or ignored")
                 .font(.system(size: 10.5, weight: .medium)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14).padding(.bottom, 9).padding(.top, 2)

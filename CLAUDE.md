@@ -41,6 +41,18 @@ two minutes outranks the list; a thread missing from the tree is left alone
 instead of a state, except Waiting on you, which is kept; idle threads AI Runs
 never saw active get no row.
 
+**Opened conversations:** `ClaudeCurrentView` also reads validated
+`AXWebArea.AXURL` routes for an opened child thread and a project's main
+conversation. A main uses its own `Session.projectMainId` and `:main` row key;
+child keys and hook executor links remain unchanged. Both appear in One list.
+`Session.nativeView` records identity observation separately from
+`Session.native` state observation. An open page never refreshes an older state
+or supplies a guessed one. Newly identified conversations without state are
+`SessionState.unknown`: no Working/Needs you/Done counts, alerts or activity
+spans. Unknown and stale rows remain visible. Pin/open links address the main
+or child conversation directly. Titles come from scoped project/thread headers,
+not conversation messages.
+
 ## Layout
 
 - `Sources/AIRunsCore` — no UI, unit tested. Models, `EventParser`,
@@ -63,11 +75,11 @@ never saw active get no row.
 ## Build, test, release
 
 - Swift package, macOS 14+, swift-tools 5.10. `swift test`; `./Scripts/package_app.sh`
-  builds `build/AI Runs.app` (ad-hoc signed, bundle ID `io.github.alextang809.airuns`,
+  builds `build/AI Runs.app` (local identity when available, otherwise ad hoc; bundle ID `io.github.alextang809.airuns`,
   `LSUIElement`), copying `Resources/AppIcon.icns` and `BrowserExtension/`.
 - Cloud sessions have **no Swift toolchain**. Push and let CI compile:
   GitHub Actions on macOS 15 (Swift 6.1) and macOS 26 (Swift 6.3) run
-  `swift test` and the extension test on every push. Read failures from the job
+  `swift test`, signing-script tests and the extension test on every push. Read failures from the job
   logs. Write Swift that compiles under strict concurrency on both.
 - Release: bump `VERSION` and `BrowserExtension/manifest.json`, then push a tag
   `vX.Y.Z`; `.github/workflows/release.yml` builds and attaches `AI-Runs.zip`.
@@ -76,7 +88,16 @@ never saw active get no row.
   (`gh api repos/alextang809/ai-runs/pulls -f title=… -f head=… -f base=main -f body=…`).
 - On Alex's Mac, `~/ai-runs` is Codex's working copy; builds happen in the
   worktree `~/ai-runs-build` (`git fetch && git checkout --detach origin/main &&
-  ./Scripts/package_app.sh`).
+  ./Scripts/install_local.sh`). Keep one copy only, `/Applications/AI Runs.app`:
+  several copies with the same bundle ID confuse macOS permissions.
+- Signing: `./Scripts/make_signing_identity.sh` creates or reuses the self-signed
+  "AI Runs Local Signing" identity and signs a temporary probe to check key access.
+  If macOS asks, enter the login keychain password in its dialog and choose
+  **Always Allow** for `codesign`. The script never reads that password. Keep
+  the same identity; do not recreate it merely because it is self-signed.
+  `install_local.sh` requires this identity and validates the built signature
+  before stopping the installed app. Default `package_app.sh` still supports
+  ad-hoc packaging for CI; those builds can lose Accessibility after updates.
 
 ## Design rules
 

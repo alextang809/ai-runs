@@ -50,8 +50,27 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature so macOS will launch it locally. Releases should be signed
-# with a Developer ID and notarised instead.
-codesign --force --deep --sign - "$APP"
+# Sign with the local identity from Scripts/make_signing_identity.sh when it
+# exists: macOS then keeps the Accessibility permission across rebuilds.
+# Otherwise sign ad hoc, which macOS treats as a new app after every build.
+# Releases should be signed with a Developer ID and notarised instead.
+IDENTITY="${SIGN_IDENTITY:-AI Runs Local Signing}"
+identity_available=false
+if command -v security >/dev/null; then
+    if identities="$(security find-identity -p codesigning 2>/dev/null)"; then
+        if grep -qF "\"$IDENTITY\"" <<< "$identities"; then identity_available=true; fi
+    fi
+fi
+if [[ "$identity_available" == true ]]; then
+    codesign --force --deep --sign "$IDENTITY" "$APP"
+    echo "Signed with \"$IDENTITY\""
+else
+    if [[ "${REQUIRE_SIGN_IDENTITY:-0}" == "1" ]]; then
+        echo "Signing identity \"$IDENTITY\" is unavailable. The installed app was left unchanged." >&2
+        exit 1
+    fi
+    codesign --force --deep --sign - "$APP"
+    echo "Signed ad hoc (run ./Scripts/make_signing_identity.sh once to keep permissions across rebuilds)"
+fi
 
 echo "Built $APP"

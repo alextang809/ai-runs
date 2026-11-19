@@ -4,9 +4,11 @@ public enum SessionState: String, Codable, Sendable {
     case working
     case needsApproval
     case yourTurn
+    /// A conversation is identified, but its current state has not been observed.
+    case unknown
 
-    /// True when the session is waiting on the user.
-    public var needsUser: Bool { self != .working }
+    /// True only when there is evidence the session is waiting on the user.
+    public var needsUser: Bool { self == .needsApproval || self == .yourTurn }
 }
 
 /// One AI conversation that is still open in the panel.
@@ -14,7 +16,11 @@ public enum SessionState: String, Codable, Sendable {
 /// Usually one local session. For a Claude project thread it is the thread,
 /// and `sessionId` is the local session that worked for it most recently.
 public struct Session: Codable, Equatable, Identifiable, Sendable {
-    public var id: String { thread.map { Session.key(tool: tool, thread: $0) } ?? Session.key(tool: tool, sessionId: sessionId) }
+    public var id: String {
+        if let thread { return Session.key(tool: tool, thread: thread) }
+        if let projectMainId { return Session.key(tool: tool, projectMainId: projectMainId) }
+        return Session.key(tool: tool, sessionId: sessionId)
+    }
     public var tool: AgentTool
     public var sessionId: String
     public var title: String
@@ -65,6 +71,17 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var native: NativeSighting?
     /// Set by "Ignore for Now"; see `isIgnored`.
     public var ignored: Bool?
+    /// The project's main conversation has its own identity, separate from child threads.
+    public var projectMainId: String?
+    /// Identity evidence from an open page; this never refreshes native state evidence.
+    public var nativeView: NativeViewSighting?
+
+    public var claudeConversation: ClaudeConversation? {
+        if let thread { return ClaudeConversation(projectId: thread.projectId, threadId: thread.threadId) }
+        return projectMainId.map { ClaudeConversation(projectId: $0) }
+    }
+    public var claudeAppLink: URL? { claudeConversation?.appLink }
+    public var isProjectConversation: Bool { claudeConversation != nil }
 
     public var isInBackground: Bool { state == .working && ((backgroundTasks ?? 0) > 0 || (scheduled ?? 0) > 0) }
     /// Finished its work: shown, but not counted as needing the user.
@@ -84,6 +101,11 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// The row of a project thread, whichever local session works for it.
     public static func key(tool: AgentTool, thread: ProjectThread) -> String {
         "\(tool.rawValue):project:\(thread.projectId):\(thread.threadId)"
+    }
+
+    /// A main conversation cannot collide with a validated child thread's cmsg address.
+    public static func key(tool: AgentTool, projectMainId: String) -> String {
+        "\(tool.rawValue):project:\(projectMainId):main"
     }
 
     public static func genericTitle(for tool: AgentTool) -> String { "\(tool.displayName) session" }
@@ -115,6 +137,17 @@ public struct NativeSighting: Codable, Equatable, Sendable {
 
     /// A state other than "Waiting on you" is only claimed this long after it was seen.
     public static let freshFor: TimeInterval = 10 * 60
+}
+
+/// When the conversation's identity was seen in an open Claude page, not its state.
+public struct NativeViewSighting: Codable, Equatable, Sendable {
+    public let seenAt: Date
+    public let isOpen: Bool
+
+    public init(seenAt: Date, isOpen: Bool = true) {
+        self.seenAt = seenAt
+        self.isOpen = isOpen
+    }
 }
 
 /// A local session working for a conversation that has its own row (a Claude
@@ -402,7 +435,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
             }
             if let state = sighting.state {
                 let hookIsFresh = at.timeIntervalSince(row.lastHookAt ?? row.lastEventAt) < Self.hookGrace
-                if row.native != nil || !(hookIsFresh || Self.agrees(row, with: state)) {
+                if row.state == .unknown || row.native != nil || !(hookIsFresh || Self.agrees(row, with: state)) {
                     Self.drive(&row, to: state, at: at)
                     record(SpanKind(row), for: key, at: at)
                 }
@@ -412,6 +445,45 @@ public struct SessionStore: Codable, Equatable, Sendable {
         expireSightings(now: at)
     }
 
+    /// Identifies current pages without inferring state from their conversation content.
+    public mutating func observeCurrentViews(_ views: [CurrentClaudeView], at: Date,
+                                            tool: AgentTool = .claudeCode, complete: Bool = true) {
+        if complete { retireCurrentViews(for: tool) }
+        for view in views {
+            let conversation = view.conversation
+            guard conversation.appLink != nil else { continue }
+            let key = conversation.thread.map { Session.key(tool: tool, thread: $0) }
+                ?? Session.key(tool: tool, projectMainId: conversation.projectId)
+            guard dismissed?.contains(key) != true, ignored?.contains(key) != true else { continue }
+            var row = sessions[key] ?? Self.currentRow(for: conversation, tool: tool, at: at)
+            if let title = view.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty,
+               row.titleIsCustom != true, row.titleSettled != true {
+                row.title = TextUtils.truncate(title, limit: 60)
+                row.titleSettled = true
+            }
+            row.nativeView = NativeViewSighting(seenAt: at)
+            sessions[key] = row
+        }
+        expireSightings(now: at)
+    }
+
+    private mutating func retireCurrentViews(for tool: AgentTool) {
+        sessions = sessions.mapValues { row in
+            guard row.tool == tool, let view = row.nativeView, view.isOpen else { return row }
+            var closed = row
+            closed.nativeView = NativeViewSighting(seenAt: view.seenAt, isOpen: false)
+            return closed
+        }
+    }
+
+    private static func currentRow(for conversation: ClaudeConversation, tool: AgentTool, at: Date) -> Session {
+        Session(tool: tool, sessionId: "", title: conversation.thread == nil ? "Claude project conversation" : "Claude thread",
+                cwd: nil, state: .unknown, startedAt: at, turnStartedAt: at, waitingSince: nil,
+                lastEventAt: at, lastMessage: nil, approvalDetail: nil, transcriptPath: nil,
+                terminal: TerminalContext(bundleId: "com.anthropic.claudefordesktop"),
+                thread: conversation.thread, projectMainId: conversation.thread == nil ? conversation.projectId : nil)
+    }
+
     /// Rows whose last look at Claude's list is too old stop claiming a state.
     /// "Waiting on you" is kept: it stays true until the user answers.
     public mutating func expireSightings(now: Date) {
@@ -419,10 +491,10 @@ public struct SessionStore: Codable, Equatable, Sendable {
             guard let native = row.native, native.stale != true, native.state != .waitingOnYou,
                   now.timeIntervalSince(native.seenAt) > NativeSighting.freshFor else { continue }
             sessions[key]?.native?.stale = true
-            sessions[key]?.state = .yourTurn
-            sessions[key]?.outcome = .done
+            sessions[key]?.state = .unknown
+            sessions[key]?.outcome = nil
             sessions[key]?.outcomeSource = nil
-            sessions[key]?.waitingSince = native.seenAt
+            sessions[key]?.waitingSince = nil
             record(nil, for: key, at: now)
         }
     }
@@ -500,7 +572,17 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// Run after loading: hides helper threads saved by older versions and
     /// judges finished turns that ended before outcomes existed.
     public mutating func tidy() {
+        retireCurrentViews(for: .claudeCode)
         for (key, session) in sessions {
+            if session.native?.stale == true {
+                var unknown = session
+                unknown.state = .unknown
+                unknown.outcome = nil
+                unknown.outcomeSource = nil
+                unknown.waitingSince = nil
+                sessions[key] = unknown
+                continue
+            }
             if session.tool == .codex, (session.transcriptPath ?? "").isEmpty {
                 ignore(id: key)
                 continue
@@ -564,8 +646,11 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// Drops sessions nobody has touched for a long time (closed windows that
     /// never sent SessionEnd).
     public mutating func pruneStale(now: Date, olderThan age: TimeInterval = 24 * 3600) {
-        let gone = sessions.filter { now.timeIntervalSince($0.value.lastEventAt) >= age }.map(\.key)
-        sessions = sessions.filter { now.timeIntervalSince($0.value.lastEventAt) < age }
+        let kept = sessions.filter {
+            now.timeIntervalSince(max($0.value.lastEventAt, $0.value.nativeView?.seenAt ?? .distantPast)) < age
+        }
+        let gone = Set(sessions.keys).subtracting(kept.keys)
+        sessions = kept
         for key in gone { record(nil, for: key, at: now) }
         if let links = executors {
             let kept = links.filter { now.timeIntervalSince($0.value.linkedAt) < age || sessions[$0.value.conversation] != nil }
@@ -585,11 +670,12 @@ public struct SessionStore: Codable, Equatable, Sendable {
             case .needsApproval: return 0
             case .yourTurn:
                 switch session.outcome {
-                case .needsInput: return session.isIgnored ? 5 : 1
-                case .done: return 4
-                default: return session.isIgnored ? 5 : 2
+                case .needsInput: return session.isIgnored ? 6 : 1
+                case .done: return 5
+                default: return session.isIgnored ? 6 : 2
                 }
             case .working: return 3
+            case .unknown: return 4
             }
         }
         return sessions.values.sorted { a, b in

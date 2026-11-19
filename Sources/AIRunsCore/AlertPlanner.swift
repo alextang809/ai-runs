@@ -13,6 +13,7 @@ extension Session {
     /// What this session would notify about at `now`, if anything.
     public func alertKind(now: Date = Date()) -> AlertKind? {
         switch state {
+        case .unknown: return nil
         case .needsApproval: return .approval
         case .yourTurn:
             if isIgnored { return nil }

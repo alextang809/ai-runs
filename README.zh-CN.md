@@ -109,11 +109,12 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 | Claude 项目里的 thread | 在 Claude 桌面版里直接打开那个 thread |
 | chatgpt.com、claude.ai（装了插件） | 切到浏览器里那个标签页；标签页关了就在那个浏览器里重新打开 |
 
-**Claude 项目 thread**（新功能，还没在真 Mac 上验证过）
+**Claude 项目主对话和 thread**
 
 - Claude 项目里的每个 thread 只占**一行**，标着 "Claude project"。替这个 thread 干活的本地 Claude Code 会话不再单独占行，由最新的那个告诉这一行它在做什么。
 - 只在云端跑的 thread 不会给 AI Runs 发任何东西。当 Claude 的 **Threads** 列表显示在屏幕上时，AI Runs 通过辅助功能读取它（只读，只读 Claude 这个 App），用 Claude 自己的词显示状态：**WORKING**、**WAITING ON YOU**、**READY FOR REVIEW**、**IDLE**。这一行会写"Seen in Claude 3m ago"；超过 10 分钟没再看到这个 thread，就显示 **LAST SEEN**，不再显示状态（Waiting on you 会保留）。
-- 可以在设置的 **Claude project threads** 里关掉（"Show threads from Claude's Threads list"）。
+- 项目主对话和当前打开的子线程也显示在同一列表中。页面没有提供状态时显示 **STATE UNKNOWN**，不增加 Working 或 Needs you 计数。打开页面不会刷新旧状态的观察时间。主对话和子线程都有独立的打开、钉选链接。
+- 可以在设置的 **Claude project threads** 里关掉（"Show Claude project conversations and threads"）。
 
 **其他功能**
 
@@ -157,7 +158,7 @@ AI Runs 只读写你 Mac 上的文件：
 
 ## 已知限制
 
-- 网页对话需要装浏览器插件，暂不支持 Safari。Codex cloud 还没法跟踪；Claude 的云端 thread 只有在 Claude 的 Threads 列表显示在屏幕上时才能看到。
+- 网页对话需要装浏览器插件，暂不支持 Safari。Codex cloud 还没法跟踪。Claude 项目主对话和子线程可以从打开的页面识别；状态来自 Threads 列表或 agent 事件，无法确认时显示 STATE UNKNOWN。
 - ChatGPT 和 Claude 的网页经常改版。如果插件突然认不出回复了，请告诉我。
 - Ghostty、Warp 等终端不支持脚本控制，点一下只能把那个 App 带到前台，选不中具体的标签页。
 - 现在的版本是临时签名，每次更新后 macOS 可能会要你重新打开一次辅助功能权限。
@@ -170,11 +171,13 @@ AI Runs 只读写你 Mac 上的文件：
 ```sh
 git clone https://github.com/alextang809/ai-runs.git
 cd ai-runs
-./Scripts/package_app.sh
-open "build/AI Runs.app"
+./Scripts/make_signing_identity.sh
+./Scripts/install_local.sh
 ```
 
-用 `swift test` 运行测试。
+如果 macOS 询问是否允许 `codesign` 使用本机密钥，请在系统对话框里输入登录钥匙串密码，并选择 **Always Allow（始终允许）**。脚本会先检查签名是否可用，不会读取密码。随后在 AI Runs 设置中授予一次辅助功能权限。后续构建复用同一签名身份，只保留 `/Applications/AI Runs.app` 这一份应用。
+
+用 `swift test` 和 `bash Tests/Scripts/local_signing.test.sh` 运行核心和签名脚本测试。
 
 - `Sources/AIRunsCore`：事件解析、会话状态机、判断做完还是要你输入、钉板和 hook 安装。没有界面，有单元测试。
 - `Sources/airuns-hook`：hook 调用的小工具。

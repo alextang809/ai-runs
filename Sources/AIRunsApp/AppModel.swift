@@ -73,32 +73,104 @@ final class AppModel: ObservableObject {
     // MARK: - Claude's Threads list
 
     private var threadsTimer: Timer?
-    private var readingThreads = false
+    private var threadReads = ThreadReadQueue()
+
+    /// Whether Claude's Threads list can be read, and what the last look found.
+    enum ThreadsStatus: Equatable {
+        case off
+        case claudeNotRunning
+        case needsPermission
+        case read(found: Int, complete: Bool)
+    }
+
+    @Published private(set) var threadsStatus: ThreadsStatus = .off
 
     /// Looks at the Claude app's window for project threads, which is the only
     /// way to see the ones that work in the cloud.
-    private func readClaudeThreads() {
-        guard !readingThreads, let pid = ClaudeThreadsReader.target() else { return }
-        readingThreads = true
-        ClaudeThreadsReader.read(pid: pid) { [weak self] sightings in
-            MainActor.assumeIsolated { self?.apply(sightings: sightings) }
+    private func readClaudeThreads(request: ThreadReadQueue.Request = .regular) {
+        let wasIdle = threadReads.active == nil
+        threadReads = threadReads.requesting(request)
+        if wasIdle, let active = threadReads.active { startThreadRead(active) }
+    }
+
+    private func startThreadRead(_ request: ThreadReadQueue.Request) {
+        let pid: pid_t
+        switch ClaudeThreadsReader.availability() {
+        case .off: completeThreadRead(.off)
+            return
+        case .claudeNotRunning: completeThreadRead(.claudeNotRunning)
+            return
+        case .needsPermission: completeThreadRead(.needsPermission)
+            return
+        case .ready(let id): pid = id
+        }
+        let budget = request == .refresh ? ClaudeThreadsReader.refreshBudget : ClaudeThreadsReader.regularBudget
+        ClaudeThreadsReader.read(pid: pid, budget: budget) { [weak self] reading in
+            MainActor.assumeIsolated {
+                let listed = reading.sightings.map {
+                    ClaudeConversation(projectId: $0.thread.projectId, threadId: $0.thread.threadId)
+                }
+                let conversations = Set(listed).union(reading.currentViews.map(\.conversation))
+                self?.completeThreadRead(.read(found: conversations.count, complete: reading.complete), reading: reading)
+            }
         }
     }
 
-    private func apply(sightings: [ThreadSighting]) {
-        readingThreads = false
-        guard !sightings.isEmpty else { return }
+    private func completeThreadRead(_ status: ThreadsStatus, reading: ClaudeThreadsReader.Reading? = nil) {
+        let announce = threadReads.shouldAnnounce
+        threadReads = threadReads.completing()
+        if threadsStatus != status { threadsStatus = status }
+        if announce { show(Self.refreshText(status)) }
+        if let reading {
+            apply(reading)
+        } else {
+            // A disabled or unavailable reader cannot keep claiming a page is open.
+            apply(.init(sightings: [], complete: true))
+        }
+        // Store updates can be empty or unchanged; queued refreshes still run.
+        if let next = threadReads.active { startThreadRead(next) }
+    }
+
+    private func apply(_ reading: ClaudeThreadsReader.Reading) {
+        let observedAt = Date()
         var updated = store
-        updated.observe(sightings, at: Date())
+        updated.observe(reading.sightings, at: observedAt)
+        updated.observeCurrentViews(reading.currentViews, at: observedAt, complete: reading.complete)
         guard updated != store else { return }
         store = updated
-        now = Date()
+        now = observedAt
         saveSessions()
+    }
+
+    /// What a refresh the user asked for says, in a few words.
+    static func refreshText(_ status: ThreadsStatus) -> String {
+        switch status {
+        case .off: return "Refreshed · Claude threads off in Settings"
+        case .claudeNotRunning: return "Refreshed · Claude isn’t open"
+        case .needsPermission: return "Refreshed · Claude threads need Accessibility"
+        case .read(let found, let complete):
+            if found > 0 { return "Refreshed · \(found) Claude conversation\(found == 1 ? "" : "s") seen" }
+            return complete ? "Refreshed · show a Claude project or its Threads list"
+                            : "Refreshed · Claude’s window was too big to read"
+        }
     }
 
     func refresh() {
         readEvents()
         tick()
+    }
+
+    /// The refresh button: hook events, the clock and Claude's Threads list
+    /// right now, reading more of Claude's window than the regular look does.
+    func refreshNow() {
+        refresh()
+        readClaudeThreads(request: .refresh)
+    }
+
+    /// Asks macOS for Accessibility (shows its prompt), then looks again.
+    func allowAccessibility() {
+        _ = SidebarClicker.requestTrust()
+        readClaudeThreads()
     }
 
     private func tick() {
@@ -192,11 +264,11 @@ final class AppModel: ObservableObject {
             }
             // A project thread's local session has its own name, which isn't the
             // thread's; the thread is named from what was asked in it.
-            if session.tool == .claudeCode, session.thread == nil {
+            if session.tool == .claudeCode, !session.isProjectConversation {
                 if desktop == nil { desktop = ClaudeDesktopIndex.load(root: ClaudeDesktopIndex.root()) }
                 toolTitle = ClaudeDesktopIndex.session(forCLI: session.sessionId, in: desktop ?? [])?.title
             }
-            if toolTitle == nil, session.thread == nil, let transcript { toolTitle = TranscriptReader.toolTitle(at: transcript) }
+            if toolTitle == nil, !session.isProjectConversation, let transcript { toolTitle = TranscriptReader.toolTitle(at: transcript) }
 
             if let toolTitle {
                 if toolTitle != session.title || session.titleSettled != true {

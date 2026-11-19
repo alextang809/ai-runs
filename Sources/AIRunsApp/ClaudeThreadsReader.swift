@@ -4,8 +4,8 @@ import ApplicationServices
 
 /// Reads the Claude desktop app's window through the Accessibility API to
 /// find project threads and the section Claude files them under ("Waiting on
-/// you", "Idle", …). This is the only way AI Runs can see threads that work
-/// in the cloud: they fire no local hooks.
+/// you", "Idle", …), plus the current project conversations identified by their
+/// web-area routes. Cloud-only conversations fire no local hooks.
 ///
 /// It only reads: nothing is pressed, typed or focused. It needs the
 /// Accessibility permission and never asks for it by itself; without it,
@@ -17,30 +17,112 @@ enum ClaudeThreadsReader {
     /// On unless the user turned it off in Settings.
     static var isEnabled: Bool { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
 
-    /// The running Claude app, when reading is on and allowed.
-    static func target() -> pid_t? {
-        guard isEnabled, AXIsProcessTrusted() else { return nil }
-        return NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.processIdentifier
+    /// Whether a read can happen now, and if not, why.
+    enum Availability {
+        case off
+        case claudeNotRunning
+        case needsPermission
+        case ready(pid_t)
     }
 
+    static func availability() -> Availability {
+        guard isEnabled else { return .off }
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first else {
+            return .claudeNotRunning
+        }
+        // After a rebuild an ad-hoc signed app can look ticked in System
+        // Settings and still not be trusted; this is the only true answer.
+        guard AXIsProcessTrusted() else { return .needsPermission }
+        return .ready(app.processIdentifier)
+    }
+
+    /// What one look at Claude's window found.
+    struct Reading: Sendable {
+        var sightings: [ThreadSighting]
+        var currentViews: [CurrentClaudeView] = []
+        /// False when the node budget ran out before the whole tree was read.
+        var complete: Bool
+    }
+
+    /// Elements read on the regular 5 s look, and on a refresh the user asked for.
+    static let regularBudget = 5000
+    static let refreshBudget = 20000
+
     /// Reads off the main thread; calls `completion` on the main thread.
-    static func read(pid: pid_t, completion: @escaping @Sendable ([ThreadSighting]) -> Void) {
+    static func read(pid: pid_t, budget: Int = regularBudget, completion: @escaping @Sendable (Reading) -> Void) {
         DispatchQueue.global(qos: .utility).async {
-            let found = sightings(pid: pid)
+            let found = reading(pid: pid, budget: budget)
             DispatchQueue.main.async { completion(found) }
         }
     }
 
-    private static func sightings(pid: pid_t) -> [ThreadSighting] {
+    private static func reading(pid: pid_t, budget start: Int) -> Reading {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.5)
         // Electron apps only build their accessibility tree when asked
         // (SidebarClicker asks the same way).
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         let windows = (copy(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
-        var budget = 5000
+        var budget = start
         let children = windows.compactMap { node($0, depth: 0, budget: &budget) }
-        return ClaudeThreadsView.sightings(in: AXNode(role: "AXApplication", children: children))
+        let root = AXNode(role: "AXApplication", children: children)
+        let sightings = ClaudeThreadsView.sightings(in: root)
+        let currentViews = ClaudeCurrentView.sightings(in: root)
+        let complete = budget > 0
+        writeReport(windows: windows.count, root: root, sightings: sightings, currentViews: currentViews, complete: complete)
+        return Reading(sightings: sightings, currentViews: currentViews, complete: complete)
+    }
+
+    /// Counts only, never titles or ids: what the last look at Claude's window
+    /// found, written to `~/.airuns/threads-report.json` so a missing thread
+    /// can be traced to a layer (no window, no links, links but no section).
+    private struct Report: Codable {
+        var at: Date
+        var windows: Int
+        var nodes: Int
+        var links: Int
+        var threadLinks: Int
+        /// Link shapes that are not thread links: host and first path part only.
+        var otherLinkShapes: [String: Int]
+        /// Recognised section headings seen, by Claude's word.
+        var sections: [String: Int]
+        var sightings: Int
+        var sightingsWithState: Int
+        var currentViews: Int
+        var currentThreads: Int
+        var projectMainViews: Int
+        var complete: Bool
+    }
+
+    private static func writeReport(windows: Int, root: AXNode, sightings: [ThreadSighting],
+                                    currentViews: [CurrentClaudeView], complete: Bool) {
+        var report = Report(at: Date(), windows: windows, nodes: 0, links: 0, threadLinks: 0, otherLinkShapes: [:],
+                            sections: [:], sightings: sightings.count,
+                            sightingsWithState: sightings.filter { $0.state != nil }.count, currentViews: currentViews.count,
+                            currentThreads: currentViews.filter { $0.conversation.threadId != nil }.count,
+                            projectMainViews: currentViews.filter { $0.conversation.threadId == nil }.count, complete: complete)
+        func visit(_ node: AXNode) {
+            report.nodes += 1
+            if node.role == "AXLink" {
+                report.links += 1
+                if ClaudeThreadsView.thread(fromLink: node.url) != nil {
+                    report.threadLinks += 1
+                } else if let text = node.url, let parts = URLComponents(string: text) {
+                    let first = parts.path.split(separator: "/").first.map(String.init) ?? ""
+                    let shape = "\(parts.scheme ?? "?")://\(parts.host ?? "")/\(first)"
+                    if report.otherLinkShapes.count < 12 || report.otherLinkShapes[shape] != nil {
+                        report.otherLinkShapes[shape, default: 0] += 1
+                    }
+                }
+            }
+            if node.role == "AXHeading" || node.role == "AXButton", let state = NativeThreadState.from(heading: node.title) {
+                report.sections[state.heading, default: 0] += 1
+            }
+            node.children.forEach(visit)
+        }
+        visit(root)
+        let url = AIRunsPaths().root.appendingPathComponent("threads-report.json")
+        try? JSONFile.save(report, to: url)
     }
 
     /// Copies the part of the tree that matters, with limits so a huge window can't stall.
@@ -56,6 +138,10 @@ enum ClaudeThreadsReader {
             result.title = copy(element, kAXTitleAttribute) as? String
             // Only thread links are worth going into.
             guard ClaudeThreadsView.thread(fromLink: result.url) != nil else { return result }
+        case "AXWebArea":
+            let url = copy(element, kAXURLAttribute)
+            result.url = (url as? URL)?.absoluteString ?? (url as? String)
+            result.title = copy(element, kAXTitleAttribute) as? String
         case "AXHeading", "AXButton":
             result.title = copy(element, kAXTitleAttribute) as? String
         case "AXStaticText":

@@ -29,8 +29,9 @@ public struct ActivitySpan: Codable, Equatable, Sendable {
 }
 
 extension SpanKind {
-    init(_ session: Session) {
+    init?(_ session: Session) {
         switch session.state {
+        case .unknown: return nil
         case .needsApproval: self = .waiting
         // An ignored wait is not time the user kept an agent waiting.
         case .yourTurn: self = session.isDone || session.isIgnored ? .background : .waiting
