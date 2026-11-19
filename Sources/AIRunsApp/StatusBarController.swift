@@ -322,7 +322,7 @@ final class PanelUIState: ObservableObject {
     @Published var hover: Target?
     @Published var rowFrames: [String: CGRect] = [:]
     @Published var collapsed: Set<String> = [PanelUIState.staleGroup]
-    @Published var expandedDone = false
+    @Published var expandedDone = true
     @Published var expandedIgnored = false
     /// Available height below the menu-bar anchor, excluding the outer shadow margin.
     @Published var menuHeightLimit: CGFloat = 600

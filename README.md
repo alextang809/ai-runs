@@ -17,8 +17,8 @@ which one is waiting for an answer, and which one quietly stopped. AI Runs puts
 them all in one list in your menu bar:
 
 - **Needs you** — sessions that ask for approval or for your input, with how long they have waited.
-- **Working** — running sessions, with elapsed time and plan progress when available.
-- **Done** — finished sessions, folded away until you expand the group.
+- **Working** — running sessions, with elapsed time, readable activity and plan progress when available.
+- **Done** — finished sessions, shown below the active ones; fold the group when you want more room.
 
 Everything stays on your Mac. No account, no server, nothing is sent anywhere.
 
@@ -94,10 +94,15 @@ If you don't see it:
 
 ## Using it
 
+**The overview** shows Needs you, Working and Today counts, a two-hour activity
+chart and today's waiting time.
+
 **Each row** shows the app's real icon, the session name (the same one Claude or
-Codex shows in its sidebar), its state and elapsed time. An approval request,
-input question or current plan adds a short line. Hover for source, project and
-activity details. Done and Ignored groups start collapsed; long lists scroll
+Codex shows in its sidebar), state and elapsed time, plus readable activity or
+current plan progress and a small history bar. Approval requests and input
+questions use the full activity line. A branch symbol warns when other sessions
+are working in the same repository. Hover for source, project and full details.
+Done starts expanded and can be folded; Ignored starts collapsed. Long lists scroll
 while Settings and the floating-window control stay visible. The pinned board
 lives in the floating window, leaving the main menu for sessions.
 
@@ -106,7 +111,7 @@ lives in the floating window, leaving the main menu for sessions.
 | **APPROVE** (solid) | It wants to run a command or edit a file and is waiting for your OK |
 | **NEEDS INPUT** (solid) | It asked you a question, or said it's blocked |
 | **REPLIED** (light) | It finished a turn, and AI Runs can't tell whether it needs you |
-| **WORKING** (outline) | It's running; a current plan appears below when available |
+| **WORKING** (outline) | It's running; the line below shows activity or current plan progress |
 | **NO UPDATE** (grey) | It was working, but nothing has arrived for 30 minutes; it may have stopped |
 | **SCHEDULED / BACKGROUND** (grey) | It's waiting on its own timer or background task and continues by itself |
 | **DONE ✓** (grey) | It finished what you asked |
