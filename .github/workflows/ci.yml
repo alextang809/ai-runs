@@ -20,6 +20,8 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: Test local signing scripts
+        run: bash Tests/Scripts/local_signing.test.sh
       - name: Package app and check its icon
         run: |
           chmod +x Scripts/package_app.sh

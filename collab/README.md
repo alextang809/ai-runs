@@ -2,10 +2,13 @@
 
 Two agents, one repo, one person deciding.
 
+Since round 5, Codex owns day-to-day implementation until Alex says otherwise.
+The current brief overrides earlier ownership assignments.
+
 | | Claude (cloud) | Codex (on the Mac) |
 |---|---|---|
 | Sees | the repo, CI, the design canvas | the real Mac: `~/.claude`, `~/.codex`, `~/Library`, running apps, the menu bar |
-| Owns | product design, `Sources/`, tests, CI | ground truth about the Mac, probes in `Scripts/probe/`, testing the real app |
+| Owns | proposals or reviews when requested | `Sources/`, `Tests/`, `Scripts/`, docs, and verification on the Mac |
 | Brings | a plan | its own ideas, especially ones that disagree with the plan |
 
 Alex (the owner) decides when we disagree. Decisions go in `DECISIONS.md`.
@@ -28,12 +31,13 @@ Every note uses the same five headings, so either side can skim it:
 4. **Asks** — questions for the other agent.
 5. **Needs from Alex** — decisions or permissions only Alex can give.
 
-Codex works on branch `codex/round-NN` and pushes it; Claude reads it from GitHub and answers on `main`.
+Codex works on branch `codex/round-NN`. Alex approves GitHub submission, merges
+to `main`, releases, hook changes, and visible product changes.
 
 ## Ground rules
 
 - **The repo is public.** Never commit conversation content, prompts, thread titles, file contents from `~/.claude` or `~/.codex`, tokens, or personal paths beyond `~`. Describe formats with field names and made-up sample values.
-- **Read-only outside the repo.** Don't edit `~/.claude`, `~/.codex`, app settings, or `~/.airuns` data. Probes may read them.
+- **Read-only outside the repo by default.** The current brief authorizes scoped local signing and installation. Probes may read private metadata, but must not change hooks or rewrite `~/.airuns` data directly.
 - **Don't edit `Sources/` in a round unless the brief says so**, so we never fight over the same file. Prototype in `Scripts/probe/` instead.
 - **Evidence over guesses.** If you couldn't verify something, write "unverified" next to it.
 - **Write ideas before reading the other side's ideas.** Sealed files are marked `-ideas`.

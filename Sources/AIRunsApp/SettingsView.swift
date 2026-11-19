@@ -191,9 +191,9 @@ struct ClaudeThreadsSection: View {
                     Button("Allow Accessibility…") { _ = SidebarClicker.requestTrust() }.controlSize(.small)
                 }
             }
-            Text("Threads that work in the cloud send AI Runs nothing. While the Threads list is on screen in Claude, AI Runs reads each thread’s name and where Claude files it (Working, Waiting on you, Ready for review, Idle), so those threads get a row too. It only reads, and only the Claude app.")
+            Text("Open project conversations and threads appear in AI Runs. Claude’s Threads list supplies their state; when no state is available, the row says STATE UNKNOWN. AI Runs only reads the Claude app and needs Accessibility permission.")
                 .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("Show threads from Claude’s Threads list", isOn: $enabled)
+            Toggle("Show Claude project conversations and threads", isOn: $enabled)
                 .font(.system(size: 12.5))
         }
         .onAppear { trusted = SidebarClicker.isTrusted }

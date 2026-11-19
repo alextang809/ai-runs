@@ -55,10 +55,20 @@ PLIST
 # Otherwise sign ad hoc, which macOS treats as a new app after every build.
 # Releases should be signed with a Developer ID and notarised instead.
 IDENTITY="${SIGN_IDENTITY:-AI Runs Local Signing}"
-if command -v security >/dev/null && security find-identity -p codesigning 2>/dev/null | grep -qF "\"$IDENTITY\""; then
+identity_available=false
+if command -v security >/dev/null; then
+    if identities="$(security find-identity -p codesigning 2>/dev/null)"; then
+        if grep -qF "\"$IDENTITY\"" <<< "$identities"; then identity_available=true; fi
+    fi
+fi
+if [[ "$identity_available" == true ]]; then
     codesign --force --deep --sign "$IDENTITY" "$APP"
     echo "Signed with \"$IDENTITY\""
 else
+    if [[ "${REQUIRE_SIGN_IDENTITY:-0}" == "1" ]]; then
+        echo "Signing identity \"$IDENTITY\" is unavailable. The installed app was left unchanged." >&2
+        exit 1
+    fi
     codesign --force --deep --sign - "$APP"
     echo "Signed ad hoc (run ./Scripts/make_signing_identity.sh once to keep permissions across rebuilds)"
 fi

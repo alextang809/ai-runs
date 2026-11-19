@@ -99,8 +99,9 @@ enum RunText {
             host = "Codex"
         }
         var parts: [String]
-        if session.thread != nil {
+        if session.isProjectConversation {
             parts = ["Claude project"]
+            if session.projectMainId != nil { parts.append("Main conversation") }
         } else if session.tool.isWeb {
             parts = [session.tool.displayName, host]
         } else if (session.tool == .claudeCode && host == "Claude") || (session.tool == .codex && host == "Codex") {
@@ -135,6 +136,7 @@ enum RunText {
         // A thread known only from Claude's Threads list keeps Claude's own word.
         if let native = session.native { return native.stale == true ? "LAST SEEN" : native.state.word }
         switch session.state {
+        case .unknown: return "STATE UNKNOWN"
         case .needsApproval: return "APPROVE"
         case .yourTurn:
             switch session.outcome {
@@ -150,6 +152,7 @@ enum RunText {
     }
 
     static func stateTime(_ session: Session, now: Date) -> String {
+        guard session.state != .unknown else { return "" }
         if session.state.needsUser {
             return TextUtils.duration(now.timeIntervalSince(session.waitingSince ?? session.lastEventAt))
         }
@@ -159,9 +162,27 @@ enum RunText {
 
     static func liveText(_ session: Session, now: Date) -> String {
         if let native = session.native {
+            if session.nativeView?.isOpen == true {
+                let age = max(0, now.timeIntervalSince(native.seenAt))
+                let when = age < 60 ? "just now" : "\(TextUtils.duration(age)) ago"
+                return "Open in Claude · state \(native.stale == true ? "last seen" : "seen") \(when)"
+            }
             return native.stale == true ? "State unknown · show its Threads list in Claude to refresh" : seen(native, now: now)
         }
+        if session.state == .unknown {
+            guard let view = session.nativeView else { return "State unavailable" }
+            let age = max(0, now.timeIntervalSince(view.seenAt))
+            let when = age < 60 ? "just now" : "\(TextUtils.duration(age)) ago"
+            return view.isOpen ? "Open in Claude · seen \(when)" : "Seen in Claude \(when) · state unavailable"
+        }
+        let detail = stateDetail(session, now: now)
+        return session.nativeView?.isOpen == true ? "Open in Claude · \(detail)" : detail
+    }
+
+    private static func stateDetail(_ session: Session, now: Date) -> String {
         switch session.state {
+        case .unknown:
+            return "State unavailable"
         case .needsApproval:
             return "Wants to run " + (session.approvalDetail ?? "a tool")
         case .yourTurn:
@@ -193,6 +214,7 @@ struct StatePill: View {
             if stale { return (.clear, .secondary, false) }
             if session.isIgnored { return (Color.primary.opacity(0.07), .secondary, false) }
             switch session.state {
+            case .unknown: return (Color.primary.opacity(0.07), .secondary, false)
             case .needsApproval: return (tint, Palette.onTool(session.tool), false)
             case .yourTurn:
                 switch session.outcome {
@@ -212,8 +234,10 @@ struct StatePill: View {
             Text(RunText.stateWord(session, now: now))
                 .font(.system(size: 9.5, weight: .bold))
                 .tracking(0.6)
-            Text(RunText.stateTime(session, now: now))
-                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+            if session.state != .unknown {
+                Text(RunText.stateTime(session, now: now))
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+            }
         }
         .foregroundStyle(style.text)
         .padding(.horizontal, 7)
@@ -233,7 +257,7 @@ struct LiveLine: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if session.native != nil {
+            if session.native != nil || session.state == .unknown {
                 Text(RunText.liveText(session, now: now)).foregroundStyle(.secondary).lineLimit(1)
             } else {
                 hookLine
@@ -244,6 +268,8 @@ struct LiveLine: View {
 
     @ViewBuilder private var hookLine: some View {
             switch session.state {
+            case .unknown:
+                Text(RunText.liveText(session, now: now)).foregroundStyle(.secondary).lineLimit(1)
             case .needsApproval:
                 Text("wants to run").foregroundStyle(.secondary)
                 Text(session.approvalDetail ?? "a tool")
