@@ -395,25 +395,24 @@ private struct FloatingRow: View {
     var body: some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 8) {
-                RoundedRectangle(cornerRadius: 1.5).fill(Palette.tool(session.tool)).frame(width: 3)
+                AppIcon(bundleId: Jumper.hostBundle(for: session))
+                    .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(session.title).font(AppTypography.compactTitle).lineLimit(1)
                         Spacer(minLength: 4)
                         Color.clear.frame(width: RemoveZone.slot, height: 18)
                     }
-                    Text(RunText.liveText(session, now: now))
-                        .font(AppTypography.body)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                     HStack {
                         StatePill(session: session, now: now)
                         Spacer(minLength: 0)
                     }
-                    .padding(.top, 3)
+                    if let detail = CompactRunDetail.resolve(session, now: now) {
+                        CompactRunDetailLine(detail: detail)
+                    }
                 }
             }
-            .padding(.horizontal, 8).padding(.vertical, 8)
+            .padding(.horizontal, 8).padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
@@ -421,7 +420,7 @@ private struct FloatingRow: View {
         .overlay(alignment: .topTrailing) {
             if hovering {
                 RemoveZone(label: "Remove \(session.title) from the list", action: remove)
-                    .padding(.top, 8 + 9 - RemoveZone.size.height / 2)
+                    .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
                     .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
         }

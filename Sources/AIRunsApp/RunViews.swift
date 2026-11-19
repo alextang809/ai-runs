@@ -4,12 +4,10 @@ import SwiftUI
 
 // MARK: - Session row
 
-/// One run: where it lives (app icon + words), its state as a word with a
-/// time, what it is doing now, and its last hour as a lifeline. Everything
-/// important is visible without hovering; hovering adds the details flyout.
+/// One run: its real host icon, title, state and elapsed time. Only an actual
+/// approval, input question or current plan adds a line; hover reveals evidence.
 struct SessionRow: View {
     let session: Session
-    let lifeline: [ActivitySpan]
     let now: Date
     /// Titles of other runs working in the same repository right now.
     var alsoHere: [String] = []
@@ -29,7 +27,7 @@ struct SessionRow: View {
             HStack(alignment: .top, spacing: 10) {
                 AppIcon(bundleId: Jumper.hostBundle(for: session))
                     .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         Text(session.title)
                             .font(AppTypography.rowTitle)
@@ -39,20 +37,12 @@ struct SessionRow: View {
                         Color.clear.frame(width: RemoveZone.slot, height: 18)
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(RunText.place(session))
-                            .font(AppTypography.metadata)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
                         StatePill(session: session, now: now)
+                        Spacer(minLength: 0)
                     }
-                    HStack(spacing: 10) {
-                        LiveLine(session: session, now: now)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        LifelineView(spans: lifeline, now: now, color: Palette.tool(session.tool))
-                            .frame(width: 104, height: 9)
+                    if let detail = CompactRunDetail.resolve(session, now: now) {
+                        CompactRunDetailLine(detail: detail)
                     }
-                    .padding(.top, 2)
                     if let warning = RunText.alsoHere(alsoHere) {
                         Label(warning, systemImage: "arrow.triangle.branch")
                             .font(AppTypography.metadata)
@@ -64,7 +54,7 @@ struct SessionRow: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 9)
+            .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
@@ -72,7 +62,7 @@ struct SessionRow: View {
         .overlay(alignment: .topTrailing) {
             if highlighted {
                 RemoveZone(label: "Remove \(session.title) from the list", action: remove)
-                    .padding(.top, 9 + 9 - RemoveZone.size.height / 2)
+                    .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
                     .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
         }
@@ -85,6 +75,7 @@ struct SessionRow: View {
             Button("Remove from List", action: remove)
         }
         .onHover { inside in inside ? ui.hoverOn(key) : ui.hoverOff() }
+        .help(RunText.place(session))
         .reportFrame(key.key)
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
@@ -527,7 +518,7 @@ struct SectionLabel: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Text(title.uppercased()).font(AppTypography.section).tracking(0.4)
+            Text(title).font(AppTypography.section)
             Text("\(count)").font(AppTypography.elapsed)
         }
         .foregroundStyle(.secondary)

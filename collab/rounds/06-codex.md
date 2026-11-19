@@ -1,54 +1,52 @@
-# Round 6 — native glass UI
+# Round 6 — frosted surfaces and compact menus
 
 ## Did
 
-- Refined the selected design toward stronger frosting and a consistent SF type
-  hierarchy, using the ECC liquid-glass-design, design-system, and swiftui-patterns
-  skills. Added a regular-material backdrop beneath the native glass rim and
-  a restrained semantic wash; text and controls remain unblurred.
-- Added AppTypography roles: 17-point app title, 13–13.5-point row titles,
-  12-point body, 11.5-point metadata, 10.5-point state labels, and 24-point
-  aligned metric digits. Reduced state-label tracking and moved badges below
-  titles to preserve title width. Compact lists scroll after five rows.
-- Re-rendered light/dark previews with long English and Chinese titles.
-  Final refinement: 183 local tests and optimized Release build passed.
-  The user requested manual local build/install commands for this refinement;
-  installation is not performed automatically.
-- Drafted a shared native glass surface for the menu, floating capsule/card,
-  flyouts, toast, and settings. Tool colors and state labels remain intact.
-- Used macOS 26 Liquid Glass with compiler/runtime guards and a macOS 14/15
-  visual-effect fallback. Reduce Transparency selects an opaque system surface;
-  Increased Contrast adds a stronger neutral edge.
-- Added larger header hit areas, softer row corners, menu action symbols, and
-  a bounded scrollable settings window. Floating-panel persistence is untouched.
-- Rendered real-size light/dark native previews with fictitious sessions using
-  only the preview process's own window. No AppModel was initialized.
-  The renderer is reproducible with `Scripts/probe/glass-preview.swift`.
+- Shared native glass and frosted fallbacks cover outer surfaces. macOS 26 uses
+  regular material beneath the Liquid Glass rim; macOS 14/15 use visual effects.
+  Reduce Transparency is opaque; Increased Contrast adds a neutral edge.
+- Simplified the main menu after Alex reviewed the real-size preview: real host
+  icon, full-width title, state and duration. Removed visible source/project
+  subtitles, the dashboard, per-row history bars and legend. Done and Ignored
+  start collapsed. Removed Pinned from the main menu; the floating window keeps
+  its Pinned tab. The compact footer offers Floating Window, Settings and More.
+- Main menu typography uses regular SF weights, with 13.5-point row titles,
+  12-point body and 10.5-point state labels. Vertical row padding is six points.
+  Only an actual approval target, input question or current valid plan adds a
+  line; ordinary tool activity remains in the hover details.
+- Bounded the session list and detail flyouts to the menu screen's available
+  height. Long content scrolls; short menus shrink naturally. Collapsing a group
+  cancels pending flyouts. Floating-panel persistence and focus behavior remain
+  unchanged.
+- Updated both READMEs and the main menu illustration using fictitious sessions.
 
 ## Found
 
-- NSView bitmap caching omits the native glass compositor effect; current-process
-  ScreenCaptureKit capture correctly renders the dedicated synthetic window.
-- Material-policy regressions passed after their initial RED result. The final
-  integration run passed 183 Swift tests. A real native-panel probe
-  passed button clicks and text-field focus through the glass layer; the probe is
-  saved as `Scripts/probe/glass-interaction.swift`. A synchronous NSEvent XCTest
-  harness was discarded because AppKit mouse tracking was unreliable under XCTest;
-  no hanging or flaky test was retained. The final optimized Release build passed.
-- Swift 6.1/macOS 15 compatibility is guarded in source; hosted dual-platform
-  CI has not been run for this unsubmitted UI draft.
+- The latest full local run passed 195 Swift tests, including new compact-detail,
+  flyout-boundary and pending-hover regressions. Optimized Release builds and the
+  signing-script suite (59 checks) passed.
+- Synthetic native checks used the actual menu views with a fake model, never
+  the real AppModel. Two working sessions fit naturally at 259 points; 24 rows
+  respect a 400-point screen budget with the footer visible. Reducing the same
+  model from 24 rows to two shrinks the window immediately. Done expansion and
+  collapse also resize correctly. Light/dark and actionable-detail captures use
+  only the preview process's own window and made-up content.
+- Existing surface previews and interaction probes remain in Scripts/probe.
+  GitHub CI must pass on macOS 15 and 26 for the final PR head before merge.
 
 ## Ideas
 
-- Use regular glass for text-rich outer surfaces and avoid glass per row.
-- Keep semantic foreground colors, opaque accessibility fallback, and existing
-  tool/state distinctions instead of adding decorative colors.
+- Keep the menu focused on sessions and decisions; source metadata belongs in
+  details, and pinned notes belong in the floating window.
+- Preserve tool colors and explicit unknown/stale labels rather than inferring
+  state or progress from timing.
 
 ## Asks
 
-- Native glass preview selected for local installation after review; GitHub submission is a separate step.
+- None. Alex approved submission and merge, then refined the compact layout,
+  removed the Pinned menu section and requested regular menu font weights.
 
 ## Needs from Alex
 
-- None for local installation: Alex selected the rendered native glass proposal.
-  The preview checkpoint from the round-five brief has been satisfied.
+- Run the supplied local build/install commands when ready. The compact version
+  is not automatically installed. The separate timeline branch is untouched.

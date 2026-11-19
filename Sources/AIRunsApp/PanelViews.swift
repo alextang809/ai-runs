@@ -7,6 +7,10 @@ enum PanelLayout {
     static let flyoutWidth: CGFloat = 284
     static let gap: CGFloat = 8
     static let outerPadding: CGFloat = 14
+
+    static func flyoutOffset(rowTop: CGFloat, flyoutHeight: CGFloat, maximumHeight: CGFloat) -> CGFloat {
+        min(max(0, rowTop), max(0, maximumHeight - flyoutHeight))
+    }
 }
 
 /// Colour means "which tool": Claude's clay and Codex's ink (OpenAI's black,
@@ -68,6 +72,7 @@ struct PanelRootView: View {
         }
         .padding(PanelLayout.outerPadding)
         .coordinateSpace(name: "panel")
+        .environment(\.flyoutHeightLimit, ui.menuHeightLimit)
         .onPreferenceChange(RowFramePreference.self) { frames in
             if ui.rowFrames != frames { ui.rowFrames = frames }
         }
@@ -78,9 +83,12 @@ struct PanelRootView: View {
         ZStack(alignment: .topTrailing) {
             Color.clear.frame(width: PanelLayout.flyoutWidth, height: 1)
             if let target = ui.hover, let frame = ui.rowFrames[target.key] {
-                flyout(for: target)
-                    .padding(.top, max(0, frame.minY - PanelLayout.outerPadding - 6))
-                    .onHover { inside in inside ? ui.keepHover() : ui.hoverOff() }
+                PositionedFlyout(rowTop: frame.minY - PanelLayout.outerPadding - 6,
+                                 maximumHeight: ui.menuHeightLimit) {
+                    flyout(for: target)
+                }
+                .id(target.key)
+                .onHover { inside in inside ? ui.keepHover() : ui.hoverOff() }
             }
         }
     }
@@ -109,165 +117,6 @@ struct PanelSurface<Content: View>: View {
 }
 
 // MARK: - Menu column
-
-struct MenuColumn: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject var ui: PanelUIState
-    let actions: PanelActions
-
-    var body: some View {
-        PanelSurface {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                SeparatorLine()
-                activeSection
-                SeparatorLine()
-                PinnedSection(model: model, ui: ui, actions: actions)
-                SeparatorLine()
-                bottomMenu
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Image(nsImage: Icons.statusImage(Icons.Status(store: model.store)))
-                    .accessibilityHidden(true)
-                Text("AI Runs").font(AppTypography.appTitle)
-                Spacer()
-                if let message = model.message {
-                    Text(message)
-                        .font(AppTypography.metadata)
-                        .foregroundStyle(Color.secondary)
-                        .lineLimit(1)
-                    if model.undo != nil {
-                        Button("Undo") { model.performUndo() }
-                            .buttonStyle(.plain)
-                            .font(AppTypography.section)
-                            .foregroundStyle(Color.primary)
-                            .keyboardShortcut("z", modifiers: .command)
-                    }
-                }
-                RefreshButton(model: model)
-                    .padding(.leading, 4)
-            }
-            HeaderDashboard(needs: model.store.needsUserCount, working: model.store.workingCount,
-                            stats: model.store.stats(now: model.now))
-            ForEach(model.silentTools, id: \.self) { tool in
-                Text(silentHint(tool))
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(Palette.tool(tool))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            ThreadsHint(model: model)
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 9)
-        .padding(.bottom, 8)
-        .contentShape(Rectangle())
-        .onHover { if $0 { ui.hoverOff() } }
-    }
-
-    private func silentHint(_ tool: AgentTool) -> String {
-        switch tool {
-        case .codex: return "Codex hasn’t reported yet — approve the AI Runs hooks in Codex."
-        case .claudeCode: return "Claude Code hasn’t reported yet — start or continue a session."
-        case .chatgpt, .claudeWeb: return ""
-        }
-    }
-
-    @ViewBuilder private var activeSection: some View {
-        let sessions = model.store.ordered()
-        let overlap = Overlap.sameRepo(sessions)
-        VStack(alignment: .leading, spacing: 0) {
-            if sessions.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(model.needsHookSetup
-                         ? "Set up hooks so Claude Code and Codex sessions show up here."
-                         : "Nothing running. Start a session in Claude Code or Codex and it shows up here.")
-                        .font(AppTypography.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if model.needsHookSetup {
-                        Button("Set Up Hooks…") { actions.showSettings() }
-                            .controlSize(.small)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-            } else {
-                let needs = sessions.filter { $0.needsUser }
-                let working = sessions.filter { $0.state == .working }
-                let unknown = sessions.filter { $0.state == .unknown }
-                let done = sessions.filter { $0.isDone }
-                let ignored = sessions.filter { $0.isIgnored }
-                if !needs.isEmpty {
-                    SectionLabel(title: "Needs you", count: needs.count)
-                    rows(needs, overlap: overlap)
-                }
-                if !working.isEmpty {
-                    SectionLabel(title: "Working", count: working.count)
-                    rows(working, overlap: overlap)
-                }
-                if !unknown.isEmpty {
-                    SectionLabel(title: "State unknown", count: unknown.count)
-                    rows(unknown, overlap: overlap)
-                }
-                if !done.isEmpty {
-                    SectionLabel(title: "Done", count: done.count)
-                    rows(done, overlap: overlap)
-                }
-                if !ignored.isEmpty {
-                    SectionLabel(title: "Ignored", count: ignored.count)
-                    rows(ignored, overlap: overlap)
-                }
-                LifelineLegend()
-            }
-        }
-        .padding(.vertical, 3)
-    }
-
-    private func rows(_ sessions: [Session], overlap: [String: [Session]]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(sessions) { session in
-                SessionRow(session: session, lifeline: model.store.lifeline(for: session.id, now: model.now),
-                           now: model.now, alsoHere: (overlap[session.id] ?? []).map(\.title), ui: ui,
-                           rename: { actions.renameSession(session.id) },
-                           pin: { model.pin(sessionId: session.id) },
-                           remove: {
-                               ui.hover = nil
-                               model.remove(sessionId: session.id)
-                           },
-                           ignore: ignoreAction(for: session)) {
-                    actions.closePanel()
-                    model.open(sessionId: session.id)
-                }
-            }
-        }
-        .padding(.horizontal, 5)
-    }
-
-    private func ignoreAction(for session: Session) -> (() -> Void)? {
-        guard RunText.canIgnore(session) else { return nil }
-        let id = session.id, ignored = session.isIgnored
-        return { model.setIgnored(sessionId: id, !ignored) }
-    }
-
-    private var bottomMenu: some View {
-        VStack(spacing: 0) {
-            MenuRow(title: "Pin Front AI Window", systemImage: "pin") { model.pinFrontWindow() }
-            MenuRow(title: ui.boardVisible ? "Hide Floating Window" : "Show Floating Window", systemImage: "rectangle.on.rectangle") { actions.toggleBoard() }
-            MenuRow(title: "Hooks & Settings…", systemImage: "slider.horizontal.3") { actions.showSettings() }
-            MenuRow(title: "Quit AI Runs", shortcut: "⌘Q", systemImage: "power") { NSApp.terminate(nil) }
-        }
-        .padding(.horizontal, 5)
-        .padding(.vertical, 3)
-        .onHover { if $0 { ui.hoverOff() } }
-    }
-}
 
 struct SeparatorLine: View {
     var body: some View {
@@ -401,15 +250,6 @@ struct PinnedSection: View {
                 .padding(.bottom, 6)
             }
 
-            if groups.isEmpty && stale.isEmpty && !ui.addingNote {
-                Text("Nothing pinned yet. Pin a session from its details, or use “Pin Front AI Window” below.")
-                    .font(AppTypography.body)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 9)
-                    .padding(.bottom, 6)
-            }
-
             ForEach(groups, id: \.name) { group in
                 GroupHeader(name: group.name, count: group.cards.count,
                             collapsed: ui.collapsed.contains(group.name)) { ui.toggle(group: group.name) }
@@ -486,9 +326,12 @@ struct FlyoutAction: Identifiable {
 
 struct FlyoutSurface<Content: View>: View {
     @ViewBuilder var content: Content
+    @Environment(\.flyoutHeightLimit) private var maximumHeight
     var body: some View {
         GlassSurface(cornerRadius: 16) {
-            content.frame(width: PanelLayout.flyoutWidth, alignment: .leading)
+            FittedVerticalScroll(maximumHeight: maximumHeight) {
+                content.frame(width: PanelLayout.flyoutWidth, alignment: .leading)
+            }
         }
     }
 }

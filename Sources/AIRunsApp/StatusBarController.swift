@@ -150,6 +150,9 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
             // No visible icon to hang from: open at the top-right of the screen.
             anchorTopRight = NSPoint(x: screenFrame.maxX - 4, y: screenFrame.maxY - 2)
         }
+        if let anchor = anchorTopRight, screenFrame.height > 0 {
+            ui.menuHeightLimit = max(1, anchor.y - screenFrame.minY - 2 * PanelLayout.outerPadding - 4)
+        }
         placePanel()
         panel.makeKeyAndOrderFront(nil)
         installMonitors()
@@ -319,6 +322,10 @@ final class PanelUIState: ObservableObject {
     @Published var hover: Target?
     @Published var rowFrames: [String: CGRect] = [:]
     @Published var collapsed: Set<String> = [PanelUIState.staleGroup]
+    @Published var expandedDone = false
+    @Published var expandedIgnored = false
+    /// Available height below the menu-bar anchor, excluding the outer shadow margin.
+    @Published var menuHeightLimit: CGFloat = 600
     @Published var addingNote = false
     @Published var draft = ""
     @Published var boardVisible = false
@@ -356,10 +363,15 @@ final class PanelUIState: ObservableObject {
 
     func keepHover() { clearWork?.cancel() }
 
-    func reset() {
+    /// A collapsed section must not receive a previously scheduled flyout.
+    func cancelHover() {
         clearWork?.cancel()
         switchWork?.cancel()
         hover = nil
+    }
+
+    func reset() {
+        cancelHover()
         addingNote = false
         draft = ""
     }
