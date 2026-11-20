@@ -54,6 +54,15 @@ struct MenuColumn: View {
                 .frame(height: sessionHeight)
                 VStack(spacing: 0) {
                     SeparatorLine()
+                    MenuQuickActions(manager: model.accounts,
+                                     openAccounts: { actions.showAccounts() },
+                                     openUsage: { actions.showUsageDashboard() },
+                                     openStatus: { url in
+                                         actions.closePanel()
+                                         NSWorkspace.shared.open(url)
+                                     })
+                        .onHover { if $0 { ui.hoverOff() } }
+                    SeparatorLine()
                     bottomMenu
                 }
                 .menuHeight(.footer)
@@ -139,7 +148,7 @@ struct MenuColumn: View {
                     rows(menu.working, overlap: overlap)
                 }
             } else {
-                homeActions
+                idleActions
             }
             if !menu.unknown.isEmpty {
                 SectionLabel(title: "State unknown", count: menu.unknown.count)
@@ -171,11 +180,8 @@ struct MenuColumn: View {
         .padding(.vertical, 3)
     }
 
-    private var homeActions: some View {
+    private var idleActions: some View {
         VStack(spacing: 0) {
-            ObservedPlanEntry(manager: model.accounts, open: { actions.showAccounts() })
-            MenuRow(title: "Add Account…", systemImage: "plus") { actions.showAccounts() }
-            MenuRow(title: "Usage Dashboard", systemImage: "chart.bar") { actions.showUsageDashboard() }
             MenuRow(title: ui.boardVisible ? "Hide Floating Window" : "Show Floating Window",
                     systemImage: "rectangle.on.rectangle") { actions.toggleBoard() }
             if model.needsHookSetup {
@@ -265,10 +271,6 @@ struct MenuColumn: View {
             Button("Settings…") { actions.showSettings() }
                 .help("Hooks & Settings")
             Menu {
-                Button("Add Account…", systemImage: "plus") { actions.showAccounts() }
-                Button("Usage Dashboard", systemImage: "chart.bar") { actions.showUsageDashboard() }
-                Button("Plan Usage & Accounts…", systemImage: "person.crop.circle") { actions.showAccounts() }
-                Divider()
                 Button("Pin Front AI Window", systemImage: "pin") { model.pinFrontWindow() }
                 Button("About AI Runs", systemImage: "info.circle") { actions.showAbout() }
                 Divider()

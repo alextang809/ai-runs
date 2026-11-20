@@ -198,10 +198,10 @@ source is not shown as zero. Browser and cloud-only activity without supported
 local usage records is outside these totals. Removing a session from the menu
 does not remove its recorded usage.
 
-When no sessions are active, the menu becomes a usage home with **Add Account…**,
-**Usage Dashboard**, the floating-window control and settings. Completed and
-ignored sessions remain available under **Recent Sessions**; unknown states stay
-visible without being counted as active.
+**Add Account…**, **Usage Dashboard** and **Status Page** are always available
+from the main menu. When no sessions are active, completed and ignored sessions
+are available under **Recent Sessions**. Unknown states stay visible without
+being counted as active.
 
 **Add Account…** supports separate Codex and claude.ai subscription sign-ins and
 multiple named accounts. Install the provider's command-line app first. Each
