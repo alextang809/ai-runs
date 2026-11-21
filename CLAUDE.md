@@ -138,7 +138,12 @@ not conversation messages.
 The repo is public. Never commit conversation text, thread titles, prompts,
 anything read from `~/.claude`, `~/.codex` or `~/Library`, tokens, or personal
 paths beyond `~`. Describe formats with field names and made-up values. AI Runs
-itself makes no network requests.
+keeps session tracking and token-history processing local. Optional managed
+ChatGPT, Claude, and Qwen Subscription connections use isolated CLI profiles.
+DeepSeek and Qwen API connections
+store API keys in the macOS Keychain and query read-only endpoints over HTTPS.
+Account connections do not import native credentials or send conversations to
+an AI Runs service. Keep account quota distinct from recorded local token totals.
 
 ## Working with Codex
 

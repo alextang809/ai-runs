@@ -33,6 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusBar?.openPanel()
         return false
     }
+
+    func applicationWillTerminate(_ notification: Notification) { model?.stop() }
 }
 
 /// Small user preferences kept in UserDefaults.

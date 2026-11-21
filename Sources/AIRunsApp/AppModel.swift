@@ -16,6 +16,8 @@ final class AppModel: ObservableObject {
 
     let paths = AIRunsPaths()
     let installer = HookInstaller()
+    let usage = UsageMonitor()
+    let accounts = AccountManager()
     /// The app that was in front when the panel opened, for "Pin Front AI Window".
     var frontAppAtOpen: NSRunningApplication?
 
@@ -76,6 +78,8 @@ final class AppModel: ObservableObject {
     }
 
     func start() {
+        accounts.onProfilesChanged = { [weak usage] roots in usage?.includeManagedRoots(roots) }
+        accounts.start()
         readEvents()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.readEvents() }
@@ -181,8 +185,18 @@ final class AppModel: ObservableObject {
     /// The refresh button: hook events, the clock and Claude's Threads list
     /// right now, reading more of Claude's window than the regular look does.
     func refreshNow() {
+        usage.refreshNow()
+        accounts.refreshAll()
         refresh()
         readClaudeThreads(request: .refresh)
+    }
+
+    func stop() {
+        pollTimer?.invalidate()
+        clockTimer?.invalidate()
+        threadsTimer?.invalidate()
+        usage.stop()
+        accounts.stop()
     }
 
     /// Asks macOS for Accessibility (shows its prompt), then looks again.

@@ -20,9 +20,11 @@ them all in one list in your menu bar:
 - **Working** — running sessions, with elapsed time, readable activity and plan progress when available.
 - **Done** — finished sessions, shown below the active ones; fold the group when you want more room.
 
-Everything stays on your Mac. No account, no server, nothing is sent anywhere.
+Session tracking and token statistics stay on your Mac. Optional account
+connections communicate directly with providers. AI Runs has no server.
 
-> **Version 1.0.0.** For bugs and feature requests, see [Feedback](#feedback).
+> **Latest Mac release: 1.1.0.** The download includes local token usage and optional account connections.
+> For bugs and feature requests, see [Feedback](#feedback).
 
 ## Install
 
@@ -189,15 +191,77 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 - **Pin Front AI Window** (the **…** menu at the bottom of the panel): pins the browser tab or app you
   were just in to the board.
 
+## Token usage and accounts
+
+**Tokens · This Mac** shows recorded Codex and Claude Code usage. The default is
+the **last 24 hours**. You can also select Today (your local day), 7d, or 30d.
+Click a provider for input, output, cached reads/writes and model details, or open
+**Usage Dashboard**. Cached tokens are already included in input; reasoning is
+already included in output. They are not added to the total twice.
+
+The dashboard shows **Estimated Cost** above the token breakdown, with totals for
+Today, the selected rolling period, and 30d, plus a daily cost trend. The model
+table shows per-model estimates for the selected provider and period. The
+estimate applies public standard API list prices to recorded tokens, with
+short-context and default cache-write assumptions.
+Unpriced usage and incomplete scans are marked as partial. The estimate excludes
+subscription billing, tool fees and account-specific adjustments.
+Use the currency menu next to **Estimated Cost** to switch between USD, SGD,
+CNY and the other currencies published by the ECB. One dated reference rate
+converts all displayed periods and models. The app keeps the last retrieved
+rate for offline use and shows USD if the selected rate is unavailable.
+
+The initial scan runs in the background, then reads changed files incrementally.
+**Scanning**, **Partial** and **No local records** have distinct meanings. A missing
+source is not shown as zero. Browser and cloud-only activity without supported
+local usage records is outside these totals. Removing a session from the menu
+does not remove its recorded usage.
+
+**Add Account…** and **Usage Dashboard** are always available
+from the main menu. When no sessions are active, completed and ignored sessions
+are available under **Recent Sessions**. Unknown states stay visible without
+being counted as active.
+
+In **Add Account…**, choose a provider to start its sign-in. AI Runs supports
+separate ChatGPT (via Codex) and Claude subscription sign-ins and
+multiple named accounts. Install the provider's command-line app first. Each
+connection gets a private AI Runs profile; your existing terminal and desktop
+sign-ins are not switched. Accounts can be renamed, refreshed, reconnected or
+disconnected. Disconnecting preserves local history.
+
+Choose **Qwen Subscription** to sign in with a Qwen Plus or Pro account in your
+browser. This requires Qwen Code 0.28.0 or later. AI Runs uses a private CLI
+profile to verify the account and shows the plan when Qwen provides it.
+
+Choose **DeepSeek** or **Qwen API** to connect with an API key. DeepSeek shows the
+API balance. Qwen uses a standard pay-as-you-go key from Qwen AI Platform
+(China) or QwenCloud (Singapore) and shows the Qwen models returned by that
+platform. These connections query read-only endpoints and do not generate
+inference requests or track consumer chat subscriptions.
+
+**Accounts…** shows the connected account's available quota windows and reset
+times. Codex supplies these through its app server. Claude's documented sign-in
+commands do not provide standalone quota readings, so that connection shows its
+availability explicitly. Quota windows are separate from the selected token
+period, and this Mac's token totals are not attributed to a newly added account.
+
+<p align="center"><img src="docs/usage-home.png" width="384" alt="Usage home when no sessions are active"></p>
+<p align="center"><img src="docs/accounts.png" width="480" alt="Separate connected accounts and available plan windows"></p>
+<p align="center"><sub><i>Illustrations with fictitious accounts and usage.</i></sub></p>
+
 ## Privacy
 
-AI Runs only reads and writes files on your Mac:
+Session tracking and token history are processed locally:
 
 - It **adds hooks** to `~/.claude/settings.json` and `~/.codex/hooks.json`
   (only entries whose command contains `airuns-hook`; each file is backed up once
   as `*.airuns-backup`). Each hook appends one line to `~/.airuns/events.jsonl`.
 - It **reads thread names** from the Claude app's session list and from Codex's
   `~/.codex/state_5.sqlite` (read-only).
+- It reads supported local Codex and Claude usage logs without changing them.
+  Its private usage cache keeps counts, timestamps, model and request identities,
+  and complete-line checkpoints; it does not store conversation bodies or raw
+  transcript fragments.
 - The optional **browser extension** reads only chatgpt.com and claude.ai pages:
   the conversation's address and title, whether it is writing, your last message
   and the end of the reply. It hands them to AI Runs on this Mac through the
@@ -205,7 +269,11 @@ AI Runs only reads and writes files on your Mac:
 - On macOS 26 it may ask **Apple's on-device model** to name a session or judge
   a reply. That runs on your Mac.
 
-It makes no network requests.
+ChatGPT, Claude and Qwen Subscription connections run the provider CLI for sign-in and refresh.
+DeepSeek and Qwen API keys are stored in the macOS Keychain and sent over HTTPS
+to the selected provider. AI Runs does not import native login files or browser cookies. Account metadata and local
+usage caches live under `~/.airuns`. Conversations are not uploaded to an AI Runs
+service. Session tracking and local token statistics work without connecting an account.
 
 ## Feedback
 
@@ -219,7 +287,7 @@ Open an [issue](https://github.com/alextang809/ai-runs/issues) or just message m
 
 ## Uninstall
 
-1. Open AI Runs settings (**Settings…** in the panel) and click **Remove**
+1. Disconnect optional accounts in **Accounts…**, then open AI Runs settings (**Settings…** in the panel) and click **Remove**
    for Claude Code and for Codex.
    If you added the browser extension, remove it in your browser's extensions page.
 2. Quit AI Runs and drag it from Applications to the Trash.
