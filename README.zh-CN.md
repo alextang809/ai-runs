@@ -152,7 +152,7 @@ Windows 11 用户可从 [Windows 预发行页](https://github.com/alextang809/ai
 
 选择 **Qwen Subscription** 可以用 Qwen Plus 或 Pro 账号进行浏览器授权。需要 Qwen Code 0.28.0 或更新版本。AI Runs 通过独立的 CLI 配置验证登录，并显示千问返回的套餐。
 
-选择 **DeepSeek** 或 **Qwen API** 可用 API Key 连接。DeepSeek 显示 API 余额。千问支持国内千问 AI 平台和国际 QwenCloud（新加坡）的按量付费 Key，显示平台返回的千问模型。验证和刷新只调用只读接口，不发起推理请求，也不读取网页订阅额度。
+选择 **DeepSeek** 或 **Qwen API** 可用 API Key 连接。DeepSeek 显示 API 余额。千问支持千问 AI 平台（中国大陆）和 QwenCloud（新加坡）的按量付费 Key，显示平台返回的千问模型。验证和刷新只调用只读接口，不发起推理请求，也不读取网页订阅额度。
 
 **Accounts…** 显示已连接账号可取得的额度窗口和重置时间。Codex 通过 app server 提供；Claude 的公开登录命令不能独立读取额度时，会明确显示不可用。账号额度窗口和 token 的时间范围分开，本机 token 总量也不会直接归到新添加的账号上。
 

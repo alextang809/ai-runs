@@ -6,7 +6,7 @@ enum QwenAPIPlatform: String, CaseIterable, Codable, Sendable {
 
     var displayName: String {
         switch self {
-        case .china: return "Qwen AI Platform (China)"
+        case .china: return "Qwen AI Platform (Mainland China)"
         case .international: return "QwenCloud (Singapore)"
         }
     }

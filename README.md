@@ -235,7 +235,7 @@ profile to verify the account and shows the plan when Qwen provides it.
 
 Choose **DeepSeek** or **Qwen API** to connect with an API key. DeepSeek shows the
 API balance. Qwen uses a standard pay-as-you-go key from Qwen AI Platform
-(China) or QwenCloud (Singapore) and shows the Qwen models returned by that
+(Mainland China) or QwenCloud (Singapore) and shows the Qwen models returned by that
 platform. These connections query read-only endpoints and do not generate
 inference requests or track consumer chat subscriptions.
 
