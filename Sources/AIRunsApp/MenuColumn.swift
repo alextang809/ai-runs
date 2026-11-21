@@ -141,7 +141,7 @@ struct MenuColumn: View {
                     rows(menu.needs, overlap: overlap)
                 }
                 if !menu.working.isEmpty {
-                    SectionLabel(title: "Working", count: menu.working.count)
+                    SectionLabel(title: "Working", count: menu.working.count, showsTimeScale: true)
                     rows(menu.working, overlap: overlap)
                 }
             } else {
@@ -216,7 +216,9 @@ struct MenuColumn: View {
     private func rows(_ sessions: [Session], overlap: [String: [Session]]) -> some View {
         VStack(spacing: 0) {
             ForEach(sessions) { session in
-                SessionRow(session: session, lifeline: model.store.lifeline(for: session.id, now: model.now), now: model.now,
+                SessionRow(session: session,
+                           lifeline: session.isDone ? [] : model.store.lifeline(for: session.id, now: model.now),
+                           completedWorkDuration: model.store.completedWorkDuration(for: session.id), now: model.now,
                            alsoHere: (overlap[session.id] ?? []).map(\.title), ui: ui,
                            rename: { actions.renameSession(session.id) },
                            pin: { model.pin(sessionId: session.id) },

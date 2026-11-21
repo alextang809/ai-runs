@@ -9,6 +9,7 @@ import SwiftUI
 struct SessionRow: View {
     let session: Session
     let lifeline: [ActivitySpan]
+    let completedWorkDuration: TimeInterval?
     let now: Date
     /// Titles of other runs working in the same repository right now.
     var alsoHere: [String] = []
@@ -22,6 +23,7 @@ struct SessionRow: View {
 
     private var key: PanelUIState.Target { .session(session.id) }
     private var highlighted: Bool { ui.hover == key }
+    private var workDuration: String? { completedWorkDuration.map(RunText.workDuration) }
 
     var body: some View {
         Button(action: open) {
@@ -44,10 +46,15 @@ struct SessionRow: View {
                     HStack(spacing: 10) {
                         LiveLine(session: session, now: now)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        // Requests get the full line; history must not squeeze their target.
-                        if session.state != .needsApproval && session.outcome != .needsInput {
+                        if let workDuration {
+                            Text("Worked \(workDuration)")
+                                .font(AppTypography.elapsed)
+                                .foregroundStyle(.secondary)
+                                .fixedSize()
+                                .help("Observed working time in the last completed turn")
+                        } else if !session.isDone && session.state != .needsApproval && session.outcome != .needsInput {
                             LifelineView(spans: lifeline, now: now, color: Palette.tool(session.tool))
-                                .frame(width: 104, height: 9)
+                                .frame(width: LifelineView.compactWidth, height: 9)
                                 .help("Observed activity over the last hour")
                         }
                     }
@@ -88,7 +95,7 @@ struct SessionRow: View {
         .reportFrame(key.key)
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
-        .accessibilityLabel("\(session.title), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
+        .accessibilityLabel("\(session.title), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(workDuration.map { ". Observed working time, \($0)" } ?? "")\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
         .accessibilityAddTraits(.isButton)
     }
 }
@@ -152,6 +159,12 @@ enum RunText {
             if session.isInBackground { return "BACKGROUND" }
             return session.isQuiet(now: now) ? "NO UPDATE" : "WORKING"
         }
+    }
+
+    static func workDuration(_ seconds: TimeInterval) -> String {
+        if seconds < 1 { return "<1s" }
+        if seconds < 60 { return "\(Int(seconds))s" }
+        return TextUtils.duration(seconds)
     }
 
     static func stateTime(_ session: Session, now: Date) -> String {
@@ -363,7 +376,7 @@ struct LifelineView: View {
     /// The tool's colour: solid while working, faded and outlined while it
     /// waits on the user, grey in the background.
     let color: Color
-    var window: TimeInterval = 3600
+    static let compactWidth: CGFloat = 104
 
     var body: some View {
         Canvas { context, size in
@@ -373,6 +386,7 @@ struct LifelineView: View {
             line.addLine(to: CGPoint(x: size.width, y: mid))
             context.stroke(line, with: .color(.secondary.opacity(0.45)), style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
 
+            let window = SessionStore.lifelineWindow
             let start = now.addingTimeInterval(-window)
             for span in spans {
                 let from = max(span.start, start), to = min(span.end(or: now), now)
@@ -549,53 +563,41 @@ private struct Histogram: View {
 struct SectionLabel: View {
     let title: String
     let count: Int
+    var showsTimeScale = false
 
     var body: some View {
         HStack(spacing: 5) {
             Text(title).font(AppTypography.section)
             Text("\(count)").font(AppTypography.elapsed)
+            if showsTimeScale {
+                Spacer(minLength: 4)
+                LifelineTimeScale()
+            }
         }
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 14)
+        .padding(.leading, 14)
+        .padding(.trailing, 13)
         .padding(.top, 7)
         .padding(.bottom, 1)
     }
 }
 
-struct LifelineLegend: View {
+private struct LifelineTimeScale: View {
+    private let minutes = Int(SessionStore.lifelineWindow / 60)
+
     var body: some View {
-        HStack(spacing: 7) {
-            swatch(Palette.claude, "Claude")
-            swatch(Palette.codex, "Codex")
-            Text("·")
-            bar(filled: true, "working")
-            bar(filled: false, "waiting on you")
-            Spacer(minLength: 4)
-            Text("last 60 min")
+        HStack(spacing: 5) {
+            Text("−\(minutes)m")
+            Spacer(minLength: 0)
+            Image(systemName: "arrow.right")
+                .accessibilityHidden(true)
+            Spacer(minLength: 0)
+            Text("Now")
         }
-        .font(AppTypography.metadata)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .padding(.horizontal, 14)
-        .padding(.top, 2)
-        .padding(.bottom, 6)
-    }
-
-    private func swatch(_ color: Color, _ label: String) -> some View {
-        HStack(spacing: 4) {
-            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 6)
-            Text(label)
-        }
-    }
-
-    private func bar(filled: Bool, _ label: String) -> some View {
-        HStack(spacing: 4) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color.secondary.opacity(filled ? 0.9 : 0.25))
-                .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Color.secondary, lineWidth: filled ? 0 : 1))
-                .frame(width: 10, height: 6)
-            Text(label)
-        }
+        .font(AppTypography.section)
+        .frame(width: LifelineView.compactWidth)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Activity timeline, \(minutes) minutes ago to now")
     }
 }
 

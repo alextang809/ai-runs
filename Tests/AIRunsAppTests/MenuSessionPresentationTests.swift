@@ -13,6 +13,13 @@ final class MenuSessionPresentationTests: XCTestCase {
         return try XCTUnwrap(store.sessions[Session.key(tool: .codex, sessionId: id)])
     }
 
+    func testObservedWorkUsesDurationLabelsEvenForShortTurns() {
+        XCTAssertEqual(RunText.workDuration(0.5), "<1s")
+        XCTAssertEqual(RunText.workDuration(12.9), "12s")
+        XCTAssertEqual(RunText.workDuration(60), "1m")
+        XCTAssertEqual(RunText.workDuration(3_901), "1h 05m")
+    }
+
     func testNoSessionsUsesHomeWithoutInventingActivity() {
         let menu = MenuSessionPresentation(sessions: [])
         XCTAssertFalse(menu.hasActiveSessions)

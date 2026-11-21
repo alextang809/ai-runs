@@ -117,10 +117,26 @@ extension SessionStore {
         history = all
     }
 
+    public static let lifelineWindow: TimeInterval = 60 * 60
+
     /// The last `window` of a session's lifeline.
-    public func lifeline(for id: String, now: Date, window: TimeInterval = 3600) -> [ActivitySpan] {
+    public func lifeline(for id: String, now: Date, window: TimeInterval = SessionStore.lifelineWindow) -> [ActivitySpan] {
         let from = now.addingTimeInterval(-window)
         return (history?[id] ?? []).filter { $0.end(or: now) > from }
+    }
+
+    /// Observed active work in the latest completed turn, even after it leaves the rolling lifeline.
+    public func completedWorkDuration(for id: String) -> TimeInterval? {
+        guard let session = sessions[id], session.isDone, let end = session.waitingSince,
+              session.turnStartedAt < end, let spans = history?[id] else { return nil }
+
+        let working = spans.filter { $0.kind == .working }.sorted { $0.start < $1.start }
+        let observed = working.reduce((end: session.turnStartedAt, duration: 0.0)) { partial, span in
+            let duration = span.overlap(from: partial.end, to: end, now: end)
+            guard duration > 0 else { return partial }
+            return (min(span.end(or: end), end), partial.duration + duration)
+        }
+        return observed.duration.isFinite && observed.duration > 0 ? observed.duration : nil
     }
 
     public func stats(now: Date, calendar: Calendar = .current) -> ActivityStats {
