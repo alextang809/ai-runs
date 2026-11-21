@@ -23,7 +23,7 @@ them all in one list in your menu bar:
 Session tracking and token statistics stay on your Mac. Optional account
 connections communicate directly with providers. AI Runs has no server.
 
-> **Latest release: 1.0.1.** The usage/account features below require a source build until the next release.
+> **Latest Mac release: 1.1.0.** The download includes local token usage and optional account connections.
 > For bugs and feature requests, see [Feedback](#feedback).
 
 ## Install
