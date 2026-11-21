@@ -35,6 +35,12 @@
 
 Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 
+### Windows 预览版
+
+Windows 11 用户可从 [Windows 预发行页](https://github.com/alextang809/ai-runs/releases/tag/windows-preview-v0.1.0-preview.1) 下载 x64 或 ARM64 便携 ZIP。
+解压整个 ZIP 后运行 `AIRuns.exe`，即可进入样本工作区。
+预览版尚未签名。发布页提供 SHA-256 校验文件和可选的 WSL2 引擎试用说明。
+
 ## 设置（2 分钟）
 
 第一次打开时，AI Runs 会自动弹出设置窗口。以后想再打开，点菜单栏图标（或按 ⌥⌘A），在面板最下面选 **Settings…**。
