@@ -40,6 +40,13 @@ You need a Mac with Apple silicon (M1 or later) and macOS 14 or later.
 
 On an Intel Mac, [build it from source](#build-from-source).
 
+### Windows preview
+
+For Windows 11, get the x64 or ARM64 portable ZIP from the [Windows preview release](https://github.com/alextang809/ai-runs/releases/tag/windows-preview-v0.1.0-preview.1).
+Extract the entire ZIP and run `AIRuns.exe` to try the sample workspace.
+The preview is unsigned. The release page includes SHA-256 checksums and
+instructions for the optional WSL2 engine trial.
+
 ## Set up (2 minutes)
 
 AI Runs opens its settings on first launch. To open them again later, click the
