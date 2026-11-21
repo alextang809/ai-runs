@@ -133,6 +133,17 @@ not conversation messages.
 - "Ignore for Now" on a run that waits on you (not on APPROVE): the row stays,
   in an Ignored section, without counting or reminding, until the run moves on.
 
+## Context and diagnostics
+
+- Start with targeted searches. Read the callers, state transitions, and tests
+  needed to explain the behavior you are changing.
+- Keep tool output focused on relevant evidence. For transcript and hook
+  debugging, use synthetic fixtures and show only the fields needed to diagnose
+  the issue.
+- Run focused tests for fast feedback, then complete the verification required by
+  the change. Record findings, test results, and remaining uncertainty in the
+  current `collab/rounds/` note when handing off.
+
 ## Privacy
 
 The repo is public. Never commit conversation text, thread titles, prompts,
