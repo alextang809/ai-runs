@@ -5,6 +5,8 @@ import Foundation
 
 protocol AccountConnecting: Actor {
     func connect(onAuthorization: @escaping @Sendable (URL) -> Void) async throws -> AccountConnectionResult
+    func connect(_ credentials: APIAccountCredentials,
+                 authorizeSave: @escaping @Sendable () async throws -> Void) async throws -> AccountConnectionResult
     func refresh() async throws -> AccountConnectionResult
     func cancel() async
     func disconnect() async throws
@@ -14,6 +16,11 @@ protocol AccountConnecting: Actor {
 extension ManagedAccountClient: AccountConnecting {}
 
 extension AccountConnecting {
+    func connect(_ credentials: APIAccountCredentials,
+                 authorizeSave: @escaping @Sendable () async throws -> Void) async throws -> AccountConnectionResult {
+        throw APIAccountError.invalidKey
+    }
+
     func submitCode(_ code: String) async throws { throw AccountActionError.codeUnavailable }
 }
 
@@ -48,10 +55,12 @@ private enum AccountActionError: Error { case codeUnavailable, profileMismatch }
 /// browser sign-in is entered exclusively by explicit Add or Reconnect actions.
 @MainActor
 final class AccountManager: ObservableObject {
-    typealias ClientFactory = @Sendable (ManagedAccount, URL) -> any AccountConnecting
+    typealias ClientFactory = @Sendable (ManagedAccount, URL?) -> any AccountConnecting
     @Published private(set) var accounts: [ManagedAccount] = []
     @Published private(set) var states: [UUID: AccountRowState] = [:]
     @Published private(set) var connectingID: UUID?
+    private(set) var connectingProvider: AccountProvider?
+    @Published private(set) var committingAPIKey = false
     @Published private(set) var message: String?
     @Published private(set) var isLoaded = false
     @Published private(set) var loadError: String?
@@ -77,7 +86,13 @@ final class AccountManager: ObservableObject {
     init(paths: AIRunsPaths = AIRunsPaths(), store: (any AccountPersisting)? = nil,
          makeClient: ClientFactory? = nil, openAuthorization: (@MainActor (URL) -> Void)? = nil) {
         self.store = store ?? AccountPersistence(root: paths.root.appendingPathComponent("accounts"))
-        self.makeClient = makeClient ?? { ManagedAccountClient(account: $0, profileURL: $1) }
+        self.makeClient = makeClient ?? { account, profile in
+            if let profile {
+                if account.provider == .qwenSubscription { return QwenSubscriptionClient(account: account, profile: profile) }
+                return ManagedAccountClient(account: account, profileURL: profile)
+            }
+            return APIAccountClient(account: account)
+        }
         self.openAuthorization = openAuthorization ?? { NSWorkspace.shared.open($0) }
     }
 
@@ -102,7 +117,7 @@ final class AccountManager: ObservableObject {
         loadTask?.cancel(); loadTask = nil
         refreshTask?.cancel(); refreshTask = nil
         timerTask?.cancel(); timerTask = nil
-        cancelLogin()
+        cancelLogin(force: true)
         for client in clients.values { Task { await client.cancel() } }
         operations = [:]
     }
@@ -174,62 +189,79 @@ final class AccountManager: ObservableObject {
             setState(id, refreshedState(result, previous: previous, priorAccount: account))
         } catch {
             guard active(id: id, operation: operation, generation: current) else { return }
+            if error as? ManagedAccountClientError == .notSignedIn || error as? APIAccountError == .missingKey {
+                setState(id, .init(status: .disconnected, note: "Reconnect to refresh this account."))
+                return
+            }
             setState(id, .init(status: previous?.updatedAt == nil ? .failed : .stale,
                                windows: previous?.windows ?? [], updatedAt: previous?.updatedAt,
-                               note: previous?.updatedAt == nil ? "Usage is unavailable. Try refreshing or reconnecting."
-                                  : "Couldn’t refresh. Showing the last successful reading."))
+                               note: (error as? APIAccountError)?.localizedDescription
+                                   ?? (previous?.updatedAt == nil ? "Usage is unavailable. Try refreshing or reconnecting."
+                                       : "Couldn’t refresh. Showing the last successful reading.")))
         }
     }
 
-    func add(provider: AccountProvider, label: String) async {
+    func add(provider: AccountProvider, label: String, credentials: APIAccountCredentials? = nil) async {
         guard canEdit(), connectingID == nil else { return }
         guard validLabel(label) else { message = "Use an account name of 128 characters or fewer."; return }
         let account = ManagedAccount(provider: provider, label: label)
-        let attempt = beginSignIn(account.id)
+        let attempt = beginSignIn(account)
         let current = generation
         do {
             await acquireMetadata()
             do {
                 defer { releaseMetadata() }
                 guard loginAttempt == attempt, generation == current else { return }
-                _ = try await store.profileURL(for: account)
+                if !provider.usesAPIKey { _ = try await store.profileURL(for: account) }
                 let updated = accounts + [account]
                 try await save(updated)
                 accounts = updated
             }
             await publishProfileRoots(generation: current)
             guard loginAttempt == attempt, generation == current else { return }
-            await connect(account, attempt: attempt, generation: current)
+            await connect(account, credentials: credentials, attempt: attempt, generation: current)
         } catch {
             guard loginAttempt == attempt, generation == current else { return }
             finishSignIn(account.id, state: .init(status: .failed, note: safeSignInError(error)))
         }
     }
 
-    func reconnect(id: UUID) async {
+    func reconnect(id: UUID, credentials: APIAccountCredentials? = nil) async {
         guard canEdit(), connectingID == nil, states[id]?.status != .refreshing,
               let account = accounts.first(where: { $0.id == id }) else { return }
-        let attempt = beginSignIn(id)
-        await connect(account, attempt: attempt, generation: generation)
+        let attempt = beginSignIn(account)
+        await connect(account, credentials: credentials, attempt: attempt, generation: generation)
     }
 
-    private func beginSignIn(_ id: UUID) -> UUID {
+    private func beginSignIn(_ account: ManagedAccount) -> UUID {
+        let id = account.id
         let attempt = UUID()
         loginAttempt = attempt
+        connectingProvider = account.provider
         connectingID = id
         authorizationURL = nil
         message = nil
         operations[id] = UUID()
-        setState(id, .init(status: .connecting, note: "Complete sign-in in your browser."))
+        setState(id, .init(status: .connecting))
         return attempt
     }
 
-    private func connect(_ account: ManagedAccount, attempt: UUID, generation current: UUID) async {
+    private func connect(_ account: ManagedAccount, credentials: APIAccountCredentials?,
+                         attempt: UUID, generation current: UUID) async {
         do {
             let client = try await client(for: account)
             guard loginAttempt == attempt, generation == current else { return }
-            let result = try await client.connect { [weak self] url in
-                Task { @MainActor [weak self] in self?.receiveAuthorization(url, account: account, attempt: attempt) }
+            let result: AccountConnectionResult
+            if account.provider.usesAPIKey {
+                guard let credentials else { throw APIAccountError.missingKey }
+                result = try await client.connect(credentials) { [weak self] in
+                    guard let self else { throw CancellationError() }
+                    try await self.authorizeKeychainSave(attempt: attempt, generation: current)
+                }
+            } else {
+                result = try await client.connect { [weak self] url in
+                    Task { @MainActor [weak self] in self?.receiveAuthorization(url, account: account, attempt: attempt) }
+                }
             }
             guard loginAttempt == attempt, generation == current, !Task.isCancelled else { return }
             try await accept(result, id: account.id, generation: current) { self.loginAttempt == attempt }
@@ -244,14 +276,21 @@ final class AccountManager: ObservableObject {
         }
     }
 
-    func cancelLogin() {
-        guard let id = connectingID else { return }
+    private func authorizeKeychainSave(attempt: UUID, generation current: UUID) throws {
+        guard loginAttempt == attempt, generation == current, !Task.isCancelled else { throw CancellationError() }
+        committingAPIKey = true
+    }
+
+    func cancelLogin(force: Bool = false) {
+        guard let id = connectingID, !committingAPIKey || force else { return }
         finishSignIn(id, state: .init(status: .disconnected, note: "Sign-in cancelled."))
         if let client = clients[id] { Task { await client.cancel() } }
     }
 
     private func finishSignIn(_ id: UUID, state: AccountRowState) {
         loginAttempt = nil
+        connectingProvider = nil
+        committingAPIKey = false
         connectingID = nil
         authorizationURL = nil
         submittingCode = false
@@ -270,7 +309,7 @@ final class AccountManager: ObservableObject {
         authorizationURL = url
         // Claude's owner CLI opens its sign-in page itself; keep the validated
         // URL for an explicit retry without opening a second browser tab.
-        if account.provider == .codex { openAuthorization(url) }
+        if account.provider != .claude { openAuthorization(url) }
     }
 
     func openSignInPage() {
@@ -292,8 +331,12 @@ final class AccountManager: ObservableObject {
     }
 
     func disconnect(id: UUID) async {
-        guard canEdit(), let account = accounts.first(where: { $0.id == id }) else { return }
-        if connectingID == id { cancelLogin() }
+        guard canEdit(), states[id]?.status != .refreshing,
+              let account = accounts.first(where: { $0.id == id }) else { return }
+        if connectingID == id {
+            guard !committingAPIKey else { return }
+            cancelLogin()
+        }
         let current = generation, operation = UUID(), previous = states[id]
         operations[id] = operation
         setState(id, .init(status: .refreshing, windows: previous?.windows ?? [], updatedAt: previous?.updatedAt,
@@ -325,7 +368,7 @@ final class AccountManager: ObservableObject {
 
     private func client(for account: ManagedAccount) async throws -> any AccountConnecting {
         if let client = clients[account.id] { return client }
-        let profile = try await store.profileURL(for: account)
+        let profile = account.provider.usesAPIKey ? nil : try await store.profileURL(for: account)
         if let client = clients[account.id] { return client }
         let client = makeClient(account, profile)
         clients[account.id] = client
@@ -366,7 +409,7 @@ final class AccountManager: ObservableObject {
     private func publishProfileRoots(generation current: UUID) async {
         guard isLoaded else { onProfilesChanged?([]); return }
         var roots: [UsageSourceRoot] = []
-        for account in accounts {
+        for account in accounts where account.provider == .codex || account.provider == .claude {
             do {
                 let profile = try await store.profileURL(for: account)
                 guard generation == current else { return }
@@ -398,7 +441,7 @@ final class AccountManager: ObservableObject {
     }
 
     private func safeSignInError(_ error: Error) -> String {
-        (error as? ManagedAccountClientError)?.localizedDescription
+        (error as? APIAccountError)?.localizedDescription ?? (error as? ManagedAccountClientError)?.localizedDescription
             ?? (error as? AccountRegistryError)?.localizedDescription ?? "Couldn’t sign in. Try reconnecting."
     }
 

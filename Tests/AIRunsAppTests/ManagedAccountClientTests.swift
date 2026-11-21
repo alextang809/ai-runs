@@ -108,7 +108,7 @@ final class ManagedAccountClientTests: XCTestCase {
         XCTAssertEqual(result.account.email, "sample@example.test")
         XCTAssertTrue(result.windows.isEmpty)
         XCTAssertNotNil(result.note)
-        XCTAssertEqual(urls.values.first?.host, "claude.ai")
+        XCTAssertEqual(urls.values.first?.host, "claude.com")
         XCTAssertTrue(try String(contentsOf: profile.appendingPathComponent("calls.jsonl")).contains("--claudeai"))
         try await client.disconnect()
     }
@@ -243,6 +243,34 @@ final class ManagedAccountClientTests: XCTestCase {
         XCTAssertNil(environment["NODE_OPTIONS"])
     }
 
+    func testFindsNVMNodeVersionsAndMakesTheirNodeAvailableToCodex() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for version in ["v9.0.0", "v26.1.0", "other"] {
+            try FileManager.default.createDirectory(
+                at: directory.appendingPathComponent(".nvm/versions/node/\(version)/bin"),
+                withIntermediateDirectories: true
+            )
+        }
+        let candidates = ManagedAccountClient.nvmCodexCandidates(home: directory, environment: [:])
+        XCTAssertEqual(candidates.map { $0.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent },
+                       ["v26.1.0", "v9.0.0"])
+        let bin = try XCTUnwrap(candidates.first?.deletingLastPathComponent())
+        let environment = ManagedAccountClient.scopedEnvironment(provider: .codex, profile: directory,
+                                                                  executableDirectory: bin, inherited: ["PATH": "/usr/bin"])
+        XCTAssertEqual(environment["PATH"], bin.path + ":/usr/bin")
+    }
+
+    func testClaudeSignedOutExitStatusIsReportedAsDisconnected() async throws {
+        let (client, _) = try client("claude_signed_out", provider: .claude)
+        do {
+            _ = try await client.refresh()
+            XCTFail("Expected signed-out profile")
+        } catch {
+            XCTAssertEqual(error as? ManagedAccountClientError, .notSignedIn)
+        }
+    }
+
     func testOnlyExactOfficialHTTPSAuthorizationHostsAreAccepted() {
         for value in ["http://auth.openai.com/oauth", "https://auth.openai.com.example.test/oauth",
                       "https://person@auth.openai.com/oauth", "https://auth.openai.com:8443/oauth"] {
@@ -250,6 +278,10 @@ final class ManagedAccountClientTests: XCTestCase {
         }
         XCTAssertTrue(ManagedAccountClient.isAuthorizationURL(URL(string: "https://chatgpt.com/oauth")!, for: .codex))
         XCTAssertFalse(ManagedAccountClient.isAuthorizationURL(URL(string: "https://console.anthropic.com/oauth")!, for: .claude))
+        XCTAssertTrue(ManagedAccountClient.isAuthorizationURL(URL(string: "https://claude.com/cai/oauth/authorize")!, for: .claude))
+        XCTAssertTrue(ManagedAccountClient.isAuthorizationURL(URL(string: "https://claude.ai/oauth/authorize")!, for: .claude))
+        XCTAssertFalse(ManagedAccountClient.isAuthorizationURL(URL(string: "https://claude.com/cai/oauth/authorize/other")!, for: .claude))
+        XCTAssertFalse(ManagedAccountClient.isAuthorizationURL(URL(string: "https://claude.ai/oauth/authorize")!, for: .qwen))
     }
 
     private static let fakeCLI = #"""
@@ -272,13 +304,16 @@ final class ManagedAccountClientTests: XCTestCase {
     if mode.startswith("claude_"):
         if "login" in sys.argv:
             if mode == "claude_split":
-                print("https://claude.ai/oauth/authorize?sample=", end="", flush=True)
+                print("https://claude.com/cai/oauth/authorize?sample=", end="", flush=True)
                 time.sleep(0.08)
                 print("true", flush=True)
-            else: print("https://claude.ai/oauth/authorize?sample=true", flush=True)
+            else: print("https://claude.com/cai/oauth/authorize?sample=true", flush=True)
             if mode == "claude_manual":
                 if sys.stdin.readline().strip() != "fixture-code": sys.exit(1)
         elif "status" in sys.argv:
+            if mode == "claude_signed_out":
+                print(json.dumps({"loggedIn":False, "authMethod":"none", "configDirectory":profile}), flush=True)
+                sys.exit(1)
             print(json.dumps({"loggedIn":True, "authMethod":"api_key" if mode == "claude_console" else "claude.ai",
                  "configDirectory":"/tmp/other-profile" if mode == "claude_wrong_profile" else profile,
                  "email":"sample@example.test", "subscriptionType":"sample"}), flush=True)

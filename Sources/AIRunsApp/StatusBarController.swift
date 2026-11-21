@@ -11,6 +11,7 @@ protocol PanelActions: AnyObject {
     var isBoardVisible: Bool { get }
     func showSettings()
     func showAccounts()
+    func showAddAccount()
     func showUsageDashboard()
     func showAbout()
     func renameSession(_ id: String)
@@ -36,6 +37,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
     private var cancellables = Set<AnyCancellable>()
     private var settingsWindow: NSWindow?
     private var accountsWindow: NSWindow?
+    private let accountNavigation = AccountWindowNavigation()
     private var usageWindow: NSWindow?
     private lazy var floating = FloatingController(model: model, actions: self)
     private let toast = ToastController()
@@ -196,6 +198,12 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
         placePanel()
     }
 
+    func windowWillClose(_ notification: Notification) {
+        if (notification.object as? NSWindow) === accountsWindow {
+            accountNavigation.route = .accounts
+        }
+    }
+
     func closePanel() {
         panel?.orderOut(nil)
         ui.reset()
@@ -256,13 +264,19 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    func showAccounts() {
+    func showAccounts() { presentAccounts(route: .accounts) }
+
+    func showAddAccount() { presentAccounts(route: .providers) }
+
+    private func presentAccounts(route: AccountWindowNavigation.Route) {
         closePanel()
         model.accounts.start()
-        model.accounts.refreshAll()
+        accountNavigation.route = model.accounts.connectingID == nil ? route : .accounts
+        if route == .accounts { model.accounts.refreshAll() }
         if accountsWindow == nil {
             accountsWindow = Self.auxiliaryWindow(title: "AI Runs Accounts",
-                content: ManagedAccountsView(manager: model.accounts))
+                content: ManagedAccountsView(manager: model.accounts, navigation: accountNavigation))
+            accountsWindow?.delegate = self
         }
         NSApp.activate(ignoringOtherApps: true)
         accountsWindow?.makeKeyAndOrderFront(nil)

@@ -21,7 +21,7 @@ them all in one list in your menu bar:
 - **Done** — finished sessions, shown below the active ones; fold the group when you want more room.
 
 Session tracking and token statistics stay on your Mac. Optional account
-connections sign in directly through the provider's CLI; there is no AI Runs server.
+connections communicate directly with providers. AI Runs has no server.
 
 > **Latest release: 1.0.1.** The usage/account features below require a source build until the next release.
 > For bugs and feature requests, see [Feedback](#feedback).
@@ -210,18 +210,29 @@ source is not shown as zero. Browser and cloud-only activity without supported
 local usage records is outside these totals. Removing a session from the menu
 does not remove its recorded usage.
 
-**Add Account…**, **Usage Dashboard** and **Status Page** are always available
+**Add Account…** and **Usage Dashboard** are always available
 from the main menu. When no sessions are active, completed and ignored sessions
 are available under **Recent Sessions**. Unknown states stay visible without
 being counted as active.
 
-**Add Account…** supports separate Codex and claude.ai subscription sign-ins and
+In **Add Account…**, choose a provider to start its sign-in. AI Runs supports
+separate ChatGPT (via Codex) and Claude subscription sign-ins and
 multiple named accounts. Install the provider's command-line app first. Each
 connection gets a private AI Runs profile; your existing terminal and desktop
 sign-ins are not switched. Accounts can be renamed, refreshed, reconnected or
 disconnected. Disconnecting preserves local history.
 
-**Plan Usage** shows the connected account's available quota windows and reset
+Choose **Qwen Subscription** to sign in with a Qwen Plus or Pro account in your
+browser. This requires Qwen Code 0.28.0 or later. AI Runs uses a private CLI
+profile to verify the account and shows the plan when Qwen provides it.
+
+Choose **DeepSeek** or **Qwen API** to connect with an API key. DeepSeek shows the
+API balance. Qwen uses a standard pay-as-you-go key from Qwen AI Platform
+(China) or QwenCloud (Singapore) and shows the Qwen models returned by that
+platform. These connections query read-only endpoints and do not generate
+inference requests or track consumer chat subscriptions.
+
+**Accounts…** shows the connected account's available quota windows and reset
 times. Codex supplies these through its app server. Claude's documented sign-in
 commands do not provide standalone quota readings, so that connection shows its
 availability explicitly. Quota windows are separate from the selected token
@@ -251,9 +262,9 @@ Session tracking and token history are processed locally:
 - On macOS 26 it may ask **Apple's on-device model** to name a session or judge
   a reply. That runs on your Mac.
 
-Optional account connections run the provider CLI for sign-in and plan refresh.
-Credentials stay in isolated CLI-managed profiles or the macOS Keychain; AI Runs
-does not import native login files or browser cookies. Account metadata and local
+ChatGPT, Claude and Qwen Subscription connections run the provider CLI for sign-in and refresh.
+DeepSeek and Qwen API keys are stored in the macOS Keychain and sent over HTTPS
+to the selected provider. AI Runs does not import native login files or browser cookies. Account metadata and local
 usage caches live under `~/.airuns`. Conversations are not uploaded to an AI Runs
 service. Session tracking and local token statistics work without connecting an account.
 
@@ -269,7 +280,7 @@ Open an [issue](https://github.com/alextang809/ai-runs/issues) or just message m
 
 ## Uninstall
 
-1. Disconnect optional accounts in **Plan Usage & Accounts…**, then open AI Runs settings (**Settings…** in the panel) and click **Remove**
+1. Disconnect optional accounts in **Accounts…**, then open AI Runs settings (**Settings…** in the panel) and click **Remove**
    for Claude Code and for Codex.
    If you added the browser extension, remove it in your browser's extensions page.
 2. Quit AI Runs and drag it from Applications to the Trash.

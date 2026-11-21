@@ -2,41 +2,62 @@ import AIRunsCore
 import AppKit
 import SwiftUI
 
-/// Account sign-ins and measured plan limits. Local token history stays in the
-/// main menu and is never presented as an individual account's allowance.
+@MainActor
+final class AccountWindowNavigation: ObservableObject {
+    enum Route: Equatable {
+        case accounts, providers, apiKey(AccountProvider)
+    }
+
+    @Published var route: Route = .accounts
+
+    func choose(_ provider: AccountProvider, signIn: (AccountProvider) -> Void) {
+        guard route == .providers else { return }
+        if provider.usesAPIKey {
+            route = .apiKey(provider)
+        } else {
+            route = .accounts
+            signIn(provider)
+        }
+    }
+}
+
 struct ManagedAccountsView: View {
     @ObservedObject var manager: AccountManager
-    @State private var provider: AccountProvider = .codex
-    @State private var label = ""
+    @ObservedObject var navigation: AccountWindowNavigation
     @State private var code = ""
     @State private var enteringCode = false
     @State private var renameAccount: ManagedAccount?
     @State private var renameLabel = ""
+    @State private var hoveredProvider: AccountProvider?
 
-    private var maximumHeight: CGFloat {
-        max(240, min(680, (NSScreen.main?.visibleFrame.height ?? 800) - 100))
+    private var canConnect: Bool {
+        manager.isLoaded && !manager.isBusy && manager.connectingID == nil
+    }
+
+    private var contentHeight: CGFloat {
+        let maximum = max(300, (NSScreen.main?.visibleFrame.height ?? 800) - 120)
+        switch navigation.route {
+        case .accounts:
+            let expanded = !manager.accounts.isEmpty || manager.connectingID != nil || manager.loadError != nil
+            return min(expanded ? 435 : 270, maximum)
+        case .providers: return min(manager.loadError == nil ? 425 : 485, maximum)
+        case .apiKey: return 225
+        }
     }
 
     var body: some View {
-        GlassSurface(cornerRadius: 20, fallbackMaterial: .windowBackground) {
-            FittedVerticalScroll(maximumHeight: maximumHeight) {
-                VStack(alignment: .leading, spacing: 14) {
-                    header
-                    if let error = manager.loadError { loadingError(error) }
-                    if let message = manager.message, message != manager.loadError {
-                        Text(message).font(AppTypography.body).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    accountList
-                    if manager.connectingID != nil { activeSignIn }
-                    Divider()
-                    addAccount
-                }
-                .padding(18)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(spacing: 0) {
+            switch navigation.route {
+            case .accounts:
+                accountsPage
+            case .providers:
+                providerPage
+            case .apiKey(let provider):
+                apiKeyPage(provider)
             }
         }
-        .frame(width: 480)
+        .frame(width: 480, height: contentHeight)
+        .background(Color(nsColor: .windowBackgroundColor))
         .popover(item: $renameAccount) { account in renameForm(account) }
         .onChange(of: manager.connectingID) { _, _ in
             code = ""
@@ -44,21 +65,125 @@ struct ManagedAccountsView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private var accountsPage: some View {
+        VStack(spacing: 0) {
             HStack {
-                Text("Accounts").font(AppTypography.appTitle)
+                Text("Saved Accounts").font(AppTypography.rowTitle)
                 Spacer()
-                Button("Refresh All") { manager.refreshAll() }
-                    .controlSize(.small)
+                if !manager.accounts.isEmpty {
+                    Button {
+                        manager.refreshAll()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .help("Refresh all saved accounts")
+                    .accessibilityLabel("Refresh all saved accounts")
                     .disabled(!manager.isLoaded || manager.isBusy)
-                    .accessibilityLabel("Refresh usage for all saved accounts")
+                }
+                Button {
+                    navigation.route = .providers
+                } label: {
+                    Label("Add Account", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canConnect)
             }
-            Text("Separate sign-ins; your existing terminal logins stay unchanged.")
-                .font(AppTypography.body)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let error = manager.loadError { loadingError(error) }
+                    if let message = manager.message, message != manager.loadError {
+                        Text(message).font(AppTypography.body).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if manager.connectingID != nil { activeSignIn }
+                    accountList
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+            }
         }
+    }
+
+    private var providerPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Button {
+                    navigation.route = .accounts
+                } label: {
+                    Label("Accounts", systemImage: "chevron.left")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                Text("Choose a provider").font(AppTypography.appTitle)
+                if let error = manager.loadError { loadingError(error) }
+                VStack(spacing: 0) {
+                    ForEach(AccountProvider.allCases, id: \.self) { provider in
+                        if provider != AccountProvider.allCases.first {
+                            Divider().padding(.leading, 52)
+                        }
+                        providerButton(provider)
+                    }
+                }
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+                .disabled(!canConnect)
+                if !manager.isLoaded && manager.loadError == nil {
+                    ProgressView("Loading accounts…").controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+    }
+
+    private func providerButton(_ provider: AccountProvider) -> some View {
+        Button {
+            navigation.choose(provider) { beginSignIn($0) }
+        } label: {
+            HStack(spacing: 12) {
+                AccountProviderIcon(provider: provider)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(provider == .qwen ? "Qwen API" : provider.displayName).font(AppTypography.rowTitle)
+                    Text(provider == .qwenSubscription ? "Browser sign-in · Plus or Pro" :
+                            (provider.usesAPIKey ? "API key" : "Sign in with browser"))
+                        .font(AppTypography.metadata).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: provider.usesAPIKey ? "chevron.right" : "arrow.up.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 58)
+            .background(hoveredProvider == provider && canConnect ? Color.primary.opacity(0.06) : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hoveredProvider = $0 ? provider : nil }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func apiKeyPage(_ provider: AccountProvider) -> some View {
+        ScrollView {
+            APIAccountKeyForm(provider: provider, canConnect: canConnect) { credentials in
+                guard canConnect else { return }
+                navigation.route = .accounts
+                beginSignIn(provider, credentials: credentials)
+            } onCancel: {
+                navigation.route = .providers
+            }
+            .padding(20)
+        }
+    }
+
+    private func beginSignIn(_ provider: AccountProvider, credentials: APIAccountCredentials? = nil) {
+        guard canConnect else { return }
+        Task { await manager.add(provider: provider, label: "", credentials: credentials) }
     }
 
     private func loadingError(_ error: String) -> some View {
@@ -80,14 +205,19 @@ struct ManagedAccountsView: View {
                 Text("Loading accounts…").font(AppTypography.body).foregroundStyle(.secondary)
             }
         } else if manager.accounts.isEmpty && manager.loadError == nil {
-            Text("Add an account to see its plan usage here.")
-                .font(AppTypography.body).foregroundStyle(.secondary)
-                .padding(.vertical, 8)
+            if manager.connectingID == nil {
+                VStack(spacing: 9) {
+                    Image(systemName: "person.crop.circle").font(.system(size: 26)).accessibilityHidden(true)
+                    Text("No accounts yet").font(AppTypography.body)
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 55)
+            }
         } else {
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(manager.accounts) { account in
                     accountRow(account)
-                    if account.id != manager.accounts.last?.id { Divider() }
                 }
             }
         }
@@ -104,16 +234,17 @@ struct ManagedAccountsView: View {
             }
             HStack(spacing: 10) {
                 Button("Refresh") { Task { await manager.refresh(id: account.id) } }
-                    .accessibilityLabel("Refresh plan usage for \(account.label)")
+                    .accessibilityLabel("Refresh \(account.label)")
                     .disabled(manager.isBusy || !manager.isLoaded || manager.connectingID == account.id
                               || state?.status == .refreshing)
-                Button("Reconnect") { Task { await manager.reconnect(id: account.id) } }
+                reconnectButton(account)
                     .accessibilityLabel("Reconnect \(account.label)")
                     .disabled(manager.connectingID != nil || manager.isBusy || !manager.isLoaded
                               || state?.status == .refreshing)
                 Button("Disconnect") { Task { await manager.disconnect(id: account.id) } }
                     .accessibilityLabel("Disconnect \(account.label), keeping its history")
-                    .disabled(manager.isBusy || state?.status == .disconnected || manager.connectingID == account.id)
+                    .disabled(manager.isBusy || state?.status == .disconnected || state?.status == .refreshing
+                              || manager.connectingID == account.id)
                 Spacer(minLength: 0)
                 if let updated = state?.updatedAt {
                     Text("Updated \(updated.formatted(date: .omitted, time: .shortened))")
@@ -123,11 +254,24 @@ struct ManagedAccountsView: View {
             .font(AppTypography.metadata)
             .controlSize(.small)
         }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+    }
+
+    @ViewBuilder private func reconnectButton(_ account: ManagedAccount) -> some View {
+        if account.provider.usesAPIKey {
+            APIAccountKeyButton(title: "Reconnect…", provider: account.provider) { credentials in
+                Task { await manager.reconnect(id: account.id, credentials: credentials) }
+            }
+        } else {
+            Button("Reconnect") { Task { await manager.reconnect(id: account.id) } }
+        }
     }
 
     private func accountIdentity(_ account: ManagedAccount, state: AccountRowState?) -> some View {
         HStack(alignment: .top, spacing: 9) {
-            AppIcon(bundleId: account.provider == .codex ? "com.openai.codex" : "com.anthropic.claudefordesktop")
+            AccountProviderIcon(provider: account.provider)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 7) {
                     Text(account.label).font(AppTypography.rowTitle).lineLimit(1)
@@ -160,7 +304,7 @@ struct ManagedAccountsView: View {
         case .connected: return "Connected"
         case .connecting: return "Signing in…"
         case .refreshing: return "Refreshing…"
-        case .stale: return "Last known usage"
+        case .stale: return state.windows.isEmpty ? "Refresh failed" : "Last known usage"
         case .disconnected: return "Disconnected"
         case .failed: return "Unavailable"
         }
@@ -199,14 +343,15 @@ struct ManagedAccountsView: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Complete sign-in in your browser.").font(AppTypography.body)
+                Text(signInProgressTitle).font(AppTypography.body)
                 Spacer(minLength: 0)
                 Button("Cancel") { manager.cancelLogin() }.controlSize(.small)
+                    .disabled(manager.committingAPIKey)
             }
             if manager.authorizationURL != nil {
                 Button("Open Sign-In Page") { manager.openSignInPage() }.controlSize(.small)
             }
-            if manager.accounts.first(where: { $0.id == manager.connectingID })?.provider == .claude {
+            if manager.connectingProvider == .claude {
                 DisclosureGroup("Enter a sign-in code…", isExpanded: $enteringCode) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Only if Claude asks you to paste a code after signing in.")
@@ -229,40 +374,18 @@ struct ManagedAccountsView: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
     }
 
+    private var signInProgressTitle: String {
+        guard let provider = manager.connectingProvider else { return "Connecting…" }
+        if provider.usesAPIKey { return "Verifying \(provider.displayName) API key…" }
+        return "Sign in to \(provider.displayName) in your browser"
+    }
+
     private func sendCode() {
         guard manager.connectingID != nil, !manager.submittingCode,
               !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let submitted = code
         code = ""
         Task { await manager.submitCode(submitted) }
-    }
-
-    private var addAccount: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("Add Account").font(AppTypography.rowTitle)
-            HStack(spacing: 8) {
-                Picker("Provider", selection: $provider) {
-                    ForEach(AccountProvider.allCases, id: \.self) { provider in
-                        Text(provider.displayName).tag(provider)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 110)
-                .accessibilityLabel("Account provider")
-                TextField("Label (optional)", text: $label).textFieldStyle(.roundedBorder)
-                    .onSubmit(signIn)
-                Button("Sign In", action: signIn)
-            }
-            .controlSize(.small)
-            .disabled(!manager.isLoaded || manager.isBusy || manager.connectingID != nil)
-        }
-    }
-
-    private func signIn() {
-        guard manager.isLoaded, !manager.isBusy, manager.connectingID == nil else { return }
-        let selected = provider, submittedLabel = label
-        label = ""
-        Task { await manager.add(provider: selected, label: submittedLabel) }
     }
 
     private func renameForm(_ account: ManagedAccount) -> some View {
@@ -286,5 +409,27 @@ struct ManagedAccountsView: View {
         let submitted = renameLabel
         renameAccount = nil
         Task { await manager.rename(id: account.id, label: submitted) }
+    }
+}
+
+private struct AccountProviderIcon: View {
+    let provider: AccountProvider
+
+    var body: some View {
+        Group {
+            switch provider {
+            case .codex:
+                AppIcon(bundleId: "com.openai.codex")
+            case .claude:
+                AppIcon(bundleId: "com.anthropic.claudefordesktop")
+            case .deepseek, .qwen, .qwenSubscription:
+                Image(systemName: provider == .qwenSubscription ? "person.crop.circle" : "key")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26, height: 26)
+                    .background(.quaternary.opacity(0.42), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .accessibilityHidden(true)
     }
 }

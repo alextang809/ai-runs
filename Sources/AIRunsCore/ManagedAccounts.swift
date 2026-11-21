@@ -1,11 +1,24 @@
 import Foundation
 
 public enum AccountProvider: String, Codable, CaseIterable, Sendable {
-    case codex, claude
-    public var displayName: String { self == .codex ? "Codex" : "Claude" }
+    case codex, claude, deepseek
+    case qwenSubscription = "qwen-subscription"
+    case qwen
+
+    public var displayName: String {
+        switch self {
+        case .codex: return "ChatGPT"
+        case .claude: return "Claude"
+        case .deepseek: return "DeepSeek"
+        case .qwen: return "Qwen"
+        case .qwenSubscription: return "Qwen Subscription"
+        }
+    }
+
+    public var usesAPIKey: Bool { self == .deepseek || self == .qwen }
 }
 
-/// Display metadata only. Credentials remain in each provider CLI's owned profile.
+/// Display metadata only. Credentials are stored separately.
 public struct ManagedAccount: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let provider: AccountProvider

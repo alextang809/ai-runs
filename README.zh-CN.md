@@ -18,7 +18,7 @@
 - **Working（在跑）**：运行中的会话、已用时长、可读的活动描述，以及有依据的计划进度。
 - **Done（做完）**：已经完成的会话，放在最下面，不打扰你。
 
-会话追踪和 token 统计都在 Mac 本地处理。可选的账号连接通过服务商 CLI 直接登录，不经过 AI Runs 服务器。
+会话追踪和 token 统计都在 Mac 本地处理。可选的账号连接直接与服务商通信，不经过 AI Runs 服务器。
 
 > **最新发布版 1.0.1。**下面介绍的用量／账号功能目前需要从源码构建，待下次发布再进入下载包。遇到问题或有功能建议，欢迎通过[反馈](#反馈)告诉我。
 
@@ -140,11 +140,15 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 
 首次在后台扫描，之后增量读取变化的文件。Scanning（扫描中）、Partial（不完整）和 No local records（没有本地记录）会分别显示；读不到的数据不会显示成零。没有受支持本地记录的网页、纯云端活动不在统计范围内。从菜单移除会话不会删除其已记录的用量。
 
-主菜单固定显示 **Add Account…**、**Usage Dashboard** 和 **Status Page**。没有活跃会话时，已完成、已忽略的会话可从 **Recent Sessions** 展开。未知状态仍会显示，不算作活跃。
+主菜单固定显示 **Add Account…** 和 **Usage Dashboard**。没有活跃会话时，已完成、已忽略的会话可从 **Recent Sessions** 展开。未知状态仍会显示，不算作活跃。
 
-**Add Account…** 支持独立登录 Codex、claude.ai 订阅账号，并管理多个有自定义名称的账号。需要先安装相应服务商的 CLI。每个连接使用 AI Runs 的独立私有配置目录，不会切换现有终端或桌面 App 的登录。可以改名、刷新、重新连接或断开账号；断开后保留本机历史记录。
+在 **Add Account…** 选择服务商即可开始连接。支持通过 Codex CLI 独立登录 ChatGPT，以及通过 Claude Code CLI 独立登录 Claude，并管理多个有自定义名称的账号。需要先安装相应服务商的 CLI。每个连接使用 AI Runs 的独立私有配置目录，不会切换现有终端或桌面 App 的登录。可以改名、刷新、重新连接或断开账号；断开后保留本机历史记录。
 
-**Plan Usage** 显示已连接账号可取得的额度窗口和重置时间。Codex 通过 app server 提供；Claude 的公开登录命令不能独立读取额度时，会明确显示不可用。账号额度窗口和 token 的时间范围分开，本机 token 总量也不会直接归到新添加的账号上。
+选择 **Qwen Subscription** 可以用 Qwen Plus 或 Pro 账号进行浏览器授权。需要 Qwen Code 0.28.0 或更新版本。AI Runs 通过独立的 CLI 配置验证登录，并显示千问返回的套餐。
+
+选择 **DeepSeek** 或 **Qwen API** 可用 API Key 连接。DeepSeek 显示 API 余额。千问支持国内千问 AI 平台和国际 QwenCloud（新加坡）的按量付费 Key，显示平台返回的千问模型。验证和刷新只调用只读接口，不发起推理请求，也不读取网页订阅额度。
+
+**Accounts…** 显示已连接账号可取得的额度窗口和重置时间。Codex 通过 app server 提供；Claude 的公开登录命令不能独立读取额度时，会明确显示不可用。账号额度窗口和 token 的时间范围分开，本机 token 总量也不会直接归到新添加的账号上。
 
 <p align="center"><img src="docs/usage-home.png" width="384" alt="没有活跃会话时的用量首页"></p>
 <p align="center"><img src="docs/accounts.png" width="480" alt="独立账号和可取得的额度窗口"></p>
@@ -160,7 +164,7 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 - 可选的**浏览器插件**只读取 chatgpt.com 和 claude.ai 的页面：对话地址和标题、是否在生成、你的最后一条消息和回复的结尾。这些信息通过浏览器的 native messaging 交给本机的 AI Runs。插件没有别的权限，也不联网。
 - 在 macOS 26 上，它可能会用**苹果的本机模型**给会话起名、判断回复，模型在你的 Mac 上运行。
 
-可选的账号连接会调用服务商 CLI 完成登录和额度刷新。凭据由独立 CLI 配置或 macOS 钥匙串管理，不导入原有登录文件或浏览器 Cookie。账号元数据和本机用量缓存放在 `~/.airuns`，对话不会上传到 AI Runs 服务。不连接账号也能使用会话追踪和本机 token 统计。
+ChatGPT、Claude 和 Qwen Subscription 由服务商 CLI 登录和刷新，凭据留在独立的 CLI 配置中。DeepSeek 和千问的 API Key 存在 macOS 钥匙串中，只通过 HTTPS 发给所选平台。AI Runs 不导入原有登录文件或浏览器 Cookie。账号元数据和本机用量缓存放在 `~/.airuns`，对话不会上传到 AI Runs 服务。不连接账号也能使用会话追踪和本机 token 统计。
 
 ## 反馈
 
@@ -174,7 +178,7 @@ Intel 芯片的 Mac 请[从源码构建](#从源码构建)。
 
 ## 卸载
 
-1. 先在 **Plan Usage & Accounts…** 断开可选账号，再打开 AI Runs 的设置（面板里的 **Settings…**），分别在 Claude Code 和 Codex 那一行点 **Remove**。装了浏览器插件的话，在浏览器的扩展程序页面把它移除。
+1. 先在 **Accounts…** 断开可选账号，再打开 AI Runs 的设置（面板里的 **Settings…**），分别在 Claude Code 和 Codex 那一行点 **Remove**。装了浏览器插件的话，在浏览器的扩展程序页面把它移除。
 2. 退出 AI Runs，把它从「应用程序」拖到废纸篓。
 3. 删除它的数据：`rm -rf ~/.airuns`
 

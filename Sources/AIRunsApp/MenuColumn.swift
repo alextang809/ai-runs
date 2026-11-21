@@ -56,11 +56,8 @@ struct MenuColumn: View {
                     SeparatorLine()
                     MenuQuickActions(manager: model.accounts,
                                      openAccounts: { actions.showAccounts() },
-                                     openUsage: { actions.showUsageDashboard() },
-                                     openStatus: { url in
-                                         actions.closePanel()
-                                         NSWorkspace.shared.open(url)
-                                     })
+                                     addAccount: { actions.showAddAccount() },
+                                     openUsage: { actions.showUsageDashboard() })
                         .onHover { if $0 { ui.hoverOff() } }
                     SeparatorLine()
                     bottomMenu

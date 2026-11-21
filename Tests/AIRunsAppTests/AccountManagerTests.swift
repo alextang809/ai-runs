@@ -12,6 +12,7 @@ private actor MemoryAccountStore: AccountPersisting {
     private var holdNextSave = false
     private var saveContinuation: CheckedContinuation<Void, Never>?
     private(set) var saves = 0
+    private(set) var profileRequests = 0
 
     init(_ rows: [ManagedAccount] = [], loadFails: Bool = false) {
         self.rows = rows
@@ -31,7 +32,8 @@ private actor MemoryAccountStore: AccountPersisting {
         self.rows = rows
     }
     func profileURL(for account: ManagedAccount) -> URL {
-        URL(fileURLWithPath: "/tmp/airuns-test-profiles").appendingPathComponent(account.id.uuidString)
+        profileRequests += 1
+        return URL(fileURLWithPath: "/tmp/airuns-test-profiles").appendingPathComponent(account.id.uuidString)
     }
     func failSaving() { saveFails = true }
     func pauseNextSave() { holdNextSave = true }
@@ -89,6 +91,39 @@ private actor FakeAccountClient: AccountConnecting {
 }
 
 final class AccountManagerTests: XCTestCase {
+    @MainActor
+    func testAPIAcceptanceUsesNoCLIProfilesAndDisconnectSurvivesRefresh() async throws {
+        let store = MemoryAccountStore()
+        let keys = TestAPIKeyStore()
+        let manager = AccountManager(store: store, makeClient: { account, profile in
+            XCTAssertNil(profile)
+            return APIAccountClient(account: account, keyStore: keys) { _ in
+                (200, Data(#"{"data":[{"id":"qwen-max"}]}"#.utf8))
+            }
+        }, openAuthorization: { _ in XCTFail("API keys do not use browser authorization") })
+        var roots: [UsageSourceRoot] = []
+        manager.onProfilesChanged = { roots = $0 }
+        manager.start()
+        defer { manager.stop() }
+        try await eventually { manager.isLoaded && !manager.isBusy }
+
+        await manager.add(provider: .qwen, label: "Example", credentials: .init(key: "sk-example", qwenPlatform: .china))
+        let account = try XCTUnwrap(manager.accounts.first)
+        XCTAssertEqual(manager.states[account.id]?.note, "Qwen models: qwen-max")
+        XCTAssertNotNil(account.lastVerifiedAt)
+        XCTAssertTrue(roots.isEmpty)
+        let profiles = await store.profileRequests
+        XCTAssertEqual(profiles, 0)
+        let stored = try JSONEncoder().encode(account)
+        XCTAssertFalse(String(decoding: stored, as: UTF8.self).contains("sk-example"))
+
+        await manager.disconnect(id: account.id)
+        await manager.refresh(id: account.id)
+        XCTAssertEqual(manager.states[account.id]?.status, .disconnected)
+        XCTAssertNil(try keys.load(for: account))
+    }
+
+
     @MainActor
     private func eventually(_ condition: @MainActor () async -> Bool,
                             file: StaticString = #filePath, line: UInt = #line) async throws {

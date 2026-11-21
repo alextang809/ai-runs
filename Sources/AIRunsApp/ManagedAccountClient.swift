@@ -4,13 +4,14 @@ import Darwin
 import Foundation
 
 public enum ManagedAccountClientError: Error, LocalizedError, Equatable, Sendable {
-    case cliUnavailable, launchFailed, unsafeProfile, invalidResponse, requestFailed
+    case cliUnavailable, qwenCLIUnavailable, launchFailed, unsafeProfile, invalidResponse, requestFailed
     case timedOut, cancelled, outputLimit, authorizationRejected, invalidAuthorizationURL
     case notSignedIn, unsupportedAccount, profileMismatch, busy, invalidCode
 
     public var errorDescription: String? {
         switch self {
         case .cliUnavailable: return "Install the provider's command-line app before connecting this account."
+        case .qwenCLIUnavailable: return "Install Qwen Code 0.28.0 or later to connect a Qwen subscription."
         case .launchFailed: return "The provider's command-line app could not be started."
         case .unsafeProfile: return "This account needs a private AI Runs profile without symbolic links."
         case .invalidResponse: return "The provider returned an unsupported response. Update its command-line app and retry."
@@ -55,9 +56,19 @@ public actor ManagedAccountClient {
     public nonisolated static func terminateOwnedProcesses() { OwnedAccountProcesses.shared.terminateAll() }
 
     public nonisolated static func isAuthorizationURL(_ url: URL, for provider: AccountProvider) -> Bool {
-        let hosts: Set<String> = provider == .codex ? ["chatgpt.com", "auth.openai.com"] : ["claude.ai"]
-        return url.scheme?.lowercased() == "https" && hosts.contains(url.host?.lowercased() ?? "")
-            && url.user == nil && url.password == nil && (url.port == nil || url.port == 443)
+        guard url.scheme?.lowercased() == "https", let host = url.host?.lowercased(),
+              url.user == nil, url.password == nil, url.port == nil || url.port == 443 else { return false }
+        switch provider {
+        case .codex: return ["chatgpt.com", "auth.openai.com"].contains(host)
+        case .claude:
+            return (host == "claude.com" && url.path == "/cai/oauth/authorize")
+                || (host == "claude.ai" && url.path == "/oauth/authorize")
+        case .qwenSubscription:
+            return host == "chat.qwen.ai" && url.path == "/authorize"
+                && URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                    .contains(where: { $0.name == "user_code" && !($0.value ?? "").isEmpty }) == true
+        case .deepseek, .qwen: return false
+        }
     }
 
     public func connect(onAuthorization: @escaping @Sendable (URL) -> Void) async throws -> AccountConnectionResult {
@@ -80,6 +91,8 @@ public actor ManagedAccountClient {
                                          onAuthorization: guardedAuthorization)
                 guard operation == token, !Task.isCancelled else { throw ManagedAccountClientError.cancelled }
                 result = try await readClaudeAccount()
+            case .deepseek, .qwen, .qwenSubscription:
+                throw ManagedAccountClientError.unsupportedAccount
             }
             guard operation == token, !Task.isCancelled else { throw ManagedAccountClientError.cancelled }
             account = result.account
@@ -214,9 +227,10 @@ public actor ManagedAccountClient {
     }
 
     private func readClaudeAccount() async throws -> AccountConnectionResult {
-        let output = try await runCommand(["auth", "status", "--json"], timeout: requestTimeout)
+        let output = try await runCommand(["auth", "status", "--json"], timeout: requestTimeout, acceptSignedOutStatus: true)
         let status = try Self.object(output)
-        guard Self.boolean(status["loggedIn"]) == true else { throw ManagedAccountClientError.notSignedIn }
+        guard let loggedIn = Self.boolean(status["loggedIn"]) else { throw ManagedAccountClientError.invalidResponse }
+        guard loggedIn else { throw ManagedAccountClientError.notSignedIn }
         guard status["authMethod"] as? String == "claude.ai" else { throw ManagedAccountClientError.unsupportedAccount }
         guard let directory = Self.text(status["configDirectory"], limit: 8_192),
               URL(fileURLWithPath: directory).standardizedFileURL.path == profileURL.standardizedFileURL.path else {
@@ -233,7 +247,8 @@ public actor ManagedAccountClient {
         let executable = try Self.resolveExecutable(provider: account.provider, override: executableURL)
         let child = ManagedAccountProcess()
         try await child.start(executable: executable, arguments: arguments,
-                              environment: Self.scopedEnvironment(provider: account.provider, profile: profileURL),
+                              environment: Self.scopedEnvironment(provider: account.provider, profile: profileURL,
+                                                                  executableDirectory: executable.deletingLastPathComponent()),
                               directory: profileURL)
         guard operation == token, !Task.isCancelled else {
             await child.stop()
@@ -242,7 +257,7 @@ public actor ManagedAccountClient {
         return child
     }
 
-    private func runCommand(_ arguments: [String], timeout: TimeInterval,
+    private func runCommand(_ arguments: [String], timeout: TimeInterval, acceptSignedOutStatus: Bool = false,
                             onAuthorization: (@Sendable (URL) async -> Void)? = nil) async throws -> Data {
         let token = operation
         let child = try await startProcess(arguments)
@@ -250,7 +265,10 @@ public actor ManagedAccountClient {
         let provider = account.provider
         do {
             let output = try await withThrowingTaskGroup(of: Data.self) { group in
-                group.addTask { try await Self.collectCommand(child, provider: provider, onAuthorization: onAuthorization) }
+                group.addTask {
+                    try await Self.collectCommand(child, provider: provider, acceptSignedOutStatus: acceptSignedOutStatus,
+                                                  onAuthorization: onAuthorization)
+                }
                 group.addTask {
                     try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                     await child.stop(.timedOut)
@@ -270,6 +288,13 @@ public actor ManagedAccountClient {
     }
 
     private func validateProfile() throws {
+        guard account.provider == .codex || account.provider == .claude else {
+            throw ManagedAccountClientError.unsupportedAccount
+        }
+        try Self.validateProfile(account: account, profileURL: profileURL)
+    }
+
+    static func validateProfile(account: ManagedAccount, profileURL: URL) throws {
         let path = profileURL.standardizedFileURL
         guard let resolved = realpath(path.path, nil) else { throw ManagedAccountClientError.unsafeProfile }
         defer { free(resolved) }
@@ -298,7 +323,7 @@ public actor ManagedAccountClient {
         } catch { throw ManagedAccountClientError.unsafeProfile }
     }
 
-    private static func collectCommand(_ child: ManagedAccountProcess, provider: AccountProvider,
+    private static func collectCommand(_ child: ManagedAccountProcess, provider: AccountProvider, acceptSignedOutStatus: Bool,
                                        onAuthorization: (@Sendable (URL) async -> Void)?) async throws -> Data {
         var output = Data(), lineBuffer = Data(), seen: Set<URL> = []
         for await event in child.events {
@@ -315,12 +340,16 @@ public actor ManagedAccountClient {
                         let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
                         for match in detector?.matches(in: text, range: NSRange(text.startIndex..., in: text)) ?? [] {
                             guard let url = match.url, isAuthorizationURL(url, for: provider),
-                                  url.path.hasPrefix("/oauth/authorize"), seen.insert(url).inserted else { continue }
+                                  seen.insert(url).inserted else { continue }
                             await onAuthorization(url)
                         }
                     }
                 }
             case .exited(let status):
+                if status == 1, acceptSignedOutStatus,
+                   let result = try? object(output), boolean(result["loggedIn"]) == false {
+                    throw ManagedAccountClientError.notSignedIn
+                }
                 guard status == 0 else { throw ManagedAccountClientError.requestFailed }
                 return output
             case .failed(let error): throw error
@@ -329,14 +358,23 @@ public actor ManagedAccountClient {
         throw ManagedAccountClientError.requestFailed
     }
 
-    static func scopedEnvironment(provider: AccountProvider, profile: URL,
+    static func scopedEnvironment(provider: AccountProvider, profile: URL, executableDirectory: URL? = nil,
                                   inherited: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
         let allowed: Set<String> = ["HOME", "PATH", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TERM", "COLORTERM", "NO_COLOR",
             "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"]
         var result = inherited.filter { name, _ in
             allowed.contains(name) || name.hasPrefix("LC_")
         }
-        result[provider == .codex ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"] = profile.path
+        if let executableDirectory {
+            let path = result["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+            result["PATH"] = executableDirectory.path + ":" + path
+        }
+        switch provider {
+        case .codex: result["CODEX_HOME"] = profile.path
+        case .claude: result["CLAUDE_CONFIG_DIR"] = profile.path
+        case .qwenSubscription: result["QWEN_HOME"] = profile.path
+        case .deepseek, .qwen: break
+        }
         return result
     }
 
@@ -350,7 +388,7 @@ public actor ManagedAccountClient {
         return path
     }
 
-    private static func resolveExecutable(provider: AccountProvider, override: URL?) throws -> URL {
+    static func resolveExecutable(provider: AccountProvider, override: URL?) throws -> URL {
         if let override {
             guard override.isFileURL, FileManager.default.isExecutableFile(atPath: override.path) else {
                 throw ManagedAccountClientError.cliUnavailable
@@ -360,15 +398,31 @@ public actor ManagedAccountClient {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let paths = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
             + ["/opt/homebrew/bin", "/usr/local/bin", home.appendingPathComponent(".local/bin").path]
-        var candidates = paths.map { URL(fileURLWithPath: $0).appendingPathComponent(provider.rawValue) }
+        let command = provider == .qwenSubscription ? "qwen" : provider.rawValue
+        var candidates = paths.filter { $0.hasPrefix("/") }
+            .map { URL(fileURLWithPath: $0).appendingPathComponent(command) }
         if provider == .codex {
             candidates += [URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/codex"),
                            home.appendingPathComponent("Applications/Codex.app/Contents/Resources/codex")]
         }
+        if provider == .codex || provider == .qwenSubscription {
+            candidates += nvmCodexCandidates(home: home, environment: ProcessInfo.processInfo.environment, command: command)
+        }
         guard let executable = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) else {
-            throw ManagedAccountClientError.cliUnavailable
+            throw provider == .qwenSubscription ? ManagedAccountClientError.qwenCLIUnavailable : ManagedAccountClientError.cliUnavailable
         }
         return executable
+    }
+
+    static func nvmCodexCandidates(home: URL, environment: [String: String], command: String = "codex") -> [URL] {
+        let nvm = environment["NVM_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? home.appendingPathComponent(".nvm", isDirectory: true)
+        let versions = nvm.appendingPathComponent("versions/node", isDirectory: true)
+        let installed = (try? FileManager.default.contentsOfDirectory(atPath: versions.path)) ?? []
+        return installed.filter {
+            $0.range(of: #"^v[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil
+        }.sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+            .map { versions.appendingPathComponent($0).appendingPathComponent("bin/\(command)") }
     }
 
     private static func object(_ data: Data) throws -> [String: Any] {
