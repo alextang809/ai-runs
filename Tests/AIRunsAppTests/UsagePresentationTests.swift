@@ -4,6 +4,22 @@ import XCTest
 @testable import AIRunsApp
 
 final class UsagePresentationTests: XCTestCase {
+    func testSelectedCurrencyConvertsFromUSDAndIdentifiesTheDisplayedCurrency() {
+        let display = UsageMoneyDisplay(code: "SGD", unitsPerUSD: Decimal(string: "1.35"))
+        XCTAssertEqual(display.code, "SGD")
+        XCTAssertTrue(display.format(20, locale: Locale(identifier: "en_US")).contains("27.00"))
+        XCTAssertTrue(display.format(20, locale: Locale(identifier: "en_US")).hasPrefix("SGD"))
+    }
+
+    func testAbsentRateUsesUSDAndYenUsesItsMinorUnit() {
+        let fallback = UsageMoneyDisplay(code: "SGD", unitsPerUSD: nil)
+        XCTAssertEqual(fallback.code, "USD")
+        XCTAssertTrue(fallback.format(20, locale: Locale(identifier: "en_US")).hasPrefix("USD"))
+        let yen = UsageMoneyDisplay(code: "JPY", unitsPerUSD: 150)
+        XCTAssertFalse(yen.format(1, locale: Locale(identifier: "en_US")).contains("."))
+        XCTAssertTrue(yen.format(Decimal(string: "0.001")!, locale: Locale(identifier: "en_US")).hasPrefix("<"))
+    }
+
     private let locale = Locale(identifier: "en_US")
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
@@ -39,6 +55,15 @@ final class UsagePresentationTests: XCTestCase {
         XCTAssertFalse(compact.contains("-"))
         XCTAssertFalse(compact.lowercased().contains("inf"))
         XCTAssertFalse(compact.lowercased().contains("nan"))
+    }
+
+    func testEstimatedCostShowsUSDAndKeepsPositiveSubCentAmountsVisible() throws {
+        let fraction = try XCTUnwrap(Decimal(string: "0.004"))
+        let amount = try XCTUnwrap(Decimal(string: "1234.567"))
+        XCTAssertEqual(UsagePresentation.usd(.zero, locale: locale), "$0.00")
+        XCTAssertEqual(UsagePresentation.usd(fraction, locale: locale), "<$0.01")
+        XCTAssertEqual(UsagePresentation.usd(amount, locale: locale), "$1,234.57")
+        XCTAssertTrue(UsagePresentation.usd(amount, locale: Locale(identifier: "de_DE")).contains("1.234,57"))
     }
 
     func testMissingAndPendingUsageNeverDisplayMeasuredZero() throws {

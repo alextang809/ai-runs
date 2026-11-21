@@ -162,9 +162,12 @@ public struct UsageScanOutput: Sendable {
 }
 
 public enum UsagePeriod: String, Codable, CaseIterable, Sendable {
-    case today, last24Hours = "24h", last7Days = "7d"
+    case today, last24Hours = "24h", last7Days = "7d", last30Days = "30d"
     public var title: String {
-        switch self { case .today: return "Today"; case .last24Hours: return "24h"; case .last7Days: return "7d" }
+        switch self {
+        case .today: return "Today"
+        case .last24Hours, .last7Days, .last30Days: return rawValue
+        }
     }
     public func interval(now: Date, calendar: Calendar = .current) -> DateInterval {
         let start: Date
@@ -172,6 +175,7 @@ public enum UsagePeriod: String, Codable, CaseIterable, Sendable {
         case .today: start = calendar.startOfDay(for: now)
         case .last24Hours: start = now.addingTimeInterval(-86_400)
         case .last7Days: start = now.addingTimeInterval(-7 * 86_400)
+        case .last30Days: start = now.addingTimeInterval(-30 * 86_400)
         }
         return DateInterval(start: start, end: now)
     }

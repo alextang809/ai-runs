@@ -1,6 +1,25 @@
 import AIRunsCore
 import Foundation
 
+struct UsageMoneyDisplay {
+    let code: String
+    private let unitsPerUSD: Decimal
+
+    init(code: String, unitsPerUSD: Decimal?) {
+        if code != "USD", let unitsPerUSD, unitsPerUSD > 0 {
+            self.code = code
+            self.unitsPerUSD = unitsPerUSD
+        } else {
+            self.code = "USD"
+            self.unitsPerUSD = 1
+        }
+    }
+
+    func format(_ amountUSD: Decimal, locale: Locale = .current) -> String {
+        UsagePresentation.currency(amountUSD * unitsPerUSD, code: code, useISOCode: true, locale: locale)
+    }
+}
+
 /// Formatting and availability semantics shared by the menu and usage window.
 enum UsagePresentation {
     static func compact(_ count: Int64, locale: Locale = .current) -> String {
@@ -22,6 +41,25 @@ enum UsagePresentation {
 
     static func exact(_ count: Int64, locale: Locale = .current) -> String {
         formatter(locale: locale, decimals: 0, grouping: true).string(from: NSNumber(value: count)) ?? String(count)
+    }
+
+    static func usd(_ amount: Decimal, locale: Locale = .current) -> String {
+        currency(amount, code: "USD", useISOCode: false, locale: locale)
+    }
+
+    static func currency(_ amount: Decimal, code: String, useISOCode: Bool, locale: Locale) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = useISOCode ? .currencyISOCode : .currency
+        formatter.currencyCode = code
+        let digits = ["ISK", "JPY", "KRW"].contains(code) ? 0 : 2
+        formatter.minimumFractionDigits = digits
+        formatter.maximumFractionDigits = digits
+        formatter.roundingMode = .halfUp
+        let minorUnit = digits == 0 ? Decimal(1) : Decimal(1) / 100
+        let belowMinorUnit = amount > 0 && amount < minorUnit
+        let displayed = NSDecimalNumber(decimal: belowMinorUnit ? minorUnit : amount)
+        return (belowMinorUnit ? "<" : "") + (formatter.string(from: displayed) ?? "\(code) \(displayed)")
     }
 
     static func valueText(_ usage: ProviderTokenUsage, locale: Locale = .current) -> String {
@@ -54,6 +92,7 @@ enum UsagePresentation {
         case .today: return "Today"
         case .last24Hours: return "Last 24 hours"
         case .last7Days: return "Last 7 days"
+        case .last30Days: return "Last 30 days"
         }
     }
 

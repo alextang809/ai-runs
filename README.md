@@ -187,10 +187,22 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 ## Token usage and accounts
 
 **Tokens · This Mac** shows recorded Codex and Claude Code usage. The default is
-the **last 24 hours**; switch to Today (your local day) or 7d (the last 168 hours).
+the **last 24 hours**. You can also select Today (your local day), 7d, or 30d.
 Click a provider for input, output, cached reads/writes and model details, or open
 **Usage Dashboard**. Cached tokens are already included in input; reasoning is
 already included in output. They are not added to the total twice.
+
+The dashboard shows **Estimated Cost** above the token breakdown, with totals for
+Today, the selected rolling period, and 30d, plus a daily cost trend. The model
+table shows per-model estimates for the selected provider and period. The
+estimate applies public standard API list prices to recorded tokens, with
+short-context and default cache-write assumptions.
+Unpriced usage and incomplete scans are marked as partial. The estimate excludes
+subscription billing, tool fees and account-specific adjustments.
+Use the currency menu next to **Estimated Cost** to switch between USD, SGD,
+CNY and the other currencies published by the ECB. One dated reference rate
+converts all displayed periods and models. The app keeps the last retrieved
+rate for offline use and shows USD if the selected rate is unavailable.
 
 The initial scan runs in the background, then reads changed files incrementally.
 **Scanning**, **Partial** and **No local records** have distinct meanings. A missing
