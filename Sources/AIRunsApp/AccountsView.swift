@@ -246,7 +246,7 @@ struct ManagedAccountsView: View {
                     .disabled(manager.isBusy || state?.status == .disconnected || state?.status == .refreshing
                               || manager.connectingID == account.id)
                 Spacer(minLength: 0)
-                if let updated = state?.updatedAt {
+                if account.provider != .codex, let updated = state?.updatedAt {
                     Text("Updated \(updated.formatted(date: .omitted, time: .shortened))")
                         .font(AppTypography.section).foregroundStyle(.secondary)
                 }
@@ -312,23 +312,8 @@ struct ManagedAccountsView: View {
 
     private func accountUsage(_ state: AccountRowState, provider: AccountProvider) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(state.windows) { window in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(window.title)
-                        Spacer()
-                        Text("\(window.usedPercent, specifier: "%.0f")% used").monospacedDigit()
-                    }
-                    .font(AppTypography.body)
-                    ProgressView(value: window.usedPercent, total: 100)
-                        .tint(Palette.tool(provider == .codex ? .codex : .claudeCode))
-                        .accessibilityLabel(window.title)
-                        .accessibilityValue("\(Int(window.usedPercent.rounded())) percent used")
-                    if let reset = window.resetsAt {
-                        Text("Resets \(reset.formatted(date: .abbreviated, time: .shortened))")
-                            .font(AppTypography.section).foregroundStyle(.secondary)
-                    }
-                }
+            if provider == .codex {
+                PlanUsageView(windows: state.windows, updatedAt: state.updatedAt)
             }
             if let note = state.note, !note.isEmpty {
                 Text(note).font(AppTypography.body).foregroundStyle(.secondary)
