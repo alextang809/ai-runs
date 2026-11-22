@@ -511,14 +511,43 @@ final class AppModel: ObservableObject {
 
     // MARK: - Cards
 
-    func open(card: PinCard) {
-        board.touch(id: card.id)
+    var pinSessionCandidates: [Session] {
+        store.ordered().filter { session in
+            if AgentTool.hookTools.contains(session.tool) { return true }
+            guard session.tool == .claudeWeb else { return false }
+            if case .url = PinAttachment.session(session).link { return true }
+            return false
+        }
+    }
+
+    @discardableResult
+    func attach(_ attachment: PinAttachment, to cardID: UUID) -> Bool {
+        guard board.attach(attachment, to: cardID) else { return false }
         savePins()
-        guard let link = card.link else {
-            show("This note isn’t linked to a conversation.")
+        return true
+    }
+
+    @discardableResult
+    func detach(_ attachmentID: UUID, from cardID: UUID) -> Bool {
+        guard board.detach(attachmentID, from: cardID) else { return false }
+        savePins()
+        return true
+    }
+
+    func open(card: PinCard) {
+        guard let attachments = board.card(id: card.id)?.attachments else { return }
+        guard attachments.count == 1, let attachment = attachments.first else {
+            show(attachments.isEmpty ? "This card has no links." : "Choose a link on the pinned card.")
             return
         }
-        Jumper.open(link: link, show: { [weak self] in self?.show($0) })
+        open(card: card, attachment: attachment)
+    }
+
+    func open(card: PinCard, attachment: PinAttachment) {
+        guard let destination = board.card(id: card.id)?.attachments.first(where: { $0.id == attachment.id }) else { return }
+        board.touch(id: card.id)
+        savePins()
+        Jumper.open(link: destination.link, in: store, show: { [weak self] in self?.show($0) })
     }
 
     func addNote(title: String, next: String = "", group: String = PinBoard.inbox) {
@@ -576,7 +605,7 @@ final class AppModel: ObservableObject {
         NSPasteboard.general.setString(handoff, forType: .string)
         board.touch(id: card.id)
         savePins()
-        if case .url(let string) = card.link, let host = URL(string: string)?.host {
+        if card.attachments.count == 1, case .url(let string) = card.link, let host = URL(string: string)?.host {
             let newChat: String?
             if host.hasSuffix("claude.ai") { newChat = "https://claude.ai/new" }
             else if host.hasSuffix("chatgpt.com") || host.hasSuffix("chat.openai.com") { newChat = "https://chatgpt.com/" }

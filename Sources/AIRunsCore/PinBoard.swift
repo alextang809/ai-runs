@@ -24,6 +24,73 @@ public enum PinLink: Codable, Equatable, Sendable {
     }
 }
 
+public struct PinAttachment: Codable, Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let title: String
+    public let link: PinLink
+
+    public init(id: UUID = UUID(), title: String, link: PinLink) {
+        self.id = id
+        self.title = title
+        self.link = Self.restoreWebLink(link)
+    }
+
+    private static func restoreWebLink(_ link: PinLink) -> PinLink {
+        // Legacy browser pins only saved the ID extracted by the browser extension.
+        guard case let .session(tool, id, _, _) = link, tool.isWeb,
+              id.range(of: #"\A[A-Za-z0-9-]{8,128}\z"#, options: .regularExpression) != nil else {
+            return link
+        }
+        let prefix = tool == .claudeWeb ? "https://claude.ai/chat/" : "https://chatgpt.com/c/"
+        return .url(prefix + id)
+    }
+
+    public static func session(_ session: Session) -> Self {
+        let link: PinLink
+        if let project = session.claudeAppLink {
+            link = .url(project.absoluteString)
+        } else if session.tool == .claudeWeb, let address = session.webURL, let url = artifactURL(address),
+                  url.scheme?.lowercased() == "https", url.host?.lowercased() == "claude.ai" {
+            link = .url(url.absoluteString)
+        } else {
+            link = .session(tool: session.tool, sessionId: session.sessionId, cwd: session.cwd, terminal: session.terminal)
+        }
+        return Self(title: session.title, link: link)
+    }
+
+    public static func artifact(_ input: String, title: String = "") -> Self? {
+        let address = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = artifactURL(address), let host = url.host else { return nil }
+        let label = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let destination = host + (url.path == "/" ? "" : url.path)
+        return Self(title: TextUtils.truncate(label.isEmpty ? destination : label, limit: 120),
+                    link: .url(url.absoluteString))
+    }
+
+    public func matches(_ other: Self) -> Bool {
+        switch (link, other.link) {
+        case let (.session(tool, id, _, _), .session(otherTool, otherID, _, _)):
+            return tool == otherTool && id == otherID
+        case let (.app(bundleID, _), .app(otherBundleID, _)):
+            return bundleID == otherBundleID
+        default:
+            return link == other.link
+        }
+    }
+
+    private static func artifactURL(_ address: String) -> URL? {
+        let invalidCharacters = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
+        guard address.utf8.count <= 8_192, !address.contains("\\"),
+              address.rangeOfCharacter(from: invalidCharacters) == nil,
+              let components = URLComponents(string: address),
+              let scheme = components.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              let host = components.host, !host.isEmpty, host.rangeOfCharacter(from: invalidCharacters) == nil,
+              components.port.map({ (1...65_535).contains($0) }) ?? true,
+              components.user == nil, components.password == nil else { return nil }
+        return components.url
+    }
+}
+
 public struct PinCard: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
     public var title: String
@@ -32,7 +99,8 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
     /// True when `next` was suggested from the AI's last reply.
     public var nextIsSuggested: Bool
     public var group: String
-    public var link: PinLink?
+    public fileprivate(set) var attachments: [PinAttachment]
+    public var link: PinLink? { attachments.first?.link }
     /// A passage the user wanted to keep from a reply.
     public var excerpt: String?
     public var createdAt: Date
@@ -47,10 +115,54 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
         self.next = next
         self.nextIsSuggested = nextIsSuggested
         self.group = group
-        self.link = link
+        self.attachments = link.map { [PinAttachment(id: id, title: title, link: $0)] } ?? []
         self.excerpt = excerpt
         self.createdAt = createdAt
         self.touchedAt = touchedAt ?? createdAt
+    }
+
+    fileprivate func withAttachments(_ attachments: [PinAttachment], at date: Date) -> Self {
+        var copy = self
+        copy.attachments = attachments
+        copy.touchedAt = date
+        return copy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, next, nextIsSuggested, group, link, attachments, excerpt, createdAt, touchedAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        next = try values.decode(String.self, forKey: .next)
+        nextIsSuggested = try values.decode(Bool.self, forKey: .nextIsSuggested)
+        group = try values.decode(String.self, forKey: .group)
+        excerpt = try values.decodeIfPresent(String.self, forKey: .excerpt)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        touchedAt = try values.decode(Date.self, forKey: .touchedAt)
+        if let saved = try values.decodeIfPresent([PinAttachment].self, forKey: .attachments) {
+            attachments = saved
+        } else if let legacy = try values.decodeIfPresent(PinLink.self, forKey: .link) {
+            attachments = [PinAttachment(id: id, title: title, link: legacy)]
+        } else {
+            attachments = []
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(title, forKey: .title)
+        try values.encode(next, forKey: .next)
+        try values.encode(nextIsSuggested, forKey: .nextIsSuggested)
+        try values.encode(group, forKey: .group)
+        try values.encode(attachments, forKey: .attachments)
+        try values.encodeIfPresent(link, forKey: .link)
+        try values.encodeIfPresent(excerpt, forKey: .excerpt)
+        try values.encode(createdAt, forKey: .createdAt)
+        try values.encode(touchedAt, forKey: .touchedAt)
     }
 }
 
@@ -107,17 +219,19 @@ public struct PinBoard: Codable, Equatable, Sendable {
     /// Pins a session. If it is already pinned, the existing card is refreshed instead.
     @discardableResult
     public mutating func pin(session: Session, now: Date = Date()) -> PinCard {
-        // Project conversations are pinned by their own links; local executors come and go.
-        let threadLink = session.claudeAppLink.map { PinLink.url($0.absoluteString) }
-        if let index = cards.firstIndex(where: {
-            if let threadLink { return $0.link == threadLink }
-            if case .session(let tool, let sessionId, _, _) = $0.link {
-                return tool == session.tool && sessionId == session.sessionId
-            }
-            return false
+        let attachment = PinAttachment.session(session)
+        if let index = cards.firstIndex(where: { card in
+            card.attachments.contains { $0.matches(attachment) || Self.isLegacyWebPin($0, for: session) }
         }) {
-            cards[index].touchedAt = now
-            if let question = TextUtils.lastQuestion(in: session.lastMessage), cards[index].nextIsSuggested || cards[index].next.isEmpty {
+            let card = cards[index]
+            let refreshed = card.attachments.map { saved in
+                guard saved.matches(attachment) || Self.isLegacyWebPin(saved, for: session) else { return saved }
+                return PinAttachment(id: saved.id, title: attachment.title, link: attachment.link)
+            }
+            let updated = card.withAttachments(refreshed, at: now)
+            cards[index] = updated
+            if updated.attachments.count == 1, let question = TextUtils.lastQuestion(in: session.lastMessage),
+               updated.nextIsSuggested || updated.next.isEmpty {
                 cards[index].next = question
                 cards[index].nextIsSuggested = true
             }
@@ -129,12 +243,36 @@ public struct PinBoard: Codable, Equatable, Sendable {
             next: question ?? "",
             nextIsSuggested: question != nil,
             group: session.project.isEmpty ? PinBoard.inbox : session.project,
-            link: threadLink ?? .session(tool: session.tool, sessionId: session.sessionId, cwd: session.cwd, terminal: session.terminal),
+            link: attachment.link,
             excerpt: TextUtils.preview(of: session.lastMessage, limit: 400),
             createdAt: now
         )
         add(card)
         return card
+    }
+
+    private static func isLegacyWebPin(_ attachment: PinAttachment, for session: Session) -> Bool {
+        guard session.tool == .claudeWeb, case let .session(tool, id, _, _) = attachment.link else { return false }
+        return tool == session.tool && id == session.sessionId
+    }
+
+    @discardableResult
+    public mutating func attach(_ attachment: PinAttachment, to cardID: UUID, now: Date = Date()) -> Bool {
+        guard let index = cards.firstIndex(where: { $0.id == cardID }) else { return false }
+        let card = cards[index]
+        guard !card.attachments.contains(where: { $0.id == attachment.id || $0.matches(attachment) }) else { return false }
+        cards[index] = card.withAttachments(card.attachments + [attachment], at: now)
+        return true
+    }
+
+    @discardableResult
+    public mutating func detach(_ attachmentID: UUID, from cardID: UUID, now: Date = Date()) -> Bool {
+        guard let index = cards.firstIndex(where: { $0.id == cardID }) else { return false }
+        let card = cards[index]
+        let remaining = card.attachments.filter { $0.id != attachmentID }
+        guard remaining.count != card.attachments.count else { return false }
+        cards[index] = card.withAttachments(remaining, at: now)
+        return true
     }
 
     public mutating func update(id: UUID, title: String? = nil, next: String? = nil, group: String? = nil,

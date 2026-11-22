@@ -49,14 +49,37 @@ enum Jumper {
               terminal: session.terminal, title: session.title, isWorking: session.state == .working, show: show)
     }
 
-    static func open(link: PinLink, show: @escaping (String) -> Void) {
+    static func currentSession(for link: PinLink, in store: SessionStore) -> Session? {
+        switch link {
+        case .session(let tool, let sessionID, _, _):
+            return store.sessions[Session.key(tool: tool, sessionId: sessionID)]
+        case .url(let address):
+            return store.sessions.values.first { session in
+                session.claudeAppLink?.absoluteString == address || (session.tool.isWeb && session.webURL == address)
+            }
+        case .app:
+            return nil
+        }
+    }
+
+    static func open(link: PinLink, in store: SessionStore, show: @escaping (String) -> Void) {
+        if let session = currentSession(for: link, in: store) {
+            open(session: session, show: show)
+            return
+        }
         switch link {
         case .url(let string):
-            guard let url = URL(string: string) else { return }
-            NSWorkspace.shared.open(url)
+            guard let url = URL(string: string), NSWorkspace.shared.open(url) else {
+                show("Couldn’t open this link.")
+                return
+            }
         case .app(let bundleId, let name):
             if !activate(bundleId: bundleId) { show("Couldn’t open \(name).") }
         case .session(let tool, let sessionId, let cwd, let terminal):
+            guard !tool.isWeb else {
+                show("Reopen the original browser conversation to reconnect this saved link.")
+                return
+            }
             focus(tool: tool, sessionId: sessionId, cwd: cwd, terminal: terminal, title: nil, isWorking: false, show: show)
         }
     }

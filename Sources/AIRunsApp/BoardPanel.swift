@@ -10,11 +10,23 @@ struct BoardView: View {
     @State private var draft = ""
     @State private var dropTargeted = false
     @State private var showStale = false
+    @State private var linkCardID: UUID?
 
     var body: some View {
+        Group {
+            if let linkCardID, let card = model.board.card(id: linkCardID) {
+                BoardLinkEditor(card: card, model: model) { self.linkCardID = nil }
+            } else {
+                board
+            }
+        }
+        .frame(minWidth: 240, minHeight: 220)
+    }
+
+    private var board: some View {
         let groups = model.board.groups(now: model.now)
         let stale = model.board.staleCards(now: model.now)
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             HStack(spacing: 6) {
                 TextField("Quick note…", text: $draft)
                     .textFieldStyle(.roundedBorder)
@@ -40,7 +52,8 @@ struct BoardView: View {
                             .padding(.top, 8)
                             .padding(.bottom, 2)
                         ForEach(group.cards) { card in
-                            BoardCard(card: card, stale: false, now: model.now, model: model, editCard: editCard)
+                            BoardCard(card: card, stale: false, now: model.now, model: model,
+                                      editCard: editCard, editLinks: { linkCardID = card.id })
                         }
                     }
                     if !stale.isEmpty {
@@ -60,7 +73,8 @@ struct BoardView: View {
                         .padding(.top, 10)
                         if showStale {
                             ForEach(stale) { card in
-                                BoardCard(card: card, stale: true, now: model.now, model: model, editCard: editCard)
+                                BoardCard(card: card, stale: true, now: model.now, model: model,
+                                          editCard: editCard, editLinks: { linkCardID = card.id })
                             }
                         }
                     }
@@ -78,7 +92,6 @@ struct BoardView: View {
                     .foregroundStyle(dropTargeted ? Color.primary : Color.secondary.opacity(0.5)))
                 .padding(10)
         }
-        .frame(minWidth: 240, minHeight: 220)
         .onDrop(of: [UTType.url, UTType.plainText], isTargeted: $dropTargeted, perform: handleDrop)
     }
 
@@ -114,10 +127,52 @@ struct BoardCard: View {
     let now: Date
     @ObservedObject var model: AppModel
     let editCard: (PinCard) -> Void
+    let editLinks: () -> Void
     @State private var hovering = false
     @State private var expanded = false
+    @State private var showAllLinks = false
+
+    private static let visibleLinkCount = 3
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                cardSummary
+                Button(action: editLinks) {
+                    Image(systemName: "link.badge.plus")
+                        .frame(width: 23, height: 23)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Manage links for \(card.title)")
+                .help(card.attachments.isEmpty ? "Add Links…" : "Manage Links…")
+            }
+            if !card.attachments.isEmpty {
+                attachmentList
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
+        .opacity(stale ? 0.6 : 1)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .contextMenu {
+            if let attachment = card.attachments.first {
+                if card.attachments.count == 1 {
+                    Button("Open") { model.open(card: card, attachment: attachment) }
+                }
+                Button("Continue in a New Chat") { model.continueInNewChat(card: card) }
+            }
+            Button("Edit…") { editCard(card) }
+            Button(card.attachments.isEmpty ? "Add Links…" : "Manage Links…", action: editLinks)
+            if stale { Button("Still Working on It") { model.keep(cardId: card.id) } }
+            Divider()
+            Button("Archive") { model.archive(cardId: card.id) }
+        }
+    }
+
+    private var cardSummary: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(card.title).font(AppTypography.rowTitle).lineLimit(2)
@@ -139,23 +194,42 @@ struct BoardCard: View {
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
             }
         }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
-        .opacity(stale ? 0.6 : 1)
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .onTapGesture(count: 2) { model.open(card: card) }
-        .onTapGesture { expanded.toggle() }
-        .help(card.link.map { "Double-click to open \($0.label)" } ?? "Click to expand")
-        .contextMenu {
-            if card.link != nil {
-                Button("Open") { model.open(card: card) }
-                Button("Continue in a New Chat") { model.continueInNewChat(card: card) }
+        .onTapGesture(count: 2) {
+            if card.attachments.count == 1, let attachment = card.attachments.first {
+                model.open(card: card, attachment: attachment)
+            } else {
+                expanded.toggle()
             }
-            Button("Edit…") { editCard(card) }
-            if stale { Button("Still Working on It") { model.keep(cardId: card.id) } }
-            Divider()
-            Button("Archive") { model.archive(cardId: card.id) }
+        }
+        .onTapGesture { expanded.toggle() }
+    }
+
+    private var attachmentList: some View {
+        let shownLinks = showAllLinks ? card.attachments[...] : card.attachments.prefix(Self.visibleLinkCount)
+        return VStack(alignment: .leading, spacing: 2) {
+            ForEach(shownLinks) { attachment in
+                Button { model.open(card: card, attachment: attachment) } label: {
+                    Label(attachment.boardTitle, systemImage: attachment.boardIcon)
+                        .font(AppTypography.metadata)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 3)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .help("Open \(attachment.title) · \(attachment.link.label)")
+            }
+            if card.attachments.count > Self.visibleLinkCount {
+                Button(showAllLinks ? "Show fewer links" : "Show \(card.attachments.count - Self.visibleLinkCount) more links") {
+                    showAllLinks.toggle()
+                }
+                .buttonStyle(.plain)
+                .font(AppTypography.section)
+                .foregroundStyle(.secondary)
+            }
         }
     }
 }
