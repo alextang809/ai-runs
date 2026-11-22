@@ -51,6 +51,12 @@ final class FloatingController: NSObject {
 
     func toggle() { isVisible ? hide() : show() }
 
+    func showPinned() {
+        state.tab = .pinned
+        state.expanded = true
+        show()
+    }
+
     func show() {
         let panel = self.panel ?? makePanel()
         self.panel = panel

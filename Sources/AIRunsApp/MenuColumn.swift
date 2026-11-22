@@ -119,6 +119,7 @@ struct MenuColumn: View {
         let sessions = model.store.ordered()
         let menu = MenuSessionPresentation(sessions: sessions)
         let overlap = Overlap.sameRepo(sessions)
+        let nextCards = model.board.menuNextCards
         VStack(alignment: .leading, spacing: 0) {
             // Setup notices scroll with content so the fixed header and footer
             // still fit when permissions and both providers need attention.
@@ -135,16 +136,28 @@ struct MenuColumn: View {
                 ThreadsHint(model: model)
             }
             .padding(.horizontal, 14)
-            if menu.hasActiveSessions {
-                if !menu.needs.isEmpty {
-                    SectionLabel(title: "Needs you", count: menu.needs.count)
-                    rows(menu.needs, overlap: overlap)
+            if !menu.needs.isEmpty {
+                SectionLabel(title: "Needs you", count: menu.needs.count)
+                rows(menu.needs, overlap: overlap)
+            }
+            if !nextCards.isEmpty {
+                MenuPinnedNext(cards: nextCards, expandedCardID: $ui.expandedNextCardID,
+                               cancelHover: { ui.cancelHover() }) { card, attachment in
+                    actions.closePanel()
+                    model.open(card: card, attachment: attachment)
                 }
-                if !menu.working.isEmpty {
-                    SectionLabel(title: "Working", count: menu.working.count, showsTimeScale: true)
-                    rows(menu.working, overlap: overlap)
-                }
+                .onHover { if $0 { ui.cancelHover() } }
             } else {
+                SectionLabel(title: "Next", count: 0)
+                MenuRow(title: "Choose from Pinned…", systemImage: "pin") { actions.showPinnedBoard() }
+                    .padding(.horizontal, 5)
+                    .onHover { if $0 { ui.cancelHover() } }
+            }
+            if !menu.working.isEmpty {
+                SectionLabel(title: "Working", count: menu.working.count, showsTimeScale: true)
+                rows(menu.working, overlap: overlap)
+            }
+            if !menu.hasActiveSessions {
                 idleActions
             }
             if !menu.unknown.isEmpty {

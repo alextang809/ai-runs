@@ -106,6 +106,7 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
     public var createdAt: Date
     /// Last time the user did anything with the card.
     public var touchedAt: Date
+    public fileprivate(set) var menuNextAt: Date?
 
     public init(id: UUID = UUID(), title: String, next: String = "", nextIsSuggested: Bool = false,
                 group: String = PinBoard.inbox, link: PinLink? = nil, excerpt: String? = nil,
@@ -129,7 +130,7 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, next, nextIsSuggested, group, link, attachments, excerpt, createdAt, touchedAt
+        case id, title, next, nextIsSuggested, group, link, attachments, excerpt, createdAt, touchedAt, menuNextAt
     }
 
     public init(from decoder: any Decoder) throws {
@@ -142,6 +143,7 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
         excerpt = try values.decodeIfPresent(String.self, forKey: .excerpt)
         createdAt = try values.decode(Date.self, forKey: .createdAt)
         touchedAt = try values.decode(Date.self, forKey: .touchedAt)
+        menuNextAt = try values.decodeIfPresent(Date.self, forKey: .menuNextAt)
         if let saved = try values.decodeIfPresent([PinAttachment].self, forKey: .attachments) {
             attachments = saved
         } else if let legacy = try values.decodeIfPresent(PinLink.self, forKey: .link) {
@@ -163,12 +165,14 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
         try values.encodeIfPresent(excerpt, forKey: .excerpt)
         try values.encode(createdAt, forKey: .createdAt)
         try values.encode(touchedAt, forKey: .touchedAt)
+        try values.encodeIfPresent(menuNextAt, forKey: .menuNextAt)
     }
 }
 
 /// The user's pinned threads and notes.
 public struct PinBoard: Codable, Equatable, Sendable {
     public static let inbox = "Inbox"
+    public static let maximumMenuNextCards = 3
     /// Cards untouched for this long move to "Maybe done".
     public static let staleAfter: TimeInterval = 3 * 24 * 3600
 
@@ -208,6 +212,33 @@ public struct PinBoard: Codable, Equatable, Sendable {
         var names = Array(Set(cards.map(\.group))).sorted()
         if !names.contains(PinBoard.inbox) { names.insert(PinBoard.inbox, at: 0) }
         return names
+    }
+
+    public var menuNextCards: [PinCard] {
+        let selections = cards.compactMap { card -> (date: Date, card: PinCard)? in
+            guard let date = card.menuNextAt, !card.next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return nil }
+            return (date, card)
+        }
+        return selections.sorted { lhs, rhs in
+            lhs.date == rhs.date ? lhs.card.id.uuidString < rhs.card.id.uuidString : lhs.date < rhs.date
+        }.prefix(Self.maximumMenuNextCards).map(\.card)
+    }
+
+    @discardableResult
+    public mutating func setMenuNext(_ selected: Bool, for cardID: UUID, now: Date = Date()) -> Bool {
+        guard let index = cards.firstIndex(where: { $0.id == cardID }),
+              selected == (cards[index].menuNextAt == nil) else { return false }
+        let card = cards[index]
+        if selected {
+            guard menuNextCards.count < Self.maximumMenuNextCards,
+                  !card.next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        }
+        var updated = card
+        updated.menuNextAt = selected ? now : nil
+        updated.touchedAt = now
+        cards[index] = updated
+        return true
     }
 
     public func card(id: UUID) -> PinCard? { cards.first { $0.id == id } }
@@ -282,6 +313,7 @@ public struct PinBoard: Codable, Equatable, Sendable {
         if let next {
             cards[index].next = next
             cards[index].nextIsSuggested = false
+            if next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { cards[index].menuNextAt = nil }
         }
         if let group {
             let trimmed = group.trimmingCharacters(in: .whitespaces)
@@ -305,7 +337,9 @@ public struct PinBoard: Codable, Equatable, Sendable {
     /// Undoes `archive`: puts the card back where it was.
     public mutating func unarchive(id: UUID, at index: Int) {
         guard let position = archived.firstIndex(where: { $0.id == id }) else { return }
-        cards.insert(archived.remove(at: position), at: min(max(0, index), cards.count))
+        var card = archived.remove(at: position)
+        if menuNextCards.count >= Self.maximumMenuNextCards { card.menuNextAt = nil }
+        cards.insert(card, at: min(max(0, index), cards.count))
     }
 
     public func index(of id: UUID) -> Int? { cards.firstIndex { $0.id == id } }

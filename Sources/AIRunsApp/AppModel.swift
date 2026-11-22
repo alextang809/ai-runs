@@ -534,6 +534,30 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func setMenuNext(_ selected: Bool, for cardID: UUID, next: String? = nil) -> Bool {
+        var updated = board
+        if let next {
+            let trimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return false }
+            updated.update(id: cardID, next: trimmed)
+        }
+        guard updated.setMenuNext(selected, for: cardID) else {
+            if selected, updated.menuNextCards.count >= PinBoard.maximumMenuNextCards {
+                show("Main menu is full. Remove a Next item to add another.")
+            }
+            return false
+        }
+        do {
+            try JSONFile.save(updated, to: paths.pins)
+            board = updated
+            return true
+        } catch {
+            show("Couldn’t save the main menu selection.")
+            return false
+        }
+    }
+
     func open(card: PinCard) {
         guard let attachments = board.card(id: card.id)?.attachments else { return }
         guard attachments.count == 1, let attachment = attachments.first else {

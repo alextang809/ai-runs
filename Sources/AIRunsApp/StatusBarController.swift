@@ -8,6 +8,7 @@ import SwiftUI
 protocol PanelActions: AnyObject {
     func closePanel()
     func toggleBoard()
+    func showPinnedBoard()
     var isBoardVisible: Bool { get }
     func showSettings()
     func showAccounts()
@@ -234,6 +235,11 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
 
     var isBoardVisible: Bool { floating.isVisible }
 
+    func showPinnedBoard() {
+        closePanel()
+        floating.showPinned()
+    }
+
     /// Shows or hides the floating window (runs and the pinned board).
     func toggleBoard() {
         closePanel()
@@ -381,6 +387,7 @@ final class PanelUIState: ObservableObject {
 
     static let staleGroup = "__stale__"
 
+    @Published var expandedNextCardID: UUID?
     @Published var hover: Target?
     @Published var rowFrames: [String: CGRect] = [:]
     @Published var collapsed: Set<String> = [PanelUIState.staleGroup]
@@ -433,6 +440,7 @@ final class PanelUIState: ObservableObject {
     }
 
     func reset() {
+        expandedNextCardID = nil
         cancelHover()
         addingNote = false
         draft = ""

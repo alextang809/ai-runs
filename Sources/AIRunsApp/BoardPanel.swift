@@ -131,13 +131,32 @@ struct BoardCard: View {
     @State private var hovering = false
     @State private var expanded = false
     @State private var showAllLinks = false
+    @State private var editingMenuNext = false
+    @State private var nextDraft = ""
+    @FocusState private var nextFieldFocused: Bool
 
     private static let visibleLinkCount = 3
+
+    private var showsInMainMenu: Bool { card.menuNextAt != nil }
+    private var hasNext: Bool { !card.next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var mainMenuAction: String {
+        if showsInMainMenu { return "Remove from Main Menu" }
+        return hasNext ? "Show in Main Menu" : "Add Next to Main Menu…"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top, spacing: 6) {
                 cardSummary
+                Button(action: toggleMainMenu) {
+                    Image(systemName: showsInMainMenu ? "pin.fill" : "pin")
+                        .frame(width: 23, height: 23)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(showsInMainMenu ? Color.accentColor : Color.secondary)
+                .accessibilityLabel("\(mainMenuAction), \(card.title)")
+                .help(mainMenuAction)
                 Button(action: editLinks) {
                     Image(systemName: "link.badge.plus")
                         .frame(width: 23, height: 23)
@@ -147,6 +166,9 @@ struct BoardCard: View {
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Manage links for \(card.title)")
                 .help(card.attachments.isEmpty ? "Add Links…" : "Manage Links…")
+            }
+            if editingMenuNext {
+                menuNextEditor
             }
             if !card.attachments.isEmpty {
                 attachmentList
@@ -165,11 +187,49 @@ struct BoardCard: View {
                 Button("Continue in a New Chat") { model.continueInNewChat(card: card) }
             }
             Button("Edit…") { editCard(card) }
+            Button(mainMenuAction, action: toggleMainMenu)
             Button(card.attachments.isEmpty ? "Add Links…" : "Manage Links…", action: editLinks)
             if stale { Button("Still Working on It") { model.keep(cardId: card.id) } }
             Divider()
             Button("Archive") { model.archive(cardId: card.id) }
         }
+    }
+
+    private func toggleMainMenu() {
+        if showsInMainMenu || hasNext {
+            model.setMenuNext(!showsInMainMenu, for: card.id)
+        } else {
+            editingMenuNext = true
+            nextFieldFocused = true
+        }
+    }
+
+    private var menuNextEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("What’s the next step?", text: $nextDraft)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Next step for \(card.title)")
+                .focused($nextFieldFocused)
+                .onSubmit(saveMenuNext)
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                Button("Cancel") { closeMenuNextEditor() }
+                Button("Show in Main Menu", action: saveMenuNext)
+                    .disabled(nextDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private func saveMenuNext() {
+        let next = nextDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !next.isEmpty, model.setMenuNext(true, for: card.id, next: next) else { return }
+        closeMenuNextEditor()
+    }
+
+    private func closeMenuNextEditor() {
+        editingMenuNext = false
+        nextDraft = ""
     }
 
     private var cardSummary: some View {
@@ -181,10 +241,12 @@ struct BoardCard: View {
                     .font(AppTypography.elapsed)
                     .foregroundStyle(.secondary)
             }
-            Text(card.next.isEmpty ? "No next step yet" : "Next: \(card.next)")
-                .font(AppTypography.body)
-                .foregroundStyle(.secondary)
-                .lineLimit(expanded ? nil : 2)
+            if !editingMenuNext {
+                Text(hasNext ? "Next: \(card.next)" : "No next step yet")
+                    .font(AppTypography.body)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(expanded ? nil : 2)
+            }
             if expanded, let excerpt = card.excerpt, !excerpt.isEmpty {
                 Text(excerpt)
                     .font(AppTypography.body)
