@@ -95,6 +95,7 @@ struct SessionRow: View {
         .reportFrame(key.key)
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
+        .accessibilityAction(named: "Pin to Board", pin)
         .accessibilityLabel("\(session.title), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(workDuration.map { ". Observed working time, \($0)" } ?? "")\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
         .accessibilityAddTraits(.isButton)
     }

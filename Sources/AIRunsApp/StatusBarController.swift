@@ -9,6 +9,8 @@ protocol PanelActions: AnyObject {
     func closePanel()
     func toggleBoard()
     func showPinnedBoard()
+    func pinSession(_ sessionID: String)
+    func pinSessionInMenu(_ sessionID: String)
     var isBoardVisible: Bool { get }
     func showSettings()
     func showAccounts()
@@ -235,6 +237,19 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
 
     var isBoardVisible: Bool { floating.isVisible }
 
+    func pinSessionInMenu(_ sessionID: String) {
+        guard let card = model.pin(sessionId: sessionID) else { return }
+        ui.cancelHover()
+        ui.expandedNextCardID = card.id
+        ui.menuPinRevealID = UUID()
+    }
+
+    func pinSession(_ sessionID: String) {
+        guard let card = model.pin(sessionId: sessionID) else { return }
+        closePanel()
+        floating.showPinned(cardID: card.id)
+    }
+
     func showPinnedBoard() {
         closePanel()
         floating.showPinned()
@@ -388,6 +403,7 @@ final class PanelUIState: ObservableObject {
     static let staleGroup = "__stale__"
 
     @Published var expandedNextCardID: UUID?
+    @Published var menuPinRevealID: UUID?
     @Published var hover: Target?
     @Published var rowFrames: [String: CGRect] = [:]
     @Published var collapsed: Set<String> = [PanelUIState.staleGroup]
@@ -441,6 +457,7 @@ final class PanelUIState: ObservableObject {
 
     func reset() {
         expandedNextCardID = nil
+        menuPinRevealID = nil
         cancelHover()
         addingNote = false
         draft = ""

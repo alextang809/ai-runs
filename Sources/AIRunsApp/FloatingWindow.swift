@@ -15,10 +15,16 @@ enum FloatingSettings {
 @MainActor
 final class FloatingState: ObservableObject {
     enum Tab: String { case runs, pinned }
+
+    struct PinReveal: Hashable {
+        let cardID: UUID
+        private let requestID = UUID()
+    }
     @Published var expanded = UserDefaults.standard.bool(forKey: FloatingSettings.expandedKey) {
         didSet { UserDefaults.standard.set(expanded, forKey: FloatingSettings.expandedKey) }
     }
     @Published var tab: Tab = .runs
+    @Published var pinReveal: PinReveal?
     /// Expanded by itself because something needed the user; folds back after a jump.
     var autoExpanded = false
 }
@@ -51,7 +57,8 @@ final class FloatingController: NSObject {
 
     func toggle() { isVisible ? hide() : show() }
 
-    func showPinned() {
+    func showPinned(cardID: UUID? = nil) {
+        state.pinReveal = cardID.map { FloatingState.PinReveal(cardID: $0) }
         state.tab = .pinned
         state.expanded = true
         show()
@@ -171,6 +178,7 @@ final class FloatingController: NSObject {
 
     func rename(_ id: String) { actions?.renameSession(id) }
     func editCard(_ card: PinCard) { actions?.editCard(card) }
+    func pinSession(_ sessionID: String) { actions?.pinSession(sessionID) }
 }
 
 // MARK: - Views
@@ -298,7 +306,7 @@ struct FloatingCard: View {
                 switch state.tab {
                 case .runs: runs
                 case .pinned:
-                    BoardView(model: model, editCard: { controller.editCard($0) })
+                    BoardView(model: model, editCard: { controller.editCard($0) }, reveal: state.pinReveal)
                         .frame(height: 360)
                 }
             }
@@ -362,7 +370,7 @@ struct FloatingCard: View {
                     FloatingRow(session: session, now: model.now,
                                 open: { controller.open(session) },
                                 rename: { controller.rename(session.id) },
-                                pin: { model.pin(sessionId: session.id) },
+                                pin: { controller.pinSession(session.id) },
                                 remove: { model.remove(sessionId: session.id) },
                                 ignore: ignoreAction(for: session))
                 }

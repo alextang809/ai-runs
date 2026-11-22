@@ -45,11 +45,19 @@ struct MenuColumn: View {
                     SeparatorLine()
                 }
                 .menuHeight(.header)
-                ScrollView(.vertical) {
-                    activeSection
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .menuHeight(.sessions)
+                ScrollViewReader { scroll in
+                    ScrollView(.vertical) {
+                        activeSection
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .menuHeight(.sessions)
+                    }
+                    .task(id: ui.menuPinRevealID) {
+                        guard ui.menuPinRevealID != nil, let cardID = ui.expandedNextCardID else { return }
+                        await Task.yield()
+                        guard !Task.isCancelled else { return }
+                        scroll.scrollTo(cardID, anchor: .top)
+                    }
                 }
                 .frame(height: sessionHeight)
                 VStack(spacing: 0) {
@@ -140,19 +148,14 @@ struct MenuColumn: View {
                 SectionLabel(title: "Needs you", count: menu.needs.count)
                 rows(menu.needs, overlap: overlap)
             }
-            if !nextCards.isEmpty {
-                MenuPinnedNext(cards: nextCards, expandedCardID: $ui.expandedNextCardID,
-                               cancelHover: { ui.cancelHover() }) { card, attachment in
-                    actions.closePanel()
-                    model.open(card: card, attachment: attachment)
-                }
-                .onHover { if $0 { ui.cancelHover() } }
-            } else {
-                SectionLabel(title: "Next", count: 0)
-                MenuRow(title: "Choose from Pinned…", systemImage: "pin") { actions.showPinnedBoard() }
-                    .padding(.horizontal, 5)
-                    .onHover { if $0 { ui.cancelHover() } }
+            MenuPinnedNext(cards: nextCards, pinnedCards: model.board.cards, expandedCardID: $ui.expandedNextCardID,
+                           cancelHover: { ui.cancelHover() }, updateNext: { card, selected, next in
+                model.setMenuNext(selected, for: card.id, next: next)
+            }, archiveCard: { model.archive(cardId: $0.id) }) { card, attachment in
+                actions.closePanel()
+                model.open(card: card, attachment: attachment)
             }
+            .onHover { if $0 { ui.cancelHover() } }
             if !menu.working.isEmpty {
                 SectionLabel(title: "Working", count: menu.working.count, showsTimeScale: true)
                 rows(menu.working, overlap: overlap)
@@ -234,7 +237,7 @@ struct MenuColumn: View {
                            completedWorkDuration: model.store.completedWorkDuration(for: session.id), now: model.now,
                            alsoHere: (overlap[session.id] ?? []).map(\.title), ui: ui,
                            rename: { actions.renameSession(session.id) },
-                           pin: { model.pin(sessionId: session.id) },
+                           pin: { actions.pinSessionInMenu(session.id) },
                            remove: {
                                ui.hover = nil
                                model.remove(sessionId: session.id)

@@ -509,7 +509,7 @@ struct SessionFlyout: View {
                 actions.closePanel()
                 model.open(sessionId: session.id)
             },
-            FlyoutAction(title: "Pin to Board") { model.pin(sessionId: session.id) },
+            FlyoutAction(title: "Pin to Board") { actions.pinSessionInMenu(session.id) },
             FlyoutAction(title: "Rename…") { actions.renameSession(session.id) },
         ]
         if RunText.canIgnore(session) {

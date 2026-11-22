@@ -27,6 +27,52 @@ final class MenuPinnedNextTests: XCTestCase {
     }
 
     @MainActor
+    func testPinnedCardsAppearImmediatelyWithoutNextSelection() {
+        let start = Date(timeIntervalSince1970: 100)
+        let cards = (0..<5).map { offset in
+            PinCard(title: "Card \(offset)", createdAt: start.addingTimeInterval(Double(offset)))
+        }
+        let shown = MenuPinnedNext.visiblePinnedCards(cards, selected: [], expandedID: nil, showAll: false)
+        XCTAssertEqual(shown.map(\.id), [cards[4], cards[3], cards[2]].map(\.id))
+    }
+
+    @MainActor
+    func testFocusedPinnedCardIsVisibleWithoutOpeningTheFullList() {
+        let selected = PinCard(title: "Selected", next: "Verify build")
+        let pinned = PinCard(title: "Pinned")
+        let shown = MenuPinnedNext.visiblePinnedCards([selected, pinned], selected: [selected],
+                                                      expandedID: pinned.id, showAll: false)
+        XCTAssertEqual(shown.map(\.id), [pinned.id])
+        XCTAssertEqual(MenuPinnedNext.visiblePinnedCards([selected, pinned], selected: [selected],
+                                                        expandedID: nil, showAll: false).map(\.id), [pinned.id])
+    }
+
+    @MainActor
+    func testNewPinRemainsVisibleAfterClosingMenuWithExistingSelections() {
+        let selected = PinCard(title: "Selected", next: "Review")
+        let recent = PinCard(title: "New pin", createdAt: Date(timeIntervalSince1970: 200))
+        let older = PinCard(title: "Older pin", createdAt: Date(timeIntervalSince1970: 100))
+        let ui = PanelUIState()
+        ui.expandedNextCardID = recent.id
+        ui.reset()
+        let visible = MenuPinnedNext.visiblePinnedCards([selected, older, recent], selected: [selected],
+            expandedID: ui.expandedNextCardID, showAll: false)
+        XCTAssertEqual(visible.map(\.id), [recent.id, older.id])
+    }
+
+    @MainActor
+    func testFullSelectionStillRevealsNewPinAndViewAllDeduplicatesSelections() {
+        let selected = (0..<3).map { PinCard(title: "Selected \($0)", next: "Review") }
+        let pinned = PinCard(title: "New pin")
+        XCTAssertEqual(MenuPinnedNext.visiblePinnedCards(selected + [pinned], selected: selected,
+            expandedID: pinned.id, showAll: false).map(\.id), [pinned.id])
+        XCTAssertEqual(MenuPinnedNext.visiblePinnedCards(selected + [pinned], selected: selected,
+            expandedID: nil, showAll: true).map(\.id), [pinned.id])
+        XCTAssertEqual(MenuPinnedNext.visiblePinnedCards(selected + [pinned], selected: selected,
+            expandedID: nil, showAll: false).map(\.id), [pinned.id])
+    }
+
+    @MainActor
     func testClosingMenuClearsExpandedNextCard() {
         let ui = PanelUIState()
         ui.expandedNextCardID = UUID()

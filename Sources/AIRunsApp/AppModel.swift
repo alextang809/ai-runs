@@ -14,8 +14,8 @@ final class AppModel: ObservableObject {
     /// Offered next to `message` for a few seconds after removing something.
     @Published private(set) var undo: (() -> Void)?
 
-    let paths = AIRunsPaths()
-    let installer = HookInstaller()
+    let paths: AIRunsPaths
+    let installer: HookInstaller
     let usage = UsageMonitor()
     let accounts = AccountManager()
     /// The app that was in front when the panel opened, for "Pin Front AI Window".
@@ -34,7 +34,17 @@ final class AppModel: ObservableObject {
     private var lastPinnableApp: NSRunningApplication?
     private var activationObserver: NSObjectProtocol?
 
+    /// Isolated state for native UI tests; no hooks, observers, or polling start.
+    init(testingRoot: URL, store: SessionStore = SessionStore(), board: PinBoard = PinBoard()) {
+        paths = AIRunsPaths(root: testingRoot)
+        installer = HookInstaller(home: testingRoot)
+        reader = EventLogReader(url: paths.events, offset: 0)
+        self.store = store
+        self.board = board
+    }
     init() {
+        paths = AIRunsPaths()
+        installer = HookInstaller()
         try? paths.ensureRoot()
         let cursor = JSONFile.load(Cursor.self, from: paths.cursor)
         reader = EventLogReader(url: paths.events, offset: cursor?.offset ?? 0)
@@ -502,11 +512,18 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func pin(sessionId: String) {
-        guard let session = store.sessions[sessionId] else { return }
-        let card = board.pin(session: session, now: Date())
-        savePins()
-        show(card.nextIsSuggested ? "Pinned to \(card.group). Next step taken from the last reply." : "Pinned to \(card.group).")
+    func pin(sessionId: String) -> PinCard? {
+        guard let session = store.sessions[sessionId] else { return nil }
+        var updated = board
+        let card = updated.pin(session: session, now: Date())
+        do {
+            try JSONFile.save(updated, to: paths.pins)
+            board = updated
+            return card
+        } catch {
+            show("Couldn’t save the pinned card.")
+            return nil
+        }
     }
 
     // MARK: - Cards
@@ -536,16 +553,21 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func setMenuNext(_ selected: Bool, for cardID: UUID, next: String? = nil) -> Bool {
+        guard let existing = board.card(id: cardID) else { return false }
         var updated = board
         if let next {
             let trimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return false }
             updated.update(id: cardID, next: trimmed)
         }
-        guard updated.setMenuNext(selected, for: cardID) else {
-            if selected, updated.menuNextCards.count >= PinBoard.maximumMenuNextCards {
-                show("Main menu is full. Remove a Next item to add another.")
+        if selected != (existing.menuNextAt != nil) {
+            guard updated.setMenuNext(selected, for: cardID) else {
+                if selected, updated.menuNextCards.count >= PinBoard.maximumMenuNextCards {
+                    show("Three cards are kept at the top. Use recent order for one to keep another.")
+                }
+                return false
             }
+        } else if next == nil {
             return false
         }
         do {
@@ -553,7 +575,7 @@ final class AppModel: ObservableObject {
             board = updated
             return true
         } catch {
-            show("Couldn’t save the main menu selection.")
+            show("Couldn’t save the pinned card.")
             return false
         }
     }
@@ -657,7 +679,7 @@ final class AppModel: ObservableObject {
            let session = store.ordered()
             .filter({ $0.terminal.bundleId == bundle || Jumper.bundleId(for: $0.terminal) == bundle })
             .max(by: { $0.lastEventAt < $1.lastEventAt }) {
-            pin(sessionId: session.id)
+            if let card = pin(sessionId: session.id) { show("Pinned to \(card.group).") }
             return
         }
         if let captured = FrontWindowCapture.capture(app: app) {
