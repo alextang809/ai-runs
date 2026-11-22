@@ -106,14 +106,13 @@ If you don't see it:
 **The overview** shows Needs you, Working and Today counts, a two-hour activity
 chart and today's waiting time.
 
-**Each row** shows the app's real icon, the session name (the same one Claude or
-Codex shows in its sidebar), state and elapsed time, plus readable activity or
+**Each row** shows the app's real icon, the current topic, state and elapsed time, plus readable activity or
 current plan progress and a small history bar. Approval requests and input
 questions use the full activity line. A branch symbol warns when other sessions
 are working in the same repository. Hover for source, project and full details.
 Done starts expanded and can be folded; Ignored starts collapsed. Long lists scroll
-while Settings and the floating-window control stay visible. The pinned board
-lives in the floating window, leaving the main menu for sessions.
+while Settings and the floating-window control stay visible. Saved items appear under
+**Later** in both windows. The floating window also has the full pinned board.
 
 | You see | Means |
 |---|---|
@@ -175,7 +174,8 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 
   <p align="center"><img src="docs/flyout.png" width="560" alt="Hovering a row shows its details and Ignore for Now"></p>
   <p align="center"><sub><i>Illustration: hover a row for its details and actions.</i></sub></p>
-- **Rename**, **Pin to Board** and more: right-click a row, or hover it for details.
+- The displayed topic follows changes in your requests. **Rename** keeps a name of your choice.
+- Choose **Resume Later** on a session to save its current topic, original message and any identified next step. Open the saved card from **Later** in the menu or floating window.
 - **Floating window:** click **Floating Window** at the bottom of the panel. A small capsule stays on
   top of every app, Space and full-screen window, including Stage Manager sets,
   showing how many sessions need you. Switching apps or waking your Mac restores

@@ -15,7 +15,8 @@ struct SessionRow: View {
     var alsoHere: [String] = []
     @ObservedObject var ui: PanelUIState
     let rename: () -> Void
-    let pin: () -> Void
+    let isSavedForLater: Bool
+    let resumeLater: () -> Void
     let remove: () -> Void
     /// "Ignore for Now" or "Stop Ignoring"; nil when this run can't be ignored.
     var ignore: (() -> Void)? = nil
@@ -32,12 +33,12 @@ struct SessionRow: View {
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
-                        Text(session.title)
+                        Text(session.currentTopicTitle)
                             .font(AppTypography.rowTitle)
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         // Always reserved, so nothing moves when the × appears.
-                        Color.clear.frame(width: RemoveZone.slot, height: 18)
+                        Color.clear.frame(width: RemoveZone.slot + 25, height: 18)
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         StatePill(session: session, now: now)
@@ -77,7 +78,7 @@ struct SessionRow: View {
         .buttonStyle(.plain)
         .overlay(alignment: .topTrailing) {
             if highlighted {
-                RemoveZone(label: "Remove \(session.title) from the list", action: remove)
+                RemoveZone(label: "Remove \(session.currentTopicTitle) from the list", action: remove)
                     .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
                     .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
@@ -86,7 +87,7 @@ struct SessionRow: View {
             Button("Open", action: open)
             if let ignore { Button(RunText.ignoreTitle(session), action: ignore) }
             Button("Rename…", action: rename)
-            Button("Pin to Board", action: pin)
+            Button(ResumeLaterButton.title(saved: isSavedForLater), action: resumeLater)
             Divider()
             Button("Remove from List", action: remove)
         }
@@ -95,9 +96,38 @@ struct SessionRow: View {
         .reportFrame(key.key)
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
-        .accessibilityAction(named: "Pin to Board", pin)
-        .accessibilityLabel("\(session.title), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(workDuration.map { ". Observed working time, \($0)" } ?? "")\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
+        .accessibilityAction(named: Text(ResumeLaterButton.title(saved: isSavedForLater)), resumeLater)
+        .accessibilityLabel("\(session.currentTopicTitle), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(workDuration.map { ". Observed working time, \($0)" } ?? "")\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
         .accessibilityAddTraits(.isButton)
+        .overlay(alignment: .topTrailing) {
+            ResumeLaterButton(sessionID: session.id, saved: isSavedForLater, action: resumeLater)
+                .padding(.trailing, RemoveZone.slot + 8)
+                .padding(.top, 4)
+        }
+    }
+}
+
+struct ResumeLaterButton: View {
+    let sessionID: String
+    let saved: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: saved ? "bookmark.fill" : "bookmark")
+                .font(AppTypography.controlIcon)
+                .foregroundStyle(.secondary)
+                .frame(width: 25, height: 23)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(Self.title(saved: saved))
+        .accessibilityLabel(Self.title(saved: saved))
+        .accessibilityIdentifier("session.\(sessionID).resume-later")
+    }
+
+    static func title(saved: Bool) -> String {
+        saved ? "Show Saved Item" : "Resume Later"
     }
 }
 

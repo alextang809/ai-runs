@@ -476,6 +476,7 @@ struct SessionFlyout: View {
         }
 
         var rows: [(String, String)] = []
+        if session.currentTopicTitle != session.title { rows.append(("Session name", session.title)) }
         if session.nativeView?.isOpen == true { rows.append(("View", "Open in Claude")) }
         if session.state == .working, let progress = session.progress {
             rows.append(("Steps", progress.summary))
@@ -496,7 +497,7 @@ struct SessionFlyout: View {
             rows.append(("Status", "\(verdict) · \(source.explanation.lowercased())"))
         }
         if let others = Overlap.sameRepo(Array(model.store.sessions.values))[session.id] {
-            rows.append(("Also running here", others.map(\.title).sorted().joined(separator: ", ")))
+            rows.append(("Also running here", others.map(\.currentTopicTitle).sorted().joined(separator: ", ")))
         }
         rows.append(("Started", Self.clock.string(from: session.startedAt)))
         // Only when AI Runs saw the turn start; otherwise the number means nothing.
@@ -509,7 +510,9 @@ struct SessionFlyout: View {
                 actions.closePanel()
                 model.open(sessionId: session.id)
             },
-            FlyoutAction(title: "Pin to Board") { actions.pinSessionInMenu(session.id) },
+            FlyoutAction(title: ResumeLaterButton.title(saved: model.board.savedForLater(session: session) != nil)) {
+                actions.resumeLaterInMenu(session.id)
+            },
             FlyoutAction(title: "Rename…") { actions.renameSession(session.id) },
         ]
         if RunText.canIgnore(session) {
@@ -530,7 +533,7 @@ struct SessionFlyout: View {
         })
 
         return FlyoutBody(
-            title: session.title,
+            title: session.currentTopicTitle,
             subtitle: subtitle,
             chip: chip,
             rows: rows,

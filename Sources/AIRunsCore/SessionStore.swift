@@ -53,6 +53,8 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// True once the automatic name was chosen; it then stays put instead of
     /// following every reply, so it keeps matching what the user remembers.
     public var titleSettled: Bool?
+    /// Locally observed user prompts can change the displayed topic independently of the tool title.
+    var topic: SessionTopic?
     /// What it is doing right now, in words. Cleared when the turn ends.
     public var activity: String?
     /// Its own step list, when it keeps one.
@@ -243,11 +245,13 @@ public struct SessionStore: Codable, Equatable, Sendable {
             guard userPrompt || event.kind == .needsApproval else { return }
             dismissed?.remove(key)
         }
+        let userPrompt = event.kind == .promptStart && event.drivenBy == nil
+            ? event.prompt.flatMap(UserTopicPrompt.init) : nil
         if session == nil {
             // Any event creates the session, so sessions that started before
             // the hooks were installed still show up. The app replaces the
             // generic title from the transcript when it can.
-            let title = event.prompt.flatMap { TextUtils.cleanPrompt($0) }.map { TextUtils.truncate($0, limit: 48) }
+            let title = userPrompt.map { TextUtils.truncate($0.cleaned, limit: 48) }
                 ?? Session.genericTitle(for: event.tool)
             session = Session(tool: event.tool, sessionId: event.sessionId, title: title, cwd: event.cwd,
                               state: .working, startedAt: event.at, turnStartedAt: event.at,
@@ -273,8 +277,13 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.title = TextUtils.truncate(title, limit: 60)
             current.titleSettled = true
         }
+        // A delayed event from a previous topic must not supply the new topic's saved excerpt.
+        if let topicStart = current.topic?.startedAt, event.at < topicStart { return }
         switch event.kind {
         case .promptStart:
+            if let userPrompt {
+                current.observeTopic(prompt: userPrompt, at: event.at)
+            }
             current.state = .working
             current.turnStartedAt = event.at
             current.waitingSince = nil
@@ -285,7 +294,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.outcomeSource = nil
             current.activity = event.tool.isWeb ? "Writing a reply" : "Thinking"
             if let driver = event.drivenBy { current.drivenBy = driver }
-            if current.firstPrompt == nil, let prompt = event.prompt, let cleaned = TextUtils.cleanPrompt(prompt) {
+            if current.firstPrompt == nil, let cleaned = userPrompt?.cleaned {
                 current.firstPrompt = TextUtils.truncate(cleaned, limit: 600)
                 if current.hasGenericTitle || current.title == "Untitled session" {
                     current.title = TextUtils.truncate(cleaned, limit: 48)

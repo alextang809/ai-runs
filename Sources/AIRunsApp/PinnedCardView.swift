@@ -7,6 +7,7 @@ struct PinnedCardView<Actions: View>: View {
     let card: PinCard
     @Binding var isExpanded: Bool
     var saveNext: ((String) -> Bool)? = nil
+    var liveTitle: ((PinAttachment) -> String?)? = nil
     let openLink: (PinAttachment) -> Void
     var highlighted = false
     @ViewBuilder let actions: Actions
@@ -29,8 +30,9 @@ struct PinnedCardView<Actions: View>: View {
             }
             if isExpanded {
                 Divider().padding(.vertical, 3)
+                if card.isSavedForLater { excerpt }
                 links
-                excerpt
+                if !card.isSavedForLater { excerpt }
             }
         }
         .padding(12)
@@ -49,8 +51,8 @@ struct PinnedCardView<Actions: View>: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 8) {
             Text(card.title)
-                .font(AppTypography.metadata)
-                .foregroundStyle(.secondary)
+                .font(card.isSavedForLater && !hasNext ? AppTypography.rowTitle : AppTypography.metadata)
+                .foregroundStyle(card.isSavedForLater && !hasNext ? Color.primary : Color.secondary)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Menu {
@@ -94,7 +96,7 @@ struct PinnedCardView<Actions: View>: View {
                 .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
                 .accessibilityHint("Show or hide linked sessions and artifacts")
                 .accessibilityIdentifier("\(identifier).toggle")
-            } else if saveNext != nil {
+            } else if saveNext != nil && !card.isSavedForLater {
                 Button("Add a next step…", action: beginEditing)
                     .buttonStyle(.plain)
                     .font(AppTypography.body)
@@ -102,28 +104,62 @@ struct PinnedCardView<Actions: View>: View {
                     .accessibilityIdentifier("\(identifier).edit-next")
                     .padding(.vertical, 2)
             }
-            Button { isExpanded.toggle() } label: {
-                HStack(spacing: 5) {
-                    ForEach(PinnedCardPresentation.tools(for: card.attachments), id: \.self) { tool in
-                        toolIcon(tool)
-                            .font(.system(size: 10))
-                            .frame(width: 14, height: 14)
+            if card.isSavedForLater, card.attachments.count == 1,
+               let attachment = card.attachments.first, let tool = PinnedCardPresentation.tool(for: attachment.link) {
+                if !isExpanded || !hasNext {
+                    HStack {
+                        if !isExpanded {
+                            Button { openLink(attachment) } label: {
+                                HStack(spacing: 4) {
+                                    Text("Open in \(tool.displayName)")
+                                    Image(systemName: "arrow.up.right").accessibilityHidden(true)
+                                }
+                            }
+                            .accessibilityIdentifier("\(identifier).open")
+                        }
+                        Spacer()
+                        if !hasNext {
+                            Button { isExpanded.toggle() } label: {
+                                HStack(spacing: 4) {
+                                    Text("Details")
+                                    disclosureIcon
+                                }
+                            }
+                            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+                            .accessibilityIdentifier("\(identifier).toggle")
+                        }
                     }
-                    Text(PinnedCardPresentation.summary(for: card.attachments))
-                        .font(AppTypography.section)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 2)
-                    if !hasNext { disclosureIcon }
+                    .font(AppTypography.section)
+                    .buttonStyle(.plain)
                 }
-                .contentShape(Rectangle())
+            } else {
+                attachmentSummary
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(PinnedCardPresentation.summary(for: card.attachments))
-            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-            .accessibilityHint("Show or hide linked sessions and artifacts")
-            .accessibilityIdentifier("\(identifier).\(hasNext ? "links-toggle" : "toggle")")
         }
+    }
+
+    private var attachmentSummary: some View {
+        Button { isExpanded.toggle() } label: {
+            HStack(spacing: 5) {
+                ForEach(PinnedCardPresentation.tools(for: card.attachments), id: \.self) { tool in
+                    toolIcon(tool)
+                        .font(.system(size: 10))
+                        .frame(width: 14, height: 14)
+                }
+                Text(PinnedCardPresentation.summary(for: card.attachments))
+                    .font(AppTypography.section)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 2)
+                if !hasNext { disclosureIcon }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(PinnedCardPresentation.summary(for: card.attachments))
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+        .accessibilityHint("Show or hide linked sessions and artifacts")
+        .accessibilityIdentifier("\(identifier).\(hasNext ? "links-toggle" : "toggle")")
     }
 
     private var disclosureIcon: some View {
@@ -177,7 +213,7 @@ struct PinnedCardView<Actions: View>: View {
                         attachmentIcon(attachment)
                             .frame(width: 18, height: 22)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(attachment.title.isEmpty ? attachment.link.label : attachment.title)
+                            Text(linkTitle(attachment))
                                 .font(AppTypography.body)
                                 .foregroundStyle(.primary)
                                 .lineLimit(2)
@@ -197,26 +233,39 @@ struct PinnedCardView<Actions: View>: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Open \(attachment.title) · \(attachment.link.label)")
+                .help("Open \(linkTitle(attachment)) · \(attachment.link.label)")
                 .accessibilityIdentifier("\(identifier).link.\(attachment.id.uuidString)")
             }
         }
     }
 
+    private func linkTitle(_ attachment: PinAttachment) -> String {
+        if card.isSavedForLater, let title = liveTitle?(attachment) { return title }
+        return attachment.title.isEmpty ? attachment.link.label : attachment.title
+    }
+
     @ViewBuilder private var excerpt: some View {
         if let text = card.excerpt, !text.isEmpty {
-            DisclosureGroup("Saved context") {
-                Text(text)
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
+            let label = card.isSavedForLater ? (card.savedTopic?.quoteSource == .prompt ? "Your message" : "Saved reply") : "Excerpt"
+            let quote = Text(verbatim: text)
+                .font(AppTypography.metadata)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("\(identifier).quote")
+            if card.isSavedForLater, text != card.title, text.count <= 180,
+               text.split(separator: "\n").count <= 4 {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(label).font(AppTypography.section).foregroundStyle(.secondary)
+                    quote
+                }
+            } else {
+                DisclosureGroup(label) {
+                    quote.padding(.top, 4)
+                }
+                .font(AppTypography.section)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("\(identifier).context")
             }
-            .font(AppTypography.section)
-            .foregroundStyle(.secondary)
-            .padding(.top, 4)
-            .accessibilityIdentifier("\(identifier).context")
         }
     }
 

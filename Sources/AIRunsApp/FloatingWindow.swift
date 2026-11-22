@@ -178,7 +178,6 @@ final class FloatingController: NSObject {
 
     func rename(_ id: String) { actions?.renameSession(id) }
     func editCard(_ card: PinCard) { actions?.editCard(card) }
-    func pinSession(_ sessionID: String) { actions?.pinSession(sessionID) }
 }
 
 // MARK: - Views
@@ -291,6 +290,9 @@ struct FloatingCard: View {
     @ObservedObject var model: AppModel
     @ObservedObject var state: FloatingState
     let controller: FloatingController
+    @State private var expandedLaterID: UUID?
+    @State private var resumeReveal: FloatingState.PinReveal?
+    @State private var runsHeight: CGFloat = 170
 
     var body: some View {
         FloatingSurface(radius: 20) {
@@ -353,43 +355,73 @@ struct FloatingCard: View {
 
     @ViewBuilder private var runs: some View {
         let sessions = model.store.ordered()
-        // Keep unknown and currently open conversations in the same list.
-        // Other finished and ignored runs fold into one line.
-        let active = sessions.filter { (!$0.isDone || $0.nativeView?.isOpen == true) && !$0.isIgnored }
-        let quiet = sessions.count - active.count
-        ThreadsHint(model: model)
-            .padding(.horizontal, 14).padding(.bottom, 8)
-        if active.isEmpty {
-            Text(sessions.isEmpty ? "Nothing running." : "Nothing needs you; nothing is working right now.")
-                .font(AppTypography.body).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14).padding(.bottom, 12)
-        } else {
-            let list = VStack(spacing: 0) {
-                ForEach(active) { session in
-                    FloatingRow(session: session, now: model.now,
-                                open: { controller.open(session) },
-                                rename: { controller.rename(session.id) },
-                                pin: { controller.pinSession(session.id) },
-                                remove: { model.remove(sessionId: session.id) },
-                                ignore: ignoreAction(for: session))
+        let menu = MenuSessionPresentation(sessions: sessions)
+        let openDone = menu.done.filter { $0.nativeView?.isOpen == true }
+        let recentDone = menu.done.filter { $0.nativeView?.isOpen != true }
+        let quiet = recentDone.count + menu.ignored.count
+        ScrollViewReader { scroll in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    sessionGroup("Needs you", sessions: menu.needs)
+                    if !model.board.cards.isEmpty {
+                        MenuPinnedNext(cards: model.board.menuNextCards, pinnedCards: model.board.cards,
+                                       expandedCardID: $expandedLaterID, cancelHover: {},
+                                       liveTitle: model.liveTitle(for:),
+                                       updateNext: { model.setMenuNext($1, for: $0.id, next: $2) },
+                                       archiveCard: { model.archive(cardId: $0.id) },
+                                       openLink: { model.open(card: $0, attachment: $1) })
+                    }
+                    sessionGroup("In progress", sessions: menu.working)
+                    sessionGroup("State unknown", sessions: menu.unknown)
+                    sessionGroup("Done", sessions: openDone)
+                    if quiet > 0 {
+                        Text("+ \(quiet) done or ignored")
+                            .font(AppTypography.metadata).foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                    }
+                    if sessions.isEmpty && model.board.cards.isEmpty {
+                        Text("No sessions")
+                            .font(AppTypography.body).foregroundStyle(.secondary)
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                    }
                 }
-            }
-            .padding(.horizontal, 4)
-            // The window sizes itself to its content, so a scroll view only
-            // appears (with a fixed height) once the list is long.
-            if active.count <= 5 {
-                list
-            } else {
-                ScrollView { list }.frame(height: 360)
-            }
-        }
-        if quiet > 0 {
-            Text("+ \(quiet) done or ignored")
-                .font(AppTypography.metadata).foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14).padding(.bottom, 9).padding(.top, 2)
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { runsHeight = $0 }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: min(runsHeight, 340))
+            .task(id: resumeReveal) {
+                guard let cardID = resumeReveal?.cardID else { return }
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                scroll.scrollTo(cardID, anchor: .top)
+            }
         }
+        ThreadsHint(model: model).padding(.horizontal, 14).padding(.bottom, 9)
+    }
+
+    @ViewBuilder private func sessionGroup(_ title: String, sessions: [Session]) -> some View {
+        if !sessions.isEmpty {
+            Text(title).font(AppTypography.section).foregroundStyle(.secondary)
+                .padding(.horizontal, 10).padding(.top, 6)
+            ForEach(sessions) { runRow($0) }
+        }
+    }
+
+    private func runRow(_ session: Session) -> some View {
+        FloatingRow(session: session, now: model.now,
+                    open: { controller.open(session) },
+                    rename: { controller.rename(session.id) },
+                    isSavedForLater: model.board.savedForLater(session: session) != nil,
+                    resumeLater: {
+                        guard let card = model.resumeLater(session) else { return }
+                        expandedLaterID = card.id
+                        resumeReveal = .init(cardID: card.id)
+                    },
+                    remove: { model.remove(sessionId: session.id) },
+                    ignore: ignoreAction(for: session))
     }
 }
 
@@ -400,7 +432,8 @@ private struct FloatingRow: View {
     let now: Date
     let open: () -> Void
     let rename: () -> Void
-    let pin: () -> Void
+    let isSavedForLater: Bool
+    let resumeLater: () -> Void
     let remove: () -> Void
     /// "Ignore for Now"; nil when this run can't be ignored.
     var ignore: (() -> Void)? = nil
@@ -413,9 +446,9 @@ private struct FloatingRow: View {
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(session.title).font(AppTypography.compactTitle).lineLimit(1)
+                        Text(session.currentTopicTitle).font(AppTypography.compactTitle).lineLimit(1)
                         Spacer(minLength: 4)
-                        Color.clear.frame(width: RemoveZone.slot, height: 18)
+                        Color.clear.frame(width: RemoveZone.slot + 25, height: 18)
                     }
                     HStack {
                         StatePill(session: session, now: now)
@@ -433,7 +466,7 @@ private struct FloatingRow: View {
         .buttonStyle(.plain)
         .overlay(alignment: .topTrailing) {
             if hovering {
-                RemoveZone(label: "Remove \(session.title) from the list", action: remove)
+                RemoveZone(label: "Remove \(session.currentTopicTitle) from the list", action: remove)
                     .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
                     .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
@@ -450,8 +483,13 @@ private struct FloatingRow: View {
                     .overlay(Capsule().strokeBorder(Color.primary.opacity(0.3), lineWidth: 1))
                     .padding(.trailing, 8).padding(.bottom, 5)
                     .help("Stop counting this until it asks something new")
-                    .accessibilityLabel("Ignore \(session.title) for now")
+                    .accessibilityLabel("Ignore \(session.currentTopicTitle) for now")
             }
+        }
+        .overlay(alignment: .topTrailing) {
+            ResumeLaterButton(sessionID: session.id, saved: isSavedForLater, action: resumeLater)
+                .padding(.trailing, RemoveZone.slot + 8)
+                .padding(.top, 4)
         }
         .onHover { hovering = $0 }
         .help(RunText.place(session))
@@ -459,7 +497,7 @@ private struct FloatingRow: View {
             Button("Open", action: open)
             if let ignore { Button("Ignore for Now", action: ignore) }
             Button("Rename…", action: rename)
-            Button("Pin to Board", action: pin)
+            Button(ResumeLaterButton.title(saved: isSavedForLater), action: resumeLater)
             Divider()
             Button("Remove from List", action: remove)
         }

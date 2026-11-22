@@ -118,8 +118,7 @@ not conversation messages.
 
 ## Behaviour decisions worth keeping
 
-- A session's name is chosen once (user rename > tool's own title > on-device
-  model > first real request) and does not follow every reply.
+- Keep the provider title for navigation. Display the current topic from user prompts in session lists. A name chosen by the user in AI Runs takes precedence. Resume Later captures the topic, message and available next step at the time of saving.
 - "Remove" hides a session until the user prompts it again or it asks for
   approval; Undo for 6 s.
 - Notifications: APPROVE and NEEDS INPUT on by default; REPLIED and DONE off;

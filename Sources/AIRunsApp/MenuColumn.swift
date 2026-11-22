@@ -149,7 +149,7 @@ struct MenuColumn: View {
                 rows(menu.needs, overlap: overlap)
             }
             MenuPinnedNext(cards: nextCards, pinnedCards: model.board.cards, expandedCardID: $ui.expandedNextCardID,
-                           cancelHover: { ui.cancelHover() }, updateNext: { card, selected, next in
+                           cancelHover: { ui.cancelHover() }, liveTitle: model.liveTitle(for:), updateNext: { card, selected, next in
                 model.setMenuNext(selected, for: card.id, next: next)
             }, archiveCard: { model.archive(cardId: $0.id) }) { card, attachment in
                 actions.closePanel()
@@ -157,7 +157,7 @@ struct MenuColumn: View {
             }
             .onHover { if $0 { ui.cancelHover() } }
             if !menu.working.isEmpty {
-                SectionLabel(title: "Working", count: menu.working.count, showsTimeScale: true)
+                SectionLabel(title: "In progress", count: menu.working.count, showsTimeScale: true)
                 rows(menu.working, overlap: overlap)
             }
             if !menu.hasActiveSessions {
@@ -235,9 +235,10 @@ struct MenuColumn: View {
                 SessionRow(session: session,
                            lifeline: session.isDone ? [] : model.store.lifeline(for: session.id, now: model.now),
                            completedWorkDuration: model.store.completedWorkDuration(for: session.id), now: model.now,
-                           alsoHere: (overlap[session.id] ?? []).map(\.title), ui: ui,
+                           alsoHere: (overlap[session.id] ?? []).map(\.currentTopicTitle), ui: ui,
                            rename: { actions.renameSession(session.id) },
-                           pin: { actions.pinSessionInMenu(session.id) },
+                           isSavedForLater: model.board.savedForLater(session: session) != nil,
+                           resumeLater: { actions.resumeLaterInMenu(session.id) },
                            remove: {
                                ui.hover = nil
                                model.remove(sessionId: session.id)

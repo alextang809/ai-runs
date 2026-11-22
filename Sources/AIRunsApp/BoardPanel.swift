@@ -160,7 +160,7 @@ struct BoardCard: View {
             set: { expandedCardID = $0 ? card.id : nil }
         ), saveNext: { next in
             model.setMenuNext(isSelected, for: card.id, next: next)
-        }, openLink: { model.open(card: card, attachment: $0) }, highlighted: highlighted) {
+        }, liveTitle: model.liveTitle(for:), openLink: { model.open(card: card, attachment: $0) }, highlighted: highlighted) {
             Button("Edit Card…") { editCard(card) }
             Button(card.attachments.isEmpty ? "Add Links…" : "Manage Links…", action: editLinks)
             Button(isSelected ? "Use Recent Order" : "Keep at Top") {

@@ -7,7 +7,7 @@ import XCTest
 
 final class PinnedCardInteractionTests: XCTestCase {
     @MainActor
-    func testPinActionRevealsNewCardAndSavesNextInMenu() throws {
+    func testResumeLaterRevealsSnapshotAndSavesNextInMenu() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         var store = SessionStore()
@@ -22,7 +22,7 @@ final class PinnedCardInteractionTests: XCTestCase {
             MenuColumn(model: model, ui: ui, actions: actions)
         }
         defer { window.close() }
-        try window.performNamedAction("Pin to Board")
+        try window.press("session.codex:fixture.resume-later")
 
         XCTAssertEqual(actions.pinnedSession, "codex:fixture")
         XCTAssertFalse(actions.isBoardVisible)
@@ -32,7 +32,7 @@ final class PinnedCardInteractionTests: XCTestCase {
         let sessionLink = try XCTUnwrap(pinned.attachments.first)
         _ = try window.requireElement("\(prefix).link.\(sessionLink.id.uuidString)")
 
-        try window.press("\(prefix).edit-next")
+        try window.pressMenu("\(prefix).more", item: "\(prefix).edit-next", title: "Edit next step…")
         try window.edit("\(prefix).next-field", to: "Verify browser sign-in")
         try window.press("\(prefix).save-next")
         _ = try window.requireElement("\(prefix).toggle")
@@ -41,6 +41,45 @@ final class PinnedCardInteractionTests: XCTestCase {
         XCTAssertEqual(saved.next, "Verify browser sign-in")
         XCTAssertEqual(saved.attachments, pinned.attachments)
         XCTAssertFalse(actions.isBoardVisible)
+    }
+
+    @MainActor
+    func testFloatingRunsSavesSnapshotVisibleInBothWindows() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        var store = SessionStore()
+        let event = AgentEvent(tool: .codex, kind: .promptStart, sessionId: "floating", at: Date(),
+                               prompt: "Prepare a launch checklist",
+                               transcriptPath: root.appendingPathComponent("fixture.jsonl").path)
+        store.apply(event)
+        store.apply(AgentEvent(tool: .codex, kind: .turnEnd, sessionId: "floating",
+                               at: event.at.addingTimeInterval(1), lastMessage: "Two sample lists are ready."))
+        let model = AppModel(testingRoot: root, store: store)
+        let ui = PanelUIState()
+        let actions = NativePinMenuActions(model: model, ui: ui)
+        let state = FloatingState()
+        let floating = FloatingController(model: model, actions: actions)
+        let floatWindow = try NativePinWindow(width: 310) {
+            FloatingCard(model: model, state: state, controller: floating)
+        }
+        defer { floatWindow.close() }
+        let menuWindow = try NativePinWindow(width: 360) {
+            MenuColumn(model: model, ui: ui, actions: actions)
+        }
+        defer { menuWindow.close() }
+
+        try floatWindow.press("session.codex:floating.resume-later")
+        let saved = try XCTUnwrap(model.board.cards.first)
+        let prefix = "pinned.\(saved.id.uuidString)"
+        _ = try floatWindow.requireElement("\(prefix).more")
+        _ = try menuWindow.requireElement("\(prefix).more")
+        _ = try floatWindow.requireElement("\(prefix).quote")
+        XCTAssertEqual(state.tab, .runs)
+        XCTAssertNil(model.message)
+        let bookmark = try floatWindow.requireElement("session.codex:floating.resume-later")
+        XCTAssertEqual(floatWindow.value(kAXDescriptionAttribute, of: bookmark) as? String, "Show Saved Item")
+        try floatWindow.press("session.codex:floating.resume-later")
+        XCTAssertEqual(model.board.cards.map(\.id), [saved.id])
     }
 
     @MainActor
@@ -184,16 +223,15 @@ private final class NativePinMenuActions: PanelActions {
         self.ui = ui
     }
 
-    func pinSessionInMenu(_ sessionID: String) {
+    func resumeLaterInMenu(_ sessionID: String) {
         pinnedSession = sessionID
-        ui.expandedNextCardID = model.pin(sessionId: sessionID)?.id
+        ui.expandedNextCardID = model.store.sessions[sessionID].flatMap { model.resumeLater($0) }?.id
         ui.menuPinRevealID = UUID()
     }
 
     func closePanel() {}
     func toggleBoard() { isBoardVisible.toggle() }
     func showPinnedBoard() { isBoardVisible = true }
-    func pinSession(_ sessionID: String) { isBoardVisible = true }
     func showSettings() {}
     func showAccounts() {}
     func showAddAccount() {}

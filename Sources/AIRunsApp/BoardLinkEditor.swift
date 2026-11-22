@@ -136,7 +136,7 @@ struct BoardLinkEditor: View {
     }
 
     private func sessionPickerLabel(_ session: Session) -> String {
-        let title = "\(session.tool.displayName) · \(session.title)"
+        let title = "\(session.tool.displayName) · \(session.currentTopicTitle)"
         return session.project.isEmpty ? title : "\(title) · \(session.project)"
     }
 

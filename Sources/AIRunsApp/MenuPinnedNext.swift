@@ -6,6 +6,7 @@ struct MenuPinnedNext: View {
     var pinnedCards: [PinCard] = []
     @Binding var expandedCardID: UUID?
     let cancelHover: () -> Void
+    var liveTitle: ((PinAttachment) -> String?)? = nil
     var updateNext: ((PinCard, Bool, String?) -> Bool)? = nil
     var archiveCard: ((PinCard) -> Void)? = nil
     let openLink: (PinCard, PinAttachment) -> Void
@@ -38,23 +39,16 @@ struct MenuPinnedNext: View {
         let total = Set((cards + pinnedCards).map(\.id)).count
         let hasMore = total > visible.count
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "pin").accessibilityHidden(true)
-                Text("Next")
-                if total > 0 { Text("\(total)").monospacedDigit() }
-                Spacer(minLength: 0)
-                Text("Pinned by you")
-            }
-            .font(AppTypography.section)
-            .foregroundStyle(.secondary)
-            .padding(.top, 12)
-            .accessibilityAddTraits(.isHeader)
-
-            if visible.isEmpty {
-                Text("Pin a session to keep it here.")
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 4)
+            if !visible.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "pin").accessibilityHidden(true)
+                    Text("Later")
+                    Spacer(minLength: 0)
+                }
+                .font(AppTypography.section)
+                .foregroundStyle(.secondary)
+                .padding(.top, 12)
+                .accessibilityAddTraits(.isHeader)
             }
             ForEach(visible) { card in
                 PinnedCardView(card: card, isExpanded: Binding(
@@ -62,7 +56,7 @@ struct MenuPinnedNext: View {
                     set: { expandedCardID = $0 ? card.id : nil; cancelHover() }
                 ), saveNext: updateNext.map { update in
                     { next in update(card, card.menuNextAt != nil, next) }
-                }, openLink: { openLink(card, $0) }) {
+                }, liveTitle: liveTitle, openLink: { openLink(card, $0) }) {
                     if let updateNext {
                         let selected = card.menuNextAt != nil
                         Button(selected ? "Use Recent Order" : "Keep at Top") {
@@ -98,7 +92,7 @@ struct MenuPinnedNext: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.bottom, 8)
+        .padding(.bottom, visible.isEmpty ? 0 : 8)
         .onChange(of: (cards + pinnedCards).map(\.id)) { _, ids in
             if let expandedCardID, !ids.contains(expandedCardID) {
                 self.expandedCardID = nil

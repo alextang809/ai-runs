@@ -481,7 +481,7 @@ final class AppModel: ObservableObject {
     }
 
     func resolve(sessionId: String) {
-        let title = store.sessions[sessionId]?.title
+        let title = store.sessions[sessionId]?.currentTopicTitle
         store.resolve(id: sessionId)
         saveSessions()
         if let title { show("Resolved: \(title)") }
@@ -492,7 +492,7 @@ final class AppModel: ObservableObject {
         guard let session = store.sessions[sessionId] else { return }
         store.dismiss(id: sessionId, at: Date())
         saveSessions()
-        show("Removed “\(TextUtils.truncate(session.title, limit: 28))”") { [weak self] in
+        show("Removed “\(TextUtils.truncate(session.currentTopicTitle, limit: 28))”") { [weak self] in
             self?.store.restore(session)
             self?.saveSessions()
         }
@@ -516,13 +516,29 @@ final class AppModel: ObservableObject {
         guard let session = store.sessions[sessionId] else { return nil }
         var updated = board
         let card = updated.pin(session: session, now: Date())
+        return persistBoard(updated) ? card : nil
+    }
+
+    @discardableResult
+    func resumeLater(_ session: Session) -> PinCard? {
+        if let existing = board.savedForLater(session: session) { return existing }
+        var updated = board
+        let card = updated.saveForLater(session: session)
+        return persistBoard(updated) ? card : nil
+    }
+
+    func liveTitle(for attachment: PinAttachment) -> String? {
+        Jumper.currentSession(for: attachment.link, in: store)?.currentTopicTitle
+    }
+
+    private func persistBoard(_ updated: PinBoard) -> Bool {
         do {
             try JSONFile.save(updated, to: paths.pins)
             board = updated
-            return card
+            return true
         } catch {
             show("Couldn’t save the pinned card.")
-            return nil
+            return false
         }
     }
 

@@ -91,6 +91,15 @@ public struct PinAttachment: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+/// Identity and provenance captured when a user saves their place in a conversation.
+public struct SavedTopic: Codable, Equatable, Sendable {
+    public enum QuoteSource: String, Codable, Sendable { case reply, prompt }
+    public let sessionID: String
+    public let topicID: String
+    public let quoteSource: QuoteSource?
+    public let originalNext: String
+}
+
 public struct PinCard: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
     public var title: String
@@ -103,6 +112,8 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
     public var link: PinLink? { attachments.first?.link }
     /// A passage the user wanted to keep from a reply.
     public var excerpt: String?
+    public fileprivate(set) var savedTopic: SavedTopic?
+    public var isSavedForLater: Bool { savedTopic != nil }
     public var createdAt: Date
     /// Last time the user did anything with the card.
     public var touchedAt: Date
@@ -130,7 +141,7 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, next, nextIsSuggested, group, link, attachments, excerpt, createdAt, touchedAt, menuNextAt
+        case id, title, next, nextIsSuggested, group, link, attachments, excerpt, createdAt, touchedAt, menuNextAt, savedTopic
     }
 
     public init(from decoder: any Decoder) throws {
@@ -141,6 +152,7 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
         nextIsSuggested = try values.decode(Bool.self, forKey: .nextIsSuggested)
         group = try values.decode(String.self, forKey: .group)
         excerpt = try values.decodeIfPresent(String.self, forKey: .excerpt)
+        savedTopic = try values.decodeIfPresent(SavedTopic.self, forKey: .savedTopic)
         createdAt = try values.decode(Date.self, forKey: .createdAt)
         touchedAt = try values.decode(Date.self, forKey: .touchedAt)
         menuNextAt = try values.decodeIfPresent(Date.self, forKey: .menuNextAt)
@@ -163,6 +175,7 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
         try values.encode(attachments, forKey: .attachments)
         try values.encodeIfPresent(link, forKey: .link)
         try values.encodeIfPresent(excerpt, forKey: .excerpt)
+        try values.encodeIfPresent(savedTopic, forKey: .savedTopic)
         try values.encode(createdAt, forKey: .createdAt)
         try values.encode(touchedAt, forKey: .touchedAt)
         try values.encodeIfPresent(menuNextAt, forKey: .menuNextAt)
@@ -247,12 +260,92 @@ public struct PinBoard: Codable, Equatable, Sendable {
         cards.insert(card, at: 0)
     }
 
+    public var savedForLaterCards: [PinCard] {
+        cards.filter(\.isSavedForLater).sorted { $0.createdAt > $1.createdAt }
+    }
+
+    public func savedForLater(session: Session) -> PinCard? {
+        cards.first { $0.savedTopic?.sessionID == session.id && $0.savedTopic?.topicID == session.currentTopicID }
+    }
+
+    @discardableResult
+    public mutating func saveForLater(session: Session, now: Date = Date()) -> PinCard {
+        if let existing = savedForLater(session: session) { return existing }
+        let attachment = PinAttachment.session(session)
+        let reply = Self.nonblank(session.currentTopicReply)
+        let quote = reply ?? Self.nonblank(session.latestUserPrompt) ?? Self.nonblank(session.currentTopicPrompt)
+        let source: SavedTopic.QuoteSource? = reply != nil ? .reply : (quote != nil ? .prompt : nil)
+        let manual = manualNext(for: session, attachment: attachment)
+        let next = manual ?? Self.action(in: reply) ?? ""
+        var card = PinCard(title: session.currentTopicTitle, next: next, nextIsSuggested: manual == nil && !next.isEmpty,
+                           group: session.project.isEmpty ? Self.inbox : session.project, link: attachment.link,
+                           excerpt: quote, createdAt: now)
+        card.savedTopic = SavedTopic(sessionID: session.id, topicID: session.currentTopicID,
+                                    quoteSource: source, originalNext: next)
+        add(card)
+        return card
+    }
+
+    private func manualNext(for session: Session, attachment: PinAttachment) -> String? {
+        // Older board cards have no topic identity. A transition makes their actions ambiguous.
+        guard session.isInitialTopic else { return nil }
+        let matches = cards.filter { card in
+            !card.isSavedForLater && !card.nextIsSuggested && card.attachments.count == 1
+                && card.attachments[0].matches(attachment) && Self.nonblank(card.next) != nil
+        }
+        return matches.count == 1 ? matches[0].next : nil
+    }
+
+    private static func nonblank(_ value: String?) -> String? {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return value
+    }
+
+    /// A labelled handoff or a direct invitation to act is safe to surface. Otherwise the quote suffices.
+    private static func action(in reply: String?) -> String? {
+        guard let reply else { return nil }
+        // Skip quoted examples and fenced code; keep punctuation inside filenames and URLs.
+        var fence: Substring?
+        let prose = reply.split(whereSeparator: \.isNewline).compactMap { line -> String? in
+            let clean = line.drop(while: \.isWhitespace)
+            if let active = fence {
+                if clean.hasPrefix(active) { fence = nil }
+                return nil
+            }
+            if clean.hasPrefix("```") || clean.hasPrefix("~~~") {
+                fence = clean.prefix(while: { $0 == clean.first })
+                return nil
+            }
+            return clean.hasPrefix(">") ? nil : String(clean)
+        }
+        let sentences = prose.joined(separator: "\n")
+            .replacingOccurrences(of: #"(?<=[.!?])\s+|(?<=[。！？])\s*|，(?=(?:你可以|可以开始|现在可以|请))"#,
+                                  with: "\n", options: .regularExpression)
+        for sentence in sentences.components(separatedBy: .newlines) {
+            if let action = actionSentence(sentence) { return action }
+        }
+        return nil
+    }
+
+    private static func actionSentence(_ sentence: String) -> String? {
+        let cue = #"(?i)^(?:next step\s*[:：]\s*|下一步\s*[:：]\s*|you can now\s+|please\s+|(?:现在|你)可以(?:开始)?|可以开始|请(?:你)?)(.+)$"#
+        let line = sentence.replacingOccurrences(of: "**", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-*• \t"))
+        guard line.range(of: cue, options: .regularExpression) != nil else { return nil }
+        let action = line.replacingOccurrences(of: cue, with: "$1", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !action.isEmpty, action.count <= 180, !action.contains("?"), !action.contains("？"),
+              action.range(of: #"(?i)^(?:I(?:’|'|\s)|we\b|我|要不要|如果|是否)"#, options: .regularExpression) == nil
+        else { return nil }
+        return action
+    }
+
     /// Pins a session. If it is already pinned, the existing card is refreshed instead.
     @discardableResult
     public mutating func pin(session: Session, now: Date = Date()) -> PinCard {
         let attachment = PinAttachment.session(session)
         if let index = cards.firstIndex(where: { card in
-            card.attachments.contains { $0.matches(attachment) || Self.isLegacyWebPin($0, for: session) }
+            !card.isSavedForLater && card.attachments.contains { $0.matches(attachment) || Self.isLegacyWebPin($0, for: session) }
         }) {
             let card = cards[index]
             let refreshed = card.attachments.map { saved in

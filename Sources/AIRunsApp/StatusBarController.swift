@@ -9,8 +9,7 @@ protocol PanelActions: AnyObject {
     func closePanel()
     func toggleBoard()
     func showPinnedBoard()
-    func pinSession(_ sessionID: String)
-    func pinSessionInMenu(_ sessionID: String)
+    func resumeLaterInMenu(_ sessionID: String)
     var isBoardVisible: Bool { get }
     func showSettings()
     func showAccounts()
@@ -237,17 +236,11 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
 
     var isBoardVisible: Bool { floating.isVisible }
 
-    func pinSessionInMenu(_ sessionID: String) {
-        guard let card = model.pin(sessionId: sessionID) else { return }
+    func resumeLaterInMenu(_ sessionID: String) {
+        guard let session = model.store.sessions[sessionID], let card = model.resumeLater(session) else { return }
         ui.cancelHover()
         ui.expandedNextCardID = card.id
         ui.menuPinRevealID = UUID()
-    }
-
-    func pinSession(_ sessionID: String) {
-        guard let card = model.pin(sessionId: sessionID) else { return }
-        closePanel()
-        floating.showPinned(cardID: card.id)
     }
 
     func showPinnedBoard() {
@@ -337,7 +330,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
     func renameSession(_ id: String) {
         guard let session = model.store.sessions[id] else { return }
         closePanel()
-        let field = NSTextField(string: session.title)
+        let field = NSTextField(string: session.currentTopicTitle)
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
         if runPrompt(title: "Rename session", message: "Give this \(session.tool.displayName) session a name you’ll recognise.",
                      accessory: field, focus: field) {
