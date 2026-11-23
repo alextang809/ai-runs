@@ -7,6 +7,7 @@ struct MenuPinnedNext: View {
     @Binding var expandedCardID: UUID?
     let cancelHover: () -> Void
     var liveTitle: ((PinAttachment) -> String?)? = nil
+    var openLabel: ((PinAttachment) -> String)? = nil
     var updateNext: ((PinCard, Bool, String?) -> Bool)? = nil
     var archiveCard: ((PinCard) -> Void)? = nil
     let openLink: (PinCard, PinAttachment) -> Void
@@ -56,7 +57,7 @@ struct MenuPinnedNext: View {
                     set: { expandedCardID = $0 ? card.id : nil; cancelHover() }
                 ), saveNext: updateNext.map { update in
                     { next in update(card, card.menuNextAt != nil, next) }
-                }, liveTitle: liveTitle, openLink: { openLink(card, $0) }) {
+                }, liveTitle: liveTitle, openLabel: openLabel, openLink: { openLink(card, $0) }) {
                     if let updateNext {
                         let selected = card.menuNextAt != nil
                         Button(selected ? "Use Recent Order" : "Keep at Top") {

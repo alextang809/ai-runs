@@ -8,6 +8,7 @@ struct PinnedCardView<Actions: View>: View {
     @Binding var isExpanded: Bool
     var saveNext: ((String) -> Bool)? = nil
     var liveTitle: ((PinAttachment) -> String?)? = nil
+    var openLabel: ((PinAttachment) -> String)? = nil
     let openLink: (PinAttachment) -> Void
     var highlighted = false
     @ViewBuilder let actions: Actions
@@ -50,11 +51,23 @@ struct PinnedCardView<Actions: View>: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 8) {
-            Text(card.title)
-                .font(card.isSavedForLater && !hasNext ? AppTypography.rowTitle : AppTypography.metadata)
-                .foregroundStyle(card.isSavedForLater && !hasNext ? Color.primary : Color.secondary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 3) {
+                if card.isSavedReply {
+                    Text("Saved \(card.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(AppTypography.section)
+                        .foregroundStyle(.secondary)
+                }
+                Text(card.title)
+                    .font(card.isSavedForLater && !hasNext ? AppTypography.rowTitle : AppTypography.metadata)
+                    .foregroundStyle(card.isSavedForLater && !hasNext ? Color.primary : Color.secondary)
+                    .lineLimit(2)
+                if card.isSavedReply, !isExpanded, !hasNext, let text = card.excerpt {
+                    Text(verbatim: text)
+                        .font(AppTypography.body)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             Menu {
                 if saveNext != nil {
                     Button("Edit next step…", systemImage: "pencil", action: beginEditing)
@@ -105,13 +118,13 @@ struct PinnedCardView<Actions: View>: View {
                     .padding(.vertical, 2)
             }
             if card.isSavedForLater, card.attachments.count == 1,
-               let attachment = card.attachments.first, let tool = PinnedCardPresentation.tool(for: attachment.link) {
+               let attachment = card.attachments.first, PinnedCardPresentation.tool(for: attachment.link) != nil {
                 if !isExpanded || !hasNext {
                     HStack {
                         if !isExpanded {
                             Button { openLink(attachment) } label: {
                                 HStack(spacing: 4) {
-                                    Text("Open in \(tool.displayName)")
+                                    Text(openLabel?(attachment) ?? "Open session")
                                     Image(systemName: "arrow.up.right").accessibilityHidden(true)
                                 }
                             }

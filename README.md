@@ -175,7 +175,7 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
   <p align="center"><img src="docs/flyout.png" width="560" alt="Hovering a row shows its details and Ignore for Now"></p>
   <p align="center"><sub><i>Illustration: hover a row for its details and actions.</i></sub></p>
 - The displayed topic follows changes in your requests. **Rename** keeps a name of your choice.
-- Choose **Resume Later** on a session to save its current topic, original message and any identified next step. Open the saved card from **Later** in the menu or floating window.
+- Click the pin at the end of a session row to follow its latest progress in **Pinned**. When it asks for input or approval, the row moves to **Needs you** and returns to **Pinned** after you respond. Open **Details** and choose **Save Reply** beside a message to keep that version under **Later** in either window.
 - **Floating window:** click **Floating Window** at the bottom of the panel. A small capsule stays on
   top of every app, Space and full-screen window, including Stage Manager sets,
   showing how many sessions need you. Switching apps or waking your Mac restores

@@ -345,6 +345,7 @@ struct FlyoutBody: View {
     var note: String? = nil
     var quoteLabel: String? = nil
     var quote: String? = nil
+    var sessionReply: SessionReplyView? = nil
     let actions: [FlyoutAction]
 
     var body: some View {
@@ -386,7 +387,9 @@ struct FlyoutBody: View {
                     .padding(.horizontal, 14).padding(.bottom, 8)
                 }
 
-                if let quote, !quote.isEmpty {
+                if let sessionReply {
+                    sessionReply.padding(.horizontal, 14).padding(.bottom, 10)
+                } else if let quote, !quote.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
                         if let quoteLabel { Text(quoteLabel).font(AppTypography.metadata).foregroundStyle(.secondary) }
                         // Not selectable: once clicked, selectable text forgets its
@@ -430,11 +433,11 @@ struct SessionFlyout: View {
     }()
 
     var body: some View {
-        let appName = session.terminal.appName
+        let hostName = Jumper.hostName(for: session)
         var subtitle = session.isProjectConversation ? "Claude project" : session.tool.displayName
         if session.projectMainId != nil { subtitle += " · Main conversation" }
         if !session.project.isEmpty { subtitle += " · \(session.project)" }
-        subtitle += " · \(appName)"
+        if let hostName, hostName != session.tool.displayName { subtitle += " · \(hostName)" }
 
         let tint = Palette.tool(session.tool)
         let chip: (text: String, color: Color?)
@@ -506,12 +509,9 @@ struct SessionFlyout: View {
         }
 
         var flyoutActions = [
-            FlyoutAction(title: "Open in \(appName)", shortcut: "↩") {
+            FlyoutAction(title: Jumper.openLabel(for: session), shortcut: "↩") {
                 actions.closePanel()
                 model.open(sessionId: session.id)
-            },
-            FlyoutAction(title: ResumeLaterButton.title(saved: model.board.savedForLater(session: session) != nil)) {
-                actions.resumeLaterInMenu(session.id)
             },
             FlyoutAction(title: "Rename…") { actions.renameSession(session.id) },
         ]
@@ -528,7 +528,7 @@ struct SessionFlyout: View {
             })
         }
         flyoutActions.append(FlyoutAction(title: "Remove from List") {
-            ui.hover = nil
+            ui.cancelHover()
             model.remove(sessionId: session.id)
         })
 
@@ -539,8 +539,7 @@ struct SessionFlyout: View {
             rows: rows,
             noteLabel: session.approvalDetail == nil ? nil : "Wants to run",
             note: session.approvalDetail,
-            quoteLabel: "Last reply",
-            quote: TextUtils.preview(of: session.lastMessage, limit: 400),
+            sessionReply: session.currentTopicReply == nil ? nil : SessionReplyView(session: session, model: model),
             actions: flyoutActions
         )
     }
@@ -573,7 +572,7 @@ struct CardFlyout: View {
         }
         flyoutActions.append(FlyoutAction(title: "Edit…") { actions.editCard(card) })
         flyoutActions.append(FlyoutAction(title: "Remove") {
-            ui.hover = nil
+            ui.cancelHover()
             model.archive(cardId: card.id)
         })
 

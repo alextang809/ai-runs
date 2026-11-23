@@ -118,7 +118,7 @@ not conversation messages.
 
 ## Behaviour decisions worth keeping
 
-- Keep the provider title for navigation. Display the current topic from user prompts in session lists. A name chosen by the user in AI Runs takes precedence. Resume Later captures the topic, message and available next step at the time of saving.
+- Keep the provider title for navigation. Display the current topic from user prompts in session lists. A name chosen by the user in AI Runs takes precedence. Pinning follows the live session. Save Reply captures the visible reply independently of later turns.
 - "Remove" hides a session until the user prompts it again or it asks for
   approval; Undo for 6 s.
 - Notifications: APPROVE and NEEDS INPUT on by default; REPLIED and DONE off;

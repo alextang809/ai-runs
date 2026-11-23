@@ -9,7 +9,6 @@ protocol PanelActions: AnyObject {
     func closePanel()
     func toggleBoard()
     func showPinnedBoard()
-    func resumeLaterInMenu(_ sessionID: String)
     var isBoardVisible: Bool { get }
     func showSettings()
     func showAccounts()
@@ -223,7 +222,10 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.keyDown], handler: { [weak self] event in
             if event.keyCode == 53 { // Escape
-                MainActor.assumeIsolated { self?.closePanel() }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if !self.ui.closeExplicitDetails() { self.closePanel() }
+                }
                 return nil
             }
             return event
@@ -235,13 +237,6 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
     // MARK: - PanelActions
 
     var isBoardVisible: Bool { floating.isVisible }
-
-    func resumeLaterInMenu(_ sessionID: String) {
-        guard let session = model.store.sessions[sessionID], let card = model.resumeLater(session) else { return }
-        ui.cancelHover()
-        ui.expandedNextCardID = card.id
-        ui.menuPinRevealID = UUID()
-    }
 
     func showPinnedBoard() {
         closePanel()
@@ -396,7 +391,7 @@ final class PanelUIState: ObservableObject {
     static let staleGroup = "__stale__"
 
     @Published var expandedNextCardID: UUID?
-    @Published var menuPinRevealID: UUID?
+    private var explicitDetails: Target?
     @Published var hover: Target?
     @Published var rowFrames: [String: CGRect] = [:]
     @Published var collapsed: Set<String> = [PanelUIState.staleGroup]
@@ -415,6 +410,7 @@ final class PanelUIState: ObservableObject {
     /// moment, so passing over rows on the way to a button doesn't flip the
     /// details back and forth.
     func hoverOn(_ target: Target) {
+        guard explicitDetails == nil else { return }
         clearWork?.cancel()
         switchWork?.cancel()
         guard hover != target else { return }
@@ -430,6 +426,7 @@ final class PanelUIState: ObservableObject {
     }
 
     func hoverOff() {
+        guard explicitDetails == nil else { return }
         switchWork?.cancel()
         clearWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -439,10 +436,28 @@ final class PanelUIState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
+    @discardableResult
+    func toggleDetails(_ target: Target) -> Bool {
+        let opening = explicitDetails != target
+        cancelHover()
+        if opening {
+            explicitDetails = target
+            hover = target
+        }
+        return opening
+    }
+
+    func closeExplicitDetails() -> Bool {
+        guard explicitDetails != nil else { return false }
+        cancelHover()
+        return true
+    }
+
     func keepHover() { clearWork?.cancel() }
 
     /// A collapsed section must not receive a previously scheduled flyout.
     func cancelHover() {
+        explicitDetails = nil
         clearWork?.cancel()
         switchWork?.cancel()
         hover = nil
@@ -450,7 +465,6 @@ final class PanelUIState: ObservableObject {
 
     func reset() {
         expandedNextCardID = nil
-        menuPinRevealID = nil
         cancelHover()
         addingNote = false
         draft = ""
@@ -458,7 +472,7 @@ final class PanelUIState: ObservableObject {
 
     func toggle(group: String) {
         if collapsed.contains(group) { collapsed.remove(group) } else { collapsed.insert(group) }
-        hover = nil
+        cancelHover()
     }
 }
 

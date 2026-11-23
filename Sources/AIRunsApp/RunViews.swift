@@ -15,8 +15,8 @@ struct SessionRow: View {
     var alsoHere: [String] = []
     @ObservedObject var ui: PanelUIState
     let rename: () -> Void
-    let isSavedForLater: Bool
-    let resumeLater: () -> Void
+    let togglePin: () -> Void
+    let details: () -> Void
     let remove: () -> Void
     /// "Ignore for Now" or "Stop Ignoring"; nil when this run can't be ignored.
     var ignore: (() -> Void)? = nil
@@ -38,10 +38,11 @@ struct SessionRow: View {
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         // Always reserved, so nothing moves when the × appears.
-                        Color.clear.frame(width: RemoveZone.slot + 25, height: 18)
+                        Color.clear.frame(width: RemoveZone.slot + SessionRowControls.width, height: 18)
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         StatePill(session: session, now: now)
+                        if session.hasUnreadReply { UnreadReplyLabel() }
                         Spacer(minLength: 0)
                     }
                     HStack(spacing: 10) {
@@ -80,14 +81,14 @@ struct SessionRow: View {
             if highlighted {
                 RemoveZone(label: "Remove \(session.currentTopicTitle) from the list", action: remove)
                     .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
-                    .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
+                    .padding(.trailing, SessionRowControls.width + 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
         }
         .contextMenu {
             Button("Open", action: open)
             if let ignore { Button(RunText.ignoreTitle(session), action: ignore) }
             Button("Rename…", action: rename)
-            Button(ResumeLaterButton.title(saved: isSavedForLater), action: resumeLater)
+            Button(SessionRowControls.pinTitle(session), action: togglePin)
             Divider()
             Button("Remove from List", action: remove)
         }
@@ -96,59 +97,73 @@ struct SessionRow: View {
         .reportFrame(key.key)
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
-        .accessibilityAction(named: Text(ResumeLaterButton.title(saved: isSavedForLater)), resumeLater)
+        .accessibilityAction(named: Text(SessionRowControls.pinTitle(session)), togglePin)
         .accessibilityLabel("\(session.currentTopicTitle), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(workDuration.map { ". Observed working time, \($0)" } ?? "")\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
+        .accessibilityValue(session.hasUnreadReply ? "New reply" : "")
         .accessibilityAddTraits(.isButton)
         .overlay(alignment: .topTrailing) {
-            ResumeLaterButton(sessionID: session.id, saved: isSavedForLater, action: resumeLater)
-                .padding(.trailing, RemoveZone.slot + 8)
+            SessionRowControls(session: session, togglePin: togglePin, details: details)
+                .padding(.trailing, 8)
                 .padding(.top, 4)
         }
     }
 }
 
-struct ResumeLaterButton: View {
-    let sessionID: String
-    let saved: Bool
-    let action: () -> Void
+struct UnreadReplyLabel: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(Color.primary).frame(width: 5, height: 5)
+            Text("New reply").font(AppTypography.section)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct SessionRowControls: View {
+    static let width: CGFloat = 50
+    let session: Session
+    let togglePin: () -> Void
+    let details: () -> Void
 
     var body: some View {
+        HStack(spacing: 0) {
+            control("ellipsis", label: "Details", id: "details", action: details)
+            control(session.isPinned ? "pin.fill" : "pin", label: Self.pinTitle(session), id: "pin", action: togglePin)
+        }
+    }
+
+    private func control(_ image: String, label: String, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: saved ? "bookmark.fill" : "bookmark")
+            Image(systemName: image)
                 .font(AppTypography.controlIcon)
                 .foregroundStyle(.secondary)
-                .frame(width: 25, height: 23)
+                .frame(width: Self.width / 2, height: 23)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .help(Self.title(saved: saved))
-        .accessibilityLabel(Self.title(saved: saved))
-        .accessibilityIdentifier("session.\(sessionID).resume-later")
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("session.\(session.id).\(id)")
     }
 
-    static func title(saved: Bool) -> String {
-        saved ? "Show Saved Item" : "Resume Later"
-    }
+    static func pinTitle(_ session: Session) -> String { session.isPinned ? "Unpin" : "Pin to Top" }
 }
 
 /// Words shared by the row, the flyout and VoiceOver.
 enum RunText {
-    static func place(_ session: Session) -> String {
-        var host = session.terminal.appName
-        if session.tool == .codex, session.terminal.bundleId == nil, session.terminal.termProgram == nil,
-           session.terminal.tty == nil {
-            host = "Codex"
-        }
+    @MainActor static func place(_ session: Session) -> String {
         var parts: [String]
         if session.isProjectConversation {
             parts = ["Claude project"]
             if session.projectMainId != nil { parts.append("Main conversation") }
-        } else if session.tool.isWeb {
-            parts = [session.tool.displayName, host]
-        } else if (session.tool == .claudeCode && host == "Claude") || (session.tool == .codex && host == "Codex") {
-            parts = ["\(host) app"]
+        } else if let host = Jumper.hostName(for: session) {
+            if (session.tool == .claudeCode && host == "Claude") || (session.tool == .codex && host == "Codex") {
+                parts = ["\(host) app"]
+            } else {
+                parts = [session.tool.displayName, host]
+            }
         } else {
-            parts = [session.tool.displayName, host]
+            parts = [session.tool.displayName]
         }
         if !session.project.isEmpty { parts.append(session.project) }
         if let driver = session.drivenBy { parts.append("via \(driver)") }

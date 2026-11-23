@@ -291,7 +291,9 @@ struct FloatingCard: View {
     @ObservedObject var state: FloatingState
     let controller: FloatingController
     @State private var expandedLaterID: UUID?
-    @State private var resumeReveal: FloatingState.PinReveal?
+    @State private var detailSessionID: String?
+    @State private var showRecent = false
+    @State private var revealWatchedID: String?
     @State private var runsHeight: CGFloat = 170
 
     var body: some View {
@@ -362,11 +364,12 @@ struct FloatingCard: View {
         ScrollViewReader { scroll in
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    sessionGroup("Needs you", sessions: menu.needs)
+                    sessionGroup("Needs you", sessions: menu.needs, identifier: "sessions.section.needs")
+                    sessionGroup("Pinned", sessions: menu.pinned, identifier: "sessions.section.pinned")
                     if !model.board.cards.isEmpty {
                         MenuPinnedNext(cards: model.board.menuNextCards, pinnedCards: model.board.cards,
                                        expandedCardID: $expandedLaterID, cancelHover: {},
-                                       liveTitle: model.liveTitle(for:),
+                                       liveTitle: model.liveTitle(for:), openLabel: model.openLabel(for:),
                                        updateNext: { model.setMenuNext($1, for: $0.id, next: $2) },
                                        archiveCard: { model.archive(cardId: $0.id) },
                                        openLink: { model.open(card: $0, attachment: $1) })
@@ -375,9 +378,24 @@ struct FloatingCard: View {
                     sessionGroup("State unknown", sessions: menu.unknown)
                     sessionGroup("Done", sessions: openDone)
                     if quiet > 0 {
-                        Text("+ \(quiet) done or ignored")
-                            .font(AppTypography.metadata).foregroundStyle(.secondary)
-                            .padding(.horizontal, 10)
+                        Button {
+                            showRecent.toggle()
+                        } label: {
+                            Label("Recent Sessions (\(quiet))",
+                                  systemImage: showRecent ? "chevron.down" : "chevron.right")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .font(AppTypography.metadata)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .accessibilityValue(showRecent ? "Expanded" : "Collapsed")
+                        .accessibilityIdentifier("sessions.show-recent")
+                        if showRecent {
+                            sessionGroup("Done", sessions: recentDone)
+                            sessionGroup("Ignored", sessions: menu.ignored)
+                        }
                     }
                     if sessions.isEmpty && model.board.cards.isEmpty {
                         Text("No sessions")
@@ -392,36 +410,57 @@ struct FloatingCard: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             .frame(height: min(runsHeight, 340))
-            .task(id: resumeReveal) {
-                guard let cardID = resumeReveal?.cardID else { return }
+            .task(id: revealWatchedID) {
+                guard let id = revealWatchedID else { return }
                 await Task.yield()
                 guard !Task.isCancelled else { return }
-                scroll.scrollTo(cardID, anchor: .top)
+                scroll.scrollTo(id, anchor: .center)
             }
         }
         ThreadsHint(model: model).padding(.horizontal, 14).padding(.bottom, 9)
     }
 
-    @ViewBuilder private func sessionGroup(_ title: String, sessions: [Session]) -> some View {
+    @ViewBuilder private func sessionGroup(_ title: String, sessions: [Session], identifier: String? = nil) -> some View {
         if !sessions.isEmpty {
             Text(title).font(AppTypography.section).foregroundStyle(.secondary)
                 .padding(.horizontal, 10).padding(.top, 6)
-            ForEach(sessions) { runRow($0) }
+                .accessibilityIdentifier(identifier ?? "sessions.section.\(title)")
+                .accessibilityAddTraits(.isHeader)
+            ForEach(sessions) { session in
+                VStack(alignment: .leading, spacing: 2) { runRow(session) }
+                    .id(session.id)
+            }
         }
     }
 
-    private func runRow(_ session: Session) -> some View {
+    @ViewBuilder private func runRow(_ session: Session) -> some View {
         FloatingRow(session: session, now: model.now,
                     open: { controller.open(session) },
                     rename: { controller.rename(session.id) },
-                    isSavedForLater: model.board.savedForLater(session: session) != nil,
-                    resumeLater: {
-                        guard let card = model.resumeLater(session) else { return }
-                        expandedLaterID = card.id
-                        resumeReveal = .init(cardID: card.id)
+                    togglePin: {
+                        model.toggleSessionPin(session.id)
+                        revealWatchedID = session.isPinned ? nil : session.id
+                    },
+                    details: {
+                        if detailSessionID == session.id {
+                            detailSessionID = nil
+                        } else {
+                            detailSessionID = session.id
+                            model.markSessionRead(session)
+                        }
                     },
                     remove: { model.remove(sessionId: session.id) },
                     ignore: ignoreAction(for: session))
+        if detailSessionID == session.id {
+            VStack(alignment: .leading, spacing: 6) {
+                SessionReplyView(session: session, model: model)
+                Button(Jumper.openLabel(for: session)) { controller.open(session) }
+                    .font(AppTypography.body)
+                    .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
+        }
     }
 }
 
@@ -432,8 +471,8 @@ private struct FloatingRow: View {
     let now: Date
     let open: () -> Void
     let rename: () -> Void
-    let isSavedForLater: Bool
-    let resumeLater: () -> Void
+    let togglePin: () -> Void
+    let details: () -> Void
     let remove: () -> Void
     /// "Ignore for Now"; nil when this run can't be ignored.
     var ignore: (() -> Void)? = nil
@@ -448,13 +487,15 @@ private struct FloatingRow: View {
                     HStack(spacing: 6) {
                         Text(session.currentTopicTitle).font(AppTypography.compactTitle).lineLimit(1)
                         Spacer(minLength: 4)
-                        Color.clear.frame(width: RemoveZone.slot + 25, height: 18)
+                        Color.clear.frame(width: RemoveZone.slot + SessionRowControls.width, height: 18)
                     }
                     HStack {
                         StatePill(session: session, now: now)
                         Spacer(minLength: 0)
                     }
-                    if let detail = CompactRunDetail.resolve(session, now: now) {
+                    if session.isPinned {
+                        LiveLine(session: session, now: now)
+                    } else if let detail = CompactRunDetail.resolve(session, now: now) {
                         CompactRunDetailLine(detail: detail)
                     }
                 }
@@ -468,7 +509,7 @@ private struct FloatingRow: View {
             if hovering {
                 RemoveZone(label: "Remove \(session.currentTopicTitle) from the list", action: remove)
                     .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
-                    .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
+                    .padding(.trailing, SessionRowControls.width + 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
         }
         // A waiting run can be set aside right here: it leaves this window and
@@ -487,8 +528,8 @@ private struct FloatingRow: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            ResumeLaterButton(sessionID: session.id, saved: isSavedForLater, action: resumeLater)
-                .padding(.trailing, RemoveZone.slot + 8)
+            SessionRowControls(session: session, togglePin: togglePin, details: details)
+                .padding(.trailing, 8)
                 .padding(.top, 4)
         }
         .onHover { hovering = $0 }
@@ -497,7 +538,7 @@ private struct FloatingRow: View {
             Button("Open", action: open)
             if let ignore { Button("Ignore for Now", action: ignore) }
             Button("Rename…", action: rename)
-            Button(ResumeLaterButton.title(saved: isSavedForLater), action: resumeLater)
+            Button(SessionRowControls.pinTitle(session), action: togglePin)
             Divider()
             Button("Remove from List", action: remove)
         }

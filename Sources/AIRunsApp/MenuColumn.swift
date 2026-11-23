@@ -27,6 +27,7 @@ struct MenuColumn: View {
     let actions: PanelActions
     @State private var heights: [MenuPart: CGFloat] = [:]
     @State private var showRecent = false
+    @State private var revealWatchedID: String?
 
     private var hasActiveSessions: Bool {
         MenuSessionPresentation(sessions: model.store.ordered()).hasActiveSessions
@@ -52,11 +53,11 @@ struct MenuColumn: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .menuHeight(.sessions)
                     }
-                    .task(id: ui.menuPinRevealID) {
-                        guard ui.menuPinRevealID != nil, let cardID = ui.expandedNextCardID else { return }
+                    .task(id: revealWatchedID) {
+                        guard let id = revealWatchedID else { return }
                         await Task.yield()
                         guard !Task.isCancelled else { return }
-                        scroll.scrollTo(cardID, anchor: .top)
+                        scroll.scrollTo(id, anchor: .center)
                     }
                 }
                 .frame(height: sessionHeight)
@@ -146,10 +147,16 @@ struct MenuColumn: View {
             .padding(.horizontal, 14)
             if !menu.needs.isEmpty {
                 SectionLabel(title: "Needs you", count: menu.needs.count)
+                    .accessibilityIdentifier("sessions.section.needs")
                 rows(menu.needs, overlap: overlap)
             }
+            if !menu.pinned.isEmpty {
+                SectionLabel(title: "Pinned", count: menu.pinned.count)
+                    .accessibilityIdentifier("sessions.section.pinned")
+                rows(menu.pinned, overlap: overlap)
+            }
             MenuPinnedNext(cards: nextCards, pinnedCards: model.board.cards, expandedCardID: $ui.expandedNextCardID,
-                           cancelHover: { ui.cancelHover() }, liveTitle: model.liveTitle(for:), updateNext: { card, selected, next in
+                           cancelHover: { ui.cancelHover() }, liveTitle: model.liveTitle(for:), openLabel: model.openLabel(for:), updateNext: { card, selected, next in
                 model.setMenuNext(selected, for: card.id, next: next)
             }, archiveCard: { model.archive(cardId: $0.id) }) { card, attachment in
                 actions.closePanel()
@@ -178,6 +185,7 @@ struct MenuColumn: View {
                 }
             } else if !menu.recent.isEmpty {
                 sessionDisclosure("Recent Sessions", count: menu.recent.count, expanded: $showRecent)
+                    .accessibilityIdentifier("sessions.show-recent")
                 if showRecent {
                     if !menu.done.isEmpty {
                         SectionLabel(title: "Done", count: menu.done.count)
@@ -237,16 +245,23 @@ struct MenuColumn: View {
                            completedWorkDuration: model.store.completedWorkDuration(for: session.id), now: model.now,
                            alsoHere: (overlap[session.id] ?? []).map(\.currentTopicTitle), ui: ui,
                            rename: { actions.renameSession(session.id) },
-                           isSavedForLater: model.board.savedForLater(session: session) != nil,
-                           resumeLater: { actions.resumeLaterInMenu(session.id) },
+                           togglePin: {
+                               ui.cancelHover()
+                               model.toggleSessionPin(session.id)
+                               revealWatchedID = session.isPinned ? nil : session.id
+                           },
+                           details: {
+                               if ui.toggleDetails(.session(session.id)) { model.markSessionRead(session) }
+                           },
                            remove: {
-                               ui.hover = nil
+                               ui.cancelHover()
                                model.remove(sessionId: session.id)
                            },
                            ignore: ignoreAction(for: session)) {
                     actions.closePanel()
                     model.open(sessionId: session.id)
                 }
+                .id(session.id)
             }
         }
         .padding(.horizontal, 5)

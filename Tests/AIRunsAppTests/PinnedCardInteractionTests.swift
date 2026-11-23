@@ -7,79 +7,116 @@ import XCTest
 
 final class PinnedCardInteractionTests: XCTestCase {
     @MainActor
-    func testResumeLaterRevealsSnapshotAndSavesNextInMenu() throws {
+    func testPinnedSessionMovesForAttentionAndReturnsToPinnedInBothWindows() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        var store = SessionStore()
-        var event = AgentEvent(tool: .codex, kind: .promptStart, sessionId: "fixture", at: Date(),
-                               cwd: "/tmp/pinned-fixture", transcriptPath: root.appendingPathComponent("session.jsonl").path)
-        event.toolTitle = "Account connection checks"
-        store.apply(event)
-        let model = AppModel(testingRoot: root, store: store)
+        let model = AppModel(testingRoot: root)
         let ui = PanelUIState()
         let actions = NativePinMenuActions(model: model, ui: ui)
-        let window = try NativePinWindow(width: 360) {
-            MenuColumn(model: model, ui: ui, actions: actions)
-        }
-        defer { window.close() }
-        try window.press("session.codex:fixture.resume-later")
-
-        XCTAssertEqual(actions.pinnedSession, "codex:fixture")
-        XCTAssertFalse(actions.isBoardVisible)
-        let pinned = try XCTUnwrap(model.board.cards.first)
-        let prefix = "pinned.\(pinned.id.uuidString)"
-        XCTAssertEqual(ui.expandedNextCardID, pinned.id)
-        let sessionLink = try XCTUnwrap(pinned.attachments.first)
-        _ = try window.requireElement("\(prefix).link.\(sessionLink.id.uuidString)")
-
-        try window.pressMenu("\(prefix).more", item: "\(prefix).edit-next", title: "Edit next step…")
-        try window.edit("\(prefix).next-field", to: "Verify browser sign-in")
-        try window.press("\(prefix).save-next")
-        _ = try window.requireElement("\(prefix).toggle")
-        XCTAssertNil(window.element("\(prefix).next-field"))
-        let saved = try XCTUnwrap(JSONFile.load(PinBoard.self, from: model.paths.pins)?.card(id: pinned.id))
-        XCTAssertEqual(saved.next, "Verify browser sign-in")
-        XCTAssertEqual(saved.attachments, pinned.attachments)
-        XCTAssertFalse(actions.isBoardVisible)
-    }
-
-    @MainActor
-    func testFloatingRunsSavesSnapshotVisibleInBothWindows() throws {
-        let root = try temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-        var store = SessionStore()
-        let event = AgentEvent(tool: .codex, kind: .promptStart, sessionId: "floating", at: Date(),
-                               prompt: "Prepare a launch checklist",
-                               transcriptPath: root.appendingPathComponent("fixture.jsonl").path)
-        store.apply(event)
-        store.apply(AgentEvent(tool: .codex, kind: .turnEnd, sessionId: "floating",
-                               at: event.at.addingTimeInterval(1), lastMessage: "Two sample lists are ready."))
-        let model = AppModel(testingRoot: root, store: store)
-        let ui = PanelUIState()
-        let actions = NativePinMenuActions(model: model, ui: ui)
-        let state = FloatingState()
         let floating = FloatingController(model: model, actions: actions)
         let floatWindow = try NativePinWindow(width: 310) {
-            FloatingCard(model: model, state: state, controller: floating)
+            FloatingCard(model: model, state: FloatingState(), controller: floating)
         }
-        defer { floatWindow.close() }
         let menuWindow = try NativePinWindow(width: 360) {
             MenuColumn(model: model, ui: ui, actions: actions)
         }
-        defer { menuWindow.close() }
+        defer { floatWindow.close(); menuWindow.close() }
+        let windows = [menuWindow, floatWindow]
+        let pin = "session.codex:fixture.pin"
 
-        try floatWindow.press("session.codex:floating.resume-later")
-        let saved = try XCTUnwrap(model.board.cards.first)
-        let prefix = "pinned.\(saved.id.uuidString)"
-        _ = try floatWindow.requireElement("\(prefix).more")
-        _ = try menuWindow.requireElement("\(prefix).more")
-        _ = try floatWindow.requireElement("\(prefix).quote")
-        XCTAssertEqual(state.tab, .runs)
-        XCTAssertNil(model.message)
-        let bookmark = try floatWindow.requireElement("session.codex:floating.resume-later")
-        XCTAssertEqual(floatWindow.value(kAXDescriptionAttribute, of: bookmark) as? String, "Show Saved Item")
-        try floatWindow.press("session.codex:floating.resume-later")
-        XCTAssertEqual(model.board.cards.map(\.id), [saved.id])
+        try send("UserPromptSubmit", ["prompt": "Review the sample drawings"], to: model)
+        try send("Stop", ["last_assistant_message": "Finished the first review."], to: model)
+        for window in windows {
+            try window.press("sessions.show-recent")
+            _ = try window.requireElement(pin)
+        }
+        try menuWindow.press(pin)
+        for window in windows {
+            _ = try window.requireElement("sessions.section.pinned")
+            XCTAssertEqual(window.count(pin), 1)
+        }
+        XCTAssertTrue(model.board.cards.isEmpty)
+
+        try send("UserPromptSubmit", ["prompt": "Check the remaining drawings"], to: model)
+        try send("Stop", ["last_assistant_message": "Which drawing should I review?"], to: model)
+        for window in windows {
+            _ = try window.requireElement("sessions.section.needs")
+            XCTAssertNil(window.element("sessions.section.pinned"))
+            XCTAssertEqual(window.count(pin), 1)
+        }
+
+        try send("UserPromptSubmit", ["prompt": "Review both drawings"], to: model)
+        try send("Stop", ["last_assistant_message": "Finished reviewing both drawings."], to: model)
+        for window in windows {
+            _ = try window.requireElement("sessions.section.pinned")
+            XCTAssertNil(window.element("sessions.section.needs"))
+            XCTAssertEqual(window.count(pin), 1)
+        }
+        XCTAssertTrue(try XCTUnwrap(model.store.sessions["codex:fixture"]).hasUnreadReply)
+        try floatWindow.press("session.codex:fixture.details")
+        XCTAssertFalse(try XCTUnwrap(model.store.sessions["codex:fixture"]).hasUnreadReply)
+        try floatWindow.press(pin)
+        for window in windows {
+            window.update()
+            XCTAssertNil(window.element("sessions.section.pinned"))
+        }
+        XCTAssertTrue(model.board.cards.isEmpty)
+    }
+
+    @MainActor
+    func testSaveReplyFromOriginalOnBothSurfacesKeepsIndividualReplies() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(testingRoot: root)
+        let ui = PanelUIState()
+        let actions = NativePinMenuActions(model: model, ui: ui)
+        let floating = FloatingController(model: model, actions: actions)
+        let floatWindow = try NativePinWindow(width: 310) {
+            FloatingCard(model: model, state: FloatingState(), controller: floating)
+        }
+        defer { floatWindow.close() }
+        let id = "session.codex:fixture"
+        let first = "Two sample drawings are available. Which should I keep?"
+        let second = "Both drawings have been reviewed. Which should I submit?"
+        try send("UserPromptSubmit", ["prompt": "Review the sample drawings"], to: model)
+        try floatWindow.press("\(id).details")
+        XCTAssertNil(floatWindow.element("\(id).save-reply"), "A pending request has no reply to save.")
+
+        try send("Stop", ["last_assistant_message": first], to: model)
+        try floatWindow.press("\(id).save-reply")
+        XCTAssertEqual(model.board.cards.map(\.excerpt), [first])
+        let savedControl = try floatWindow.requireElement("\(id).save-reply")
+        XCTAssertEqual(floatWindow.value(kAXEnabledAttribute, of: savedControl) as? Bool, false)
+        try send("UserPromptSubmit", ["prompt": "Review both"], to: model)
+        try send("Stop", ["last_assistant_message": second], to: model)
+        let panelWidth = PanelLayout.menuWidth + PanelLayout.flyoutWidth + PanelLayout.gap + 2 * PanelLayout.outerPadding
+        let menu = try NativePinWindow(width: panelWidth) {
+            PanelRootView(model: model, ui: ui, actions: actions)
+        }
+        defer { menu.close() }
+        XCTAssertNil(menu.element("\(id).save-reply"))
+        try menu.press("\(id).details")
+        try menu.press("\(id).save-reply")
+        let persisted = try XCTUnwrap(JSONFile.load(PinBoard.self, from: model.paths.pins))
+        XCTAssertEqual(Set(persisted.cards.compactMap(\.excerpt)), [first, second])
+        XCTAssertEqual(persisted.cards.count, 2)
+        for card in persisted.cards {
+            _ = try menu.requireElement("pinned.\(card.id.uuidString).more")
+            _ = try floatWindow.requireElement("pinned.\(card.id.uuidString).more")
+        }
+    }
+
+    @MainActor
+    private func send(_ event: String, _ fields: [String: String], to model: AppModel) throws {
+        var payload = fields
+        payload["hook_event_name"] = event
+        payload["session_id"] = "fixture"
+        payload["transcript_path"] = model.paths.root.appendingPathComponent("fixture.jsonl").path
+        let line = HookRecord.makeLine(tool: AgentTool.codex.rawValue,
+                                       payload: try JSONSerialization.data(withJSONObject: payload),
+                                       environment: [:], tty: nil)
+        try EventLogWriter.append(line, to: model.paths.events)
+        model.readEvents()
     }
 
     @MainActor
@@ -215,18 +252,11 @@ private struct NativePinFixture: View {
 private final class NativePinMenuActions: PanelActions {
     let model: AppModel
     let ui: PanelUIState
-    private(set) var pinnedSession: String?
     private(set) var isBoardVisible = false
 
     init(model: AppModel, ui: PanelUIState) {
         self.model = model
         self.ui = ui
-    }
-
-    func resumeLaterInMenu(_ sessionID: String) {
-        pinnedSession = sessionID
-        ui.expandedNextCardID = model.store.sessions[sessionID].flatMap { model.resumeLater($0) }?.id
-        ui.menuPinRevealID = UUID()
     }
 
     func closePanel() {}
@@ -276,6 +306,10 @@ private final class NativePinWindow {
 
     func element(_ identifier: String) -> AXUIElement? {
         elements().first { value(kAXIdentifierAttribute, of: $0) as? String == identifier }
+    }
+
+    func count(_ identifier: String) -> Int {
+        elements().filter { value(kAXIdentifierAttribute, of: $0) as? String == identifier }.count
     }
 
     func requireElement(_ identifier: String, file: StaticString = #filePath, line: UInt = #line) throws -> AXUIElement {

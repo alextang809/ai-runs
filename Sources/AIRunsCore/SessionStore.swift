@@ -33,6 +33,12 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var waitingSince: Date?
     public var lastEventAt: Date
     public var lastMessage: String?
+    /// The time of the reply itself. Tool activity and opening the conversation do not move it.
+    public internal(set) var lastReplyAt: Date?
+    public internal(set) var pinnedAt: Date?
+    var unreadPinnedReply: Bool?
+    public var isPinned: Bool { pinnedAt != nil }
+    public var hasUnreadReply: Bool { isPinned && unreadPinnedReply == true }
     public var approvalDetail: String?
     public var transcriptPath: String?
     public var terminal: TerminalContext
@@ -89,7 +95,11 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// Finished its work: shown, but not counted as needing the user.
     public var isDone: Bool { state == .yourTurn && outcome == .done }
     /// Waiting on the user: approval, a question, or a reply AI Runs can't classify.
-    public var needsUser: Bool { waitsOnUser && !isIgnored }
+    public var needsUser: Bool {
+        guard waitsOnUser, !isIgnored else { return false }
+        if isPinned, state == .yourTurn, outcome == .replied, native?.state != .readyForReview { return false }
+        return true
+    }
     /// The same, whether or not the user chose to ignore it.
     public var waitsOnUser: Bool { state.needsUser && !isDone }
     /// The user said "I know" to this wait: it stays in sight but no longer
@@ -232,7 +242,14 @@ public struct SessionStore: Codable, Equatable, Sendable {
             return
         }
         if event.kind == .sessionEnd {
-            sessions[key] = nil
+            if var pinned = session, pinned.isPinned {
+                guard event.at >= pinned.lastEventAt else { return }
+                pinned.lastEventAt = event.at
+                if !pinned.isDone { pinned.clearObservedState() }
+                sessions[key] = pinned
+            } else {
+                sessions[key] = nil
+            }
             dismissed?.remove(key)
             executors?[executor] = nil
             record(nil, for: key, at: event.at)
@@ -262,6 +279,11 @@ public struct SessionStore: Codable, Equatable, Sendable {
         }
         guard var current = session else { return }
 
+        // Preserve a stable best-known date for replies from older versions before a new turn moves it.
+        if current.lastMessage != nil, current.lastReplyAt == nil {
+            current.lastReplyAt = current.waitingSince ?? current.lastEventAt
+        }
+        if event.kind == .turnEnd, let replyAt = current.lastReplyAt, event.at < replyAt { return }
         current.lastEventAt = max(current.lastEventAt, event.at)
         // A hook knows more than a look at Claude's window.
         current.lastHookAt = event.at
@@ -283,6 +305,10 @@ public struct SessionStore: Codable, Equatable, Sendable {
         case .promptStart:
             if let userPrompt {
                 current.observeTopic(prompt: userPrompt, at: event.at)
+                if current.lastMessage == nil {
+                    current.lastReplyAt = nil
+                    current.unreadPinnedReply = nil
+                }
             }
             current.state = .working
             current.turnStartedAt = event.at
@@ -341,7 +367,13 @@ public struct SessionStore: Codable, Equatable, Sendable {
         case .turnEnd:
             current.approvalDetail = nil
             current.activity = nil
-            if let message = event.lastMessage, !message.isEmpty { current.lastMessage = message }
+            if let message = event.lastMessage, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if current.isPinned, current.lastReplyAt != event.at || current.lastMessage != message {
+                    current.unreadPinnedReply = true
+                }
+                current.lastReplyAt = event.at
+                current.lastMessage = message
+            }
             if event.backgroundTasks > 0 || event.scheduled > 0 {
                 // Still busy: it resumes on its own when its background tasks
                 // finish or its scheduled wake-up fires.
@@ -394,6 +426,9 @@ public struct SessionStore: Codable, Equatable, Sendable {
                 if history?[key] == nil, let spans = history?[executor] { history?[key] = spans }
                 history?[executor] = nil
             } else {
+                if own.isPinned, sessions[key]?.isPinned == false {
+                    sessions[key]?.pinnedAt = own.pinnedAt
+                }
                 record(nil, for: executor, at: event.at)
             }
         }
@@ -652,6 +687,18 @@ public struct SessionStore: Codable, Equatable, Sendable {
         record(SpanKind(session), for: id, at: at)
     }
 
+    public mutating func setPinned(id: String, _ pinned: Bool, at date: Date = Date()) {
+        guard var session = sessions[id], session.isPinned != pinned else { return }
+        session.pinnedAt = pinned ? date : nil
+        session.unreadPinnedReply = nil
+        sessions[id] = session
+    }
+
+    public mutating func markReplyRead(id: String) {
+        guard sessions[id]?.hasUnreadReply == true else { return }
+        sessions[id]?.unreadPinnedReply = nil
+    }
+
     /// The user's own name for the session. Automatic names never replace it.
     public mutating func rename(id: String, to title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -678,12 +725,17 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// Drops sessions nobody has touched for a long time (closed windows that
     /// never sent SessionEnd).
     public mutating func pruneStale(now: Date, olderThan age: TimeInterval = 24 * 3600) {
-        let kept = sessions.filter {
-            now.timeIntervalSince(max($0.value.lastEventAt, $0.value.nativeView?.seenAt ?? .distantPast)) < age
+        for (key, session) in sessions {
+            let lastSeen = max(session.lastEventAt, session.nativeView?.seenAt ?? .distantPast)
+            guard now.timeIntervalSince(lastSeen) >= age else { continue }
+            if session.isPinned {
+                guard session.state == .working else { continue }
+                sessions[key]?.clearObservedState()
+            } else {
+                sessions[key] = nil
+            }
+            record(nil, for: key, at: now)
         }
-        let gone = Set(sessions.keys).subtracting(kept.keys)
-        sessions = kept
-        for key in gone { record(nil, for: key, at: now) }
         if let links = executors {
             let kept = links.filter { now.timeIntervalSince($0.value.linkedAt) < age || sessions[$0.value.conversation] != nil }
             executors = kept.isEmpty ? nil : kept

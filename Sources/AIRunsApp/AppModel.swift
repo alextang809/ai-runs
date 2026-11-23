@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
     /// The app that was in front when the panel opened, for "Pin Front AI Window".
     var frontAppAtOpen: NSRunningApplication?
 
+    private let usesSystemServices: Bool
     private let reader: EventLogReader
     private var pollTimer: Timer?
     private var clockTimer: Timer?
@@ -36,6 +37,7 @@ final class AppModel: ObservableObject {
 
     /// Isolated state for native UI tests; no hooks, observers, or polling start.
     init(testingRoot: URL, store: SessionStore = SessionStore(), board: PinBoard = PinBoard()) {
+        usesSystemServices = false
         paths = AIRunsPaths(root: testingRoot)
         installer = HookInstaller(home: testingRoot)
         reader = EventLogReader(url: paths.events, offset: 0)
@@ -43,6 +45,7 @@ final class AppModel: ObservableObject {
         self.board = board
     }
     init() {
+        usesSystemServices = true
         paths = AIRunsPaths()
         installer = HookInstaller()
         try? paths.ensureRoot()
@@ -242,6 +245,7 @@ final class AppModel: ObservableObject {
         }
         try? JSONFile.save(Cursor(offset: reader.offset), to: paths.cursor)
         now = Date()
+        guard usesSystemServices else { return }
         suggestTitles()
         refineOutcomes()
         Notifier.shared.update(sessions: Array(store.sessions.values))
@@ -342,6 +346,7 @@ final class AppModel: ObservableObject {
 
     private func saveSessions() {
         try? JSONFile.save(store, to: paths.sessions)
+        guard usesSystemServices else { return }
         // Removing, restoring or renaming changes what notifications should
         // show even though no event arrived.
         Notifier.shared.update(sessions: Array(store.sessions.values))
@@ -475,9 +480,30 @@ final class AppModel: ObservableObject {
 
     // MARK: - Sessions
 
+    func toggleSessionPin(_ sessionID: String) {
+        guard let session = store.sessions[sessionID] else { return }
+        var updated = store
+        updated.setPinned(id: sessionID, !session.isPinned)
+        do {
+            try JSONFile.save(updated, to: paths.sessions)
+            store = updated
+        } catch {
+            show("Couldn’t update the pin.")
+        }
+    }
+
+    func markSessionRead(_ session: Session) {
+        guard let current = store.sessions[session.id], current.hasUnreadReply,
+              current.lastReplyAt == session.lastReplyAt, current.lastMessage == session.lastMessage,
+              current.currentTopicID == session.currentTopicID else { return }
+        store.markReplyRead(id: session.id)
+        saveSessions()
+    }
+
     func open(sessionId: String) {
         guard let session = store.sessions[sessionId] else { return }
-        Jumper.open(session: session, show: { [weak self] in self?.show($0) })
+        Jumper.open(session: session, opened: { [weak self] in self?.markSessionRead(session) },
+                    show: { [weak self] in self?.show($0) })
     }
 
     func resolve(sessionId: String) {
@@ -520,11 +546,16 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
-    func resumeLater(_ session: Session) -> PinCard? {
-        if let existing = board.savedForLater(session: session) { return existing }
+    func saveReply(_ session: Session) -> PinCard? {
+        if let existing = board.savedReply(session: session) { return existing }
         var updated = board
-        let card = updated.saveForLater(session: session)
-        return persistBoard(updated) ? card : nil
+        guard let card = updated.saveReply(session: Jumper.sessionForBookmark(session)), persistBoard(updated) else { return nil }
+        markSessionRead(session)
+        return card
+    }
+
+    func openLabel(for attachment: PinAttachment) -> String {
+        Jumper.openLabel(for: attachment.link, in: store)
     }
 
     func liveTitle(for attachment: PinAttachment) -> String? {
@@ -609,6 +640,10 @@ final class AppModel: ObservableObject {
         guard let destination = board.card(id: card.id)?.attachments.first(where: { $0.id == attachment.id }) else { return }
         board.touch(id: card.id)
         savePins()
+        if let session = Jumper.currentSession(for: destination.link, in: store) {
+            open(sessionId: session.id)
+            return
+        }
         Jumper.open(link: destination.link, in: store, show: { [weak self] in self?.show($0) })
     }
 

@@ -98,6 +98,12 @@ public struct SavedTopic: Codable, Equatable, Sendable {
     public let topicID: String
     public let quoteSource: QuoteSource?
     public let originalNext: String
+    /// A reply capture can also originate from an older session with no recorded reply time.
+    public struct ReplyCapture: Codable, Equatable, Sendable {
+        public let second: Int64?
+    }
+    public let replyCapture: ReplyCapture?
+    public var replySecond: Int64? { replyCapture?.second }
 }
 
 public struct PinCard: Codable, Equatable, Identifiable, Sendable {
@@ -114,6 +120,7 @@ public struct PinCard: Codable, Equatable, Identifiable, Sendable {
     public var excerpt: String?
     public fileprivate(set) var savedTopic: SavedTopic?
     public var isSavedForLater: Bool { savedTopic != nil }
+    public var isSavedReply: Bool { savedTopic?.replyCapture != nil }
     public var createdAt: Date
     /// Last time the user did anything with the card.
     public var touchedAt: Date
@@ -271,17 +278,45 @@ public struct PinBoard: Codable, Equatable, Sendable {
     @discardableResult
     public mutating func saveForLater(session: Session, now: Date = Date()) -> PinCard {
         if let existing = savedForLater(session: session) { return existing }
-        let attachment = PinAttachment.session(session)
         let reply = Self.nonblank(session.currentTopicReply)
         let quote = reply ?? Self.nonblank(session.latestUserPrompt) ?? Self.nonblank(session.currentTopicPrompt)
         let source: SavedTopic.QuoteSource? = reply != nil ? .reply : (quote != nil ? .prompt : nil)
+        return appendSnapshot(session: session, quote: quote, source: source, capture: nil, now: now)
+    }
+
+    /// The caller passes the session value that supplied the visible reply, even if a newer turn has arrived.
+    public func savedReply(session: Session) -> PinCard? {
+        guard let quote = Self.nonblank(session.currentTopicReply) else { return nil }
+        let second = session.lastReplyAt.map { Int64($0.timeIntervalSince1970) }
+        return cards.first { card in
+            guard let saved = card.savedTopic, saved.sessionID == session.id,
+                  saved.topicID == session.currentTopicID, saved.quoteSource == .reply,
+                  card.excerpt == quote else { return false }
+            if let recorded = saved.replySecond { return recorded == second }
+            // Old topic bookmarks did not store the reply event time. A subsequent
+            // identical reply cannot be the original if it arrived after the bookmark.
+            return second.map { $0 <= Int64(card.createdAt.timeIntervalSince1970) } ?? true
+        }
+    }
+
+    @discardableResult
+    public mutating func saveReply(session: Session, now: Date = Date()) -> PinCard? {
+        guard let quote = Self.nonblank(session.currentTopicReply) else { return nil }
+        if let existing = savedReply(session: session) { return existing }
+        let second = session.lastReplyAt.map { Int64($0.timeIntervalSince1970) }
+        return appendSnapshot(session: session, quote: quote, source: .reply, capture: .init(second: second), now: now)
+    }
+
+    private mutating func appendSnapshot(session: Session, quote: String?, source: SavedTopic.QuoteSource?,
+                                         capture: SavedTopic.ReplyCapture?, now: Date) -> PinCard {
+        let attachment = PinAttachment.session(session)
         let manual = manualNext(for: session, attachment: attachment)
-        let next = manual ?? Self.action(in: reply) ?? ""
+        let next = manual ?? (source == .reply ? Self.action(in: quote) : nil) ?? ""
         var card = PinCard(title: session.currentTopicTitle, next: next, nextIsSuggested: manual == nil && !next.isEmpty,
                            group: session.project.isEmpty ? Self.inbox : session.project, link: attachment.link,
                            excerpt: quote, createdAt: now)
         card.savedTopic = SavedTopic(sessionID: session.id, topicID: session.currentTopicID,
-                                    quoteSource: source, originalNext: next)
+                                    quoteSource: source, originalNext: next, replyCapture: capture)
         add(card)
         return card
     }
