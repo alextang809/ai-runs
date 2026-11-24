@@ -29,7 +29,17 @@ by eye. Where the mock and the real views differ in spacing or type, the real vi
 
 ## On hold dock
 
-Sits at the bottom of the list, above the footer, in both the menu panel and the floating window.
+**Position is not decided yet.** Two candidates, switchable in the prototype under "时间线放在哪":
+
+- **Top** (menu panel only): under the Need you / Working / Today numbers. Seen
+  first, reads as "numbers are now, the line is what comes next", and the drag
+  from Needs you is short. It pushes Needs you down by roughly 100 pt, and both
+  Pin and Hold targets end up above the list. The tray opens under the line.
+- **Bottom**: at the end of the list, above the footer. Needs you stays highest
+  and "up is Pin, down is later" is easy to remember. Less visible, longest drag.
+
+The floating window has no numbers area, so there the dock is at the bottom in both cases.
+The screenshots in this folder show the bottom position.
 
 | State | What shows |
 |---|---|

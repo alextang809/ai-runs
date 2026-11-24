@@ -104,6 +104,10 @@ button:focus-visible,.row:focus-visible,.tile:focus-visible,input:focus-visible{
 .floating{width:310px;max-width:100%;background:var(--p-surface);border:1px solid var(--p-line);border-radius:20px;box-shadow:var(--p-shadow);padding:0 0 8px}
 .floating.wide{width:452px}
 .p-head{position:relative;padding:9px 14px 8px;display:flex;flex-direction:column;gap:8px}
+.p-top{position:relative;display:flex;flex-direction:column;gap:8px}
+.p-top .topdrop{inset:-3px -6px -2px}
+.dock.top{position:static;margin:2px -6px 0}
+.dock.top .tray{margin:6px -3px 0;border-bottom:0;border-top:1px solid var(--p-line);padding:4px 0 0}
 .p-title{display:flex;align-items:center;gap:8px;font-size:17px}
 .p-title .sp{flex:1}
 .metrics{display:flex;gap:30px}
@@ -358,6 +362,7 @@ td{width:29%}
       <div class="seg" id="scenTabs" role="group" aria-label="场景"></div>
     </div>
     <div class="lookrow" id="lookRow"><span class="lbl">分类有多显眼</span><div class="seg" id="lookTabs" role="group" aria-label="分类显示强度"></div><p class="fine" id="lookNote"></p></div>
+    <div class="lookrow" id="posRow"><span class="lbl">时间线放在哪</span><div class="seg" id="posTabs" role="group" aria-label="时间线位置"></div><p class="fine" id="posNote"></p></div>
     <div class="steps" id="steps" role="group" aria-label="操作路径"></div>
     <div class="work">
       <div class="desk" id="desk">
@@ -490,6 +495,13 @@ const HOSTNAME = { cl:'Claude', cx:'Codex', gp:'ChatGPT', term:'Terminal' };
 /* ---------- model ---------- */
 let M = null;
 let LOOK = 'line';
+let POS = 'top';
+const POSN = {
+  top:['顶部', '主菜单里放在三个数字下面。一打开就看到；上面的数字讲现在，这条线讲之后；Needs you 就在它正下方，拖动最短，到点回来也是落到下面一格。代价是 Needs you 被往下推一截，而且 Pin 和 Hold 的落点都在上面。浮窗没有数字区，仍放底部。'],
+  bottom:['底部', '主菜单和浮窗都放在列表末尾。Needs you 保持在最高处；方向好记，往上是 Pin，往下是以后再说；列表本来就按紧急程度从上到下排。代价是不够显眼，从 Needs you 拖下来的距离最长。']
+};
+function atTop(surf){ return LOOK === 'line' && POS === 'top' && surf === 'm' && M.scheme === 'C'; }
+function posText(x){ return LOOK === 'line' && POS === 'top' ? x.replace(/底部的 On hold/g, '顶部数字下面的 On hold').replace('一直留在底部', '一直留在顶部').replace(/往上拖是 Pin，往下拖是 Hold。/g, '拖到最上面的标题区是 Pin，拖到时间线上是 Hold。') : x; }
 const LOOKS = {
   quiet:['安静', '上一版。On hold 是底部一行灰字，落点只在拖动时出现。问题就是你说的：分类平时几乎看不见。'],
   dock:['四个格子', '时间线的简化版。On hold 是底部常驻的四个格子，每格带数字和回来的时刻，拖动时它们就是落点。好处是目标大、实现简单。代价是只有四个固定去处，看不出一周里哪天有几条回来。'],
@@ -718,9 +730,10 @@ function lineHTML(surf){
   const waits = held.filter(x => x.hold.kind === 'waiting');
   const want = M.slotOpen === 'waiting' ? (waits.length === 1 ? segOf(waits[0]) : null) : M.slotOpen;
   const open = want && by(want).length ? want : null;
-  let h = '<div class="dock line' + (held.length ? '' : ' empty') + '" data-key="' + surf + '-dock">' +
+  let h = '<div class="dock line' + (held.length ? '' : ' empty') + (atTop(surf) ? ' top' : '') + '" data-key="' + surf + '-dock">' +
     '<div class="dock-head">' + IC.clock + '<span>On hold</span>' + (held.length ? '' : '<span class="hint">Drag a session onto the day you want it back</span>') + '</div>';
-  if (open){ const items = by(open); h += '<div class="tray held">' + items.map(x => heldRowHTML(x, surf, x.hold.kind === 'waiting' ? 'waiting' : 'time', items[0])).join('') + '</div>'; }
+  const top = atTop(surf), tray = open ? '<div class="tray held">' + by(open).map(x => heldRowHTML(x, surf, x.hold.kind === 'waiting' ? 'waiting' : 'time', by(open)[0])).join('') + '</div>' : '';
+  if (!top) h += tray;
   h += '<div class="tl">' + segs.map(g => {
     const it = by(g.k), shown = it.slice(0, 4);
     const marks = shown.map((x, i) => {
@@ -733,7 +746,7 @@ function lineHTML(surf){
     return '<div class="seg-t' + (it.length ? ' has' : '') + (g.k === 'd0' ? ' today' : g.k === 'next' ? ' next' : '') + '" role="button" tabindex="0" data-seg="' + g.k + '" data-drop="seg:' + g.k + '" data-slot="' + g.k + '" data-key="' + surf + '-slot-' + g.k + '" data-sec="' + it.length + '" aria-expanded="' + (open === g.k) + '" aria-label="On hold, ' + label + ', ' + it.length + ' sessions">' +
       '<span class="axis-l">' + (g.k === 'd0' ? '<i class="now"></i>' : '') + marks + '</span><span class="lab">' + label + '</span><span class="sub">' + sub + '</span></div>';
   }).join('') +
-    '<div class="seg-t cap" data-drop="hold:waiting" aria-label="Waiting on someone"><span class="axis-l">' + IC.person + '</span><span class="lab">Waiting</span><span class="sub"></span></div></div></div>';
+    '<div class="seg-t cap" data-drop="hold:waiting" aria-label="Waiting on someone"><span class="axis-l">' + IC.person + '</span><span class="lab">Waiting</span><span class="sub"></span></div></div>' + (top ? tray : '') + '</div>';
   return h;
 }
 function dockHTML(surf){
@@ -857,12 +870,13 @@ function topDrops(){
 }
 function menuHTML(){
   const L = live(), nNeed = L.filter(needs).length, nWork = L.filter(s => s.state === 'working' && !s.hold).length;
-  return '<div class="p-head">' + topDrops() +
+  const top = atTop('m');
+  return '<div class="p-head"><div class="p-top">' + topDrops() +
     '<div class="p-title">' + IC.fermata(nNeed > 0) + '<span>AI Runs</span><span class="sp"></span></div>' +
     '<div class="metrics"><div class="metric' + (nNeed ? '' : ' zero') + '"><b>' + nNeed + '</b><span>NEED YOU</span></div>' +
     '<div class="metric' + (nWork ? '' : ' zero') + '"><b>' + nWork + '</b><span>WORKING</span></div>' +
-    '<div class="metric"><b>' + M.sessions.length + '</b><span>TODAY</span></div></div></div>' +
-    '<div class="sepline"></div><div class="list">' + listHTML('m') + '</div>' + shelfHTML('m') +
+    '<div class="metric"><b>' + M.sessions.length + '</b><span>TODAY</span></div></div></div>' + (top ? dockHTML('m') : '') + '</div>' +
+    '<div class="sepline"></div><div class="list">' + listHTML('m') + '</div>' + (top ? '' : shelfHTML('m')) +
     '<div class="sepline"></div><div class="p-foot"><span>Floating Window</span><span class="sp"></span><span>Settings…</span><span>···</span></div>';
 }
 function tileHTML(s){
@@ -960,6 +974,7 @@ function buildChrome(){
   $('#schemeTabs').innerHTML = [['A','A · Matrix',''],['B','B · Lanes',''],['C','C · Hold','建议默认']].map(x =>
     '<button data-scheme="' + x[0] + '">' + x[1] + (x[2] ? '<small>' + x[2] + '</small>' : '') + '</button>').join('');
   $('#scenTabs').innerHTML = Object.keys(SCEN).map(k => '<button data-scen="' + k + '">' + SCEN[k].name + '</button>').join('');
+  $('#posTabs').innerHTML = ['top', 'bottom'].map(k => '<button data-pos="' + k + '">' + POSN[k][0] + '</button>').join('');
   $('#lookTabs').innerHTML = ['line', 'dock', 'quiet'].map(k => '<button data-look="' + k + '">' + LOOKS[k][0] + (k === 'line' ? '<small>建议</small>' : '') + '</button>').join('');
 }
 function buildSteps(){
@@ -967,18 +982,21 @@ function buildSteps(){
   $('#steps').innerHTML = st.map((s, i) => '<button data-step="' + i + '"><i>' + (i + 1) + '</i>' + s.l + '</button>').join('');
   const n = NOTES[M.scheme];
   const items = M.scheme === 'C' && LOOK !== 'quiet' ? n[LOOK] : n.items;
-  $('#notes').innerHTML = '<h3>' + n.t + ' 的规则</h3><ul>' + items.map(x => '<li>' + x + '</li>').join('') + '</ul>';
+  $('#notes').innerHTML = '<h3>' + n.t + ' 的规则</h3><ul>' + items.map(x => '<li>' + posText(x) + '</li>').join('') + '</ul>';
 }
 function chrome(){
   $$('#schemeTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.scheme === M.scheme));
   $$('#scenTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.scen === M.scenario));
   $$('#lookTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.look === LOOK));
   $('#lookRow').hidden = M.scheme !== 'C'; $('#lookNote').textContent = LOOKS[LOOK][1];
+  $('#posRow').hidden = M.scheme !== 'C' || LOOK !== 'line'; $('#posNote').textContent = POSN[POS][1];
+  $$('#posTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.pos === POS));
   const st = STEPS[M.scheme][M.scenario];
   $$('#steps button').forEach((b, i) => { if (i === M.step && !M.note) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); });
   $('#capTag').textContent = M.note ? '你刚才的操作' : '第 ' + (M.step + 1) + ' 步，共 ' + st.length + ' 步 · ' + st[M.step].l;
   const cs = st[M.step];
   $('#capText').textContent = M.note || (M.scheme === 'C' && ((LOOK === 'line' && cs.t) || (LOOK === 'dock' && cs.d))) || cs.c;
+  if (!M.note && M.scheme === 'C') $('#capText').textContent = posText($('#capText').textContent);
   $('#prev').disabled = M.step === 0 && !M.note;
   $('#next').disabled = M.step >= st.length - 1 && !M.note;
   $('#next').textContent = M.note ? '回到第 ' + (M.step + 1) + ' 步' : '下一步';
@@ -1143,6 +1161,7 @@ document.addEventListener('click', e => {
   if (t.closest('#next')) return goStep(M.note ? M.step : M.step + 1);
   if (t.closest('#reset')) return goStep(0);
   if ((b = t.closest('[data-ev]'))) return runEvent(b.dataset.ev);
+  if ((b = t.closest('[data-pos]'))){ POS = b.dataset.pos; buildSteps(); return render(); }
   if ((b = t.closest('[data-look]'))){ LOOK = b.dataset.look; if (M.slotOpen !== 'waiting') M.slotOpen = null; buildSteps(); return render(); }
   if ((b = t.closest('[data-slot]'))){
     if (!b.classList.contains('has')) return free('这里还是空的。把一条会话拖过来，或者用每行的 ··· 菜单。');
