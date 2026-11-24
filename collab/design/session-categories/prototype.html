@@ -1,0 +1,1179 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>body{margin:0;font:14px -apple-system,system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>AI Runs 会话分类原型</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one reading column of notes around a single "desk" holding the two product windows at real size.
+   Blue controls are prototype scaffolding; grey, clay and ink are the product's own colours. */
+:root{
+  --bg:#F1F2F5; --fg:#16181C; --muted:#565C67; --line:#D5D9E0; --card:#FFFFFF;
+  --chrome:#2450B8; --chrome-soft:#E3EAFA; --on-chrome:#FFFFFF;
+  --desk:#BCC3D1; --desk-bar:rgba(255,255,255,.5); --desk-fg:#1C1F26;
+  --p-surface:#ECEDEC; --p-raise:#F8F8F7; --p-fg:#1B1B1C; --p-2:#5F6064;
+  --p-line:rgba(0,0,0,.13); --p-hover:rgba(0,0,0,.07); --p-fill:rgba(0,0,0,.075); --p-drop:rgba(0,0,0,.045);
+  --p-shadow:0 22px 48px rgba(22,28,45,.30),0 2px 6px rgba(22,28,45,.16);
+  --clay:#D97757; --ink:#111112; --on-ink:#FFFFFF; --amber:#E8890C; --term:#2A2B2E;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei","Segoe UI",Inter,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#131518; --fg:#E9EBEE; --muted:#9BA2AD; --line:#2B3038; --card:#1B1E23;
+  --chrome:#8FB0FF; --chrome-soft:#1C2740; --on-chrome:#0E1320;
+  --desk:#2A2F3A; --desk-bar:rgba(0,0,0,.28); --desk-fg:#E6E8EC;
+  --p-surface:#2C2D2F; --p-raise:#38393C; --p-fg:#F1F1F2; --p-2:#A6A7AB;
+  --p-line:rgba(255,255,255,.15); --p-hover:rgba(255,255,255,.09); --p-fill:rgba(255,255,255,.1); --p-drop:rgba(255,255,255,.055);
+  --p-shadow:0 22px 48px rgba(0,0,0,.5),0 2px 6px rgba(0,0,0,.4);
+  --clay:#E3876B; --ink:#F4F4F5; --on-ink:#1B1B1C; --amber:#F09A2A; --term:#17181A;
+  color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#131518; --fg:#E9EBEE; --muted:#9BA2AD; --line:#2B3038; --card:#1B1E23;
+  --chrome:#8FB0FF; --chrome-soft:#1C2740; --on-chrome:#0E1320;
+  --desk:#2A2F3A; --desk-bar:rgba(0,0,0,.28); --desk-fg:#E6E8EC;
+  --p-surface:#2C2D2F; --p-raise:#38393C; --p-fg:#F1F1F2; --p-2:#A6A7AB;
+  --p-line:rgba(255,255,255,.15); --p-hover:rgba(255,255,255,.09); --p-fill:rgba(255,255,255,.1); --p-drop:rgba(255,255,255,.055);
+  --p-shadow:0 22px 48px rgba(0,0,0,.5),0 2px 6px rgba(0,0,0,.4);
+  --clay:#E3876B; --ink:#F4F4F5; --on-ink:#1B1B1C; --amber:#F09A2A; --term:#17181A;
+  color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:15px;line-height:1.65;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 64px}
+.wrap{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:36px}
+h1{font-size:28px;line-height:1.25;margin:0;font-weight:700;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:19px;line-height:1.3;margin:0;font-weight:700;text-wrap:balance}
+h3{font-size:15px;margin:0;font-weight:700}
+p{margin:0}
+.eyebrow{font-size:12px;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.lead{max-width:46em;font-size:16px}
+.fine{color:var(--muted);font-size:13px;max-width:60em}
+.top{display:flex;flex-direction:column;gap:12px}
+.verdict{border:1px solid var(--line);background:var(--card);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:6px;max-width:60em}
+.verdict b{font-weight:700}
+section{display:flex;flex-direction:column;gap:16px}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px 36px}
+.cols>div{display:flex;flex-direction:column;gap:10px;min-width:0}
+ul.plain{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+ul.plain li{padding-left:16px;position:relative;max-width:40em}
+ul.plain li::before{content:"";position:absolute;left:0;top:.72em;width:6px;height:6px;border-radius:50%;background:var(--muted)}
+ul.plain li b{font-weight:700}
+
+/* scaffold controls */
+.bar{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;justify-content:space-between}
+.seg{display:inline-flex;flex-wrap:wrap;gap:4px;padding:4px;border-radius:12px;background:var(--chrome-soft)}
+.seg button{font:inherit;font-size:14px;border:0;background:transparent;color:var(--fg);padding:7px 14px;border-radius:9px;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+.seg button[aria-pressed="true"]{background:var(--chrome);color:var(--on-chrome);font-weight:600}
+.seg button small{font-size:11.5px;opacity:.85;font-weight:600;border:1px solid currentColor;border-radius:99px;padding:0 7px;line-height:1.5}
+.steps{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.steps button{font:inherit;font-size:13.5px;border:1px solid var(--line);background:var(--card);color:var(--fg);padding:6px 12px 6px 8px;border-radius:99px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.steps button i{font-style:normal;font-size:12px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--chrome-soft);color:var(--chrome);font-weight:700;font-variant-numeric:tabular-nums}
+.steps button[aria-current="step"]{border-color:var(--chrome);box-shadow:0 0 0 1px var(--chrome);font-weight:600}
+.steps button[aria-current="step"] i{background:var(--chrome);color:var(--on-chrome)}
+button:focus-visible,.row:focus-visible,.tile:focus-visible,input:focus-visible{outline:2px solid var(--chrome);outline-offset:2px}
+.work{display:grid;grid-template-columns:auto minmax(260px,1fr);gap:24px;align-items:start}
+.side{display:flex;flex-direction:column;gap:16px;position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);min-width:0}
+.cap{border-left:3px solid var(--chrome);padding:2px 0 2px 14px;display:flex;flex-direction:column;gap:6px}
+.cap .tag{font-size:12px;font-weight:700;color:var(--chrome);letter-spacing:.04em}
+.cap p{font-size:15.5px}
+.nav{display:flex;flex-wrap:wrap;gap:8px}
+.btn{font:inherit;font-size:13.5px;border:1px solid var(--line);background:var(--card);color:var(--fg);padding:6px 12px;border-radius:9px;cursor:pointer}
+.btn.primary{background:var(--chrome);border-color:var(--chrome);color:var(--on-chrome);font-weight:600}
+.btn:disabled{opacity:.45;cursor:default}
+.box{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.box h3{font-size:13px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+.box ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+@media (max-width:1120px){ .work{grid-template-columns:minmax(0,1fr)} .side{position:static;order:-1} }
+
+/* the desk */
+.desk{background:var(--desk);border-radius:16px;color:var(--desk-fg);min-width:0;user-select:none;-webkit-user-select:none}
+.menubar{height:30px;display:flex;justify-content:flex-end;align-items:center;gap:16px;padding:0 16px;background:var(--desk-bar);border-radius:16px 16px 0 0;font-size:12.5px;font-variant-numeric:tabular-nums}
+.mb-item{display:inline-flex;align-items:center;gap:5px}
+.mb-count{font-weight:600}
+.windows{position:relative;display:flex;flex-wrap:wrap;gap:22px;align-items:flex-start;padding:12px 20px 30px}
+.win-label{font-size:11.5px;letter-spacing:.06em;opacity:.75;margin:0 0 6px 4px;font-weight:600}
+.win{min-width:0;max-width:100%}
+
+/* product UI */
+.panel,.floating,.pop,.ghost{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,"PingFang SC",sans-serif;color:var(--p-fg);line-height:1.3}
+.panel{width:384px;max-width:100%;background:var(--p-surface);border:1px solid var(--p-line);border-radius:18px;box-shadow:var(--p-shadow);padding:4px 0}
+.floating{width:310px;max-width:100%;background:var(--p-surface);border:1px solid var(--p-line);border-radius:20px;box-shadow:var(--p-shadow);padding:0 0 8px}
+.floating.wide{width:452px}
+.p-head{position:relative;padding:9px 14px 8px;display:flex;flex-direction:column;gap:8px}
+.p-title{display:flex;align-items:center;gap:8px;font-size:17px}
+.p-title .sp{flex:1}
+.metrics{display:flex;gap:30px}
+.metric b{display:block;font-size:24px;font-weight:400;font-variant-numeric:tabular-nums;line-height:1.1}
+.metric span{font-size:10.5px;letter-spacing:.06em;color:var(--p-2)}
+.metric.zero b{color:var(--p-2)}
+.sepline{height:1px;background:var(--p-line);margin:0 14px}
+.list{padding:3px 5px}
+.sec{display:flex;align-items:center;gap:6px;padding:0 9px;height:26px;font-size:11px;color:var(--p-2);width:100%;border:0;background:none;font-family:inherit;text-align:left}
+.sec i{font-style:normal;font-variant-numeric:tabular-nums}
+.sec .right{margin-left:auto}
+button.sec{cursor:pointer;border-radius:8px}
+button.sec:hover{background:var(--p-hover)}
+.sec svg.chev{width:9px;height:9px;transition:transform .15s}
+.sec[aria-expanded="true"] svg.chev{transform:rotate(90deg)}
+.row{position:relative;display:flex;align-items:flex-start;gap:10px;padding:6px 8px;border-radius:10px;cursor:grab;touch-action:pan-y}
+.row:hover{background:var(--p-hover)}
+.row.lifted{opacity:.35}
+.ico{flex:none;width:28px;height:28px;border-radius:7px;display:grid;place-items:center;font-size:10.5px;font-weight:700;letter-spacing:.02em;margin-top:1px}
+.ico.cl{background:var(--clay);color:#fff}
+.ico.cx,.ico.gp{background:var(--ink);color:var(--on-ink)}
+.ico.term{background:var(--term);color:#fff;font-family:var(--mono);border:1px solid var(--p-line)}
+.row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.row-title{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:52px}
+.row-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-height:18px}
+.row-act{font-size:12px;color:var(--p-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.row-act code{font-family:var(--mono);font-size:11.5px;color:var(--p-fg)}
+.row-ctl{position:absolute;right:6px;top:4px;display:flex}
+.ctl{width:25px;height:23px;border:0;background:none;color:var(--p-2);border-radius:6px;display:grid;place-items:center;cursor:pointer;padding:0}
+.ctl:hover{background:var(--p-hover);color:var(--p-fg)}
+.ctl svg{width:14px;height:14px}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;letter-spacing:.02em;padding:2px 7px;border-radius:99px;border:1px solid transparent;white-space:nowrap}
+.pill i{font-style:normal;font-size:11px;font-variant-numeric:tabular-nums}
+.claude{--tool:var(--clay);--on-tool:#fff}
+.codex{--tool:var(--ink);--on-tool:var(--on-ink)}
+.pill.solid{background:var(--tool);color:var(--on-tool)}
+.pill.light{background:color-mix(in srgb,var(--tool) 16%,transparent);color:var(--tool)}
+.pill.line{border-color:var(--tool);color:var(--tool)}
+.pill.grey{background:var(--p-fill);color:var(--p-2)}
+.flag{display:inline-flex;align-items:center;gap:5px;font-size:11px}
+.flag::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--p-fg)}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--p-2);border:1px solid var(--p-line);border-radius:6px;padding:0 6px;line-height:1.5}
+.chip svg{width:9px;height:9px}
+.compact .row{gap:8px}
+.compact .ico{width:22px;height:22px;border-radius:6px;font-size:9px}
+.compact .row-title{font-size:13px;font-weight:600}
+.empty{font-size:11.5px;color:var(--p-2);padding:2px 9px 6px 9px}
+.p-foot{display:flex;align-items:center;gap:14px;padding:0 14px;height:32px;font-size:12px;color:var(--p-fg)}
+.p-foot .sp{flex:1}
+.p-foot span{opacity:.9}
+.f-head{position:relative;display:flex;align-items:center;gap:8px;padding:9px 12px 6px}
+.f-head .sp{flex:1}
+.tabs{display:inline-flex;background:var(--p-fill);border-radius:7px;padding:2px;font-size:11.5px}
+.tabs span{padding:2px 12px;border-radius:5px;color:var(--p-2)}
+.tabs span.on{background:var(--p-raise);color:var(--p-fg);box-shadow:0 0 0 .5px var(--p-line)}
+.f-ic{color:var(--p-2);display:grid;place-items:center;width:22px;height:22px}
+.f-ic svg{width:11px;height:11px}
+
+/* drop targets */
+.topdrop{display:none;position:absolute;inset:6px 8px;border:1.5px dashed var(--p-2);border-radius:12px;background:var(--p-surface);align-items:center;justify-content:center;gap:8px;font-size:13px;z-index:2}
+.topdrop svg{width:14px;height:14px}
+body[data-dk="plain"] .topdrop.pin, body[data-dk="held"] .topdrop.unhold{display:flex}
+.shelf{display:none;position:sticky;bottom:10px;z-index:3;margin:6px 8px 8px;padding:8px;border-radius:14px;background:var(--p-raise);border:1px solid var(--p-line);box-shadow:0 8px 24px rgba(0,0,0,.22)}
+body.is-dragging .shelf, body.is-peek .shelf{display:block}
+body.is-peek .shelf{position:static}
+.shelf-title{font-size:11px;color:var(--p-2);padding:0 4px 6px}
+.shelf-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.shelf-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.compact .shelf-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.drop{border:1.5px dashed var(--p-2);border-radius:10px;padding:7px 6px;display:flex;flex-direction:column;align-items:center;gap:1px;text-align:center;min-width:0;background:var(--p-drop)}
+.drop b{font-size:12.5px;font-weight:600;white-space:nowrap}
+.drop span{font-size:10.5px;color:var(--p-2);white-space:nowrap}
+.drop.only-laned,.drop.only-quad{display:none}
+body[data-dk="laned"] .drop.only-laned, body[data-dk="quad"] .drop.only-quad{display:flex}
+.over{border-style:solid!important;border-color:var(--p-fg)!important;background:var(--p-hover)!important}
+.lane,.pinzone{border:1.5px dashed transparent;border-radius:12px;margin:1px 0}
+body.is-dragging .lane, body.is-peek .lane, body.is-dragging[data-dk="plain"] .pinzone{border-color:var(--p-line)}
+.lane-name{cursor:text;border-radius:4px;padding:0 3px;margin-left:-3px}
+.lane-name:hover{background:var(--p-hover)}
+.inline{font:inherit;font-size:11.5px;color:var(--p-fg);background:var(--p-raise);border:1px solid var(--p-2);border-radius:5px;padding:1px 6px;width:104px;max-width:100%}
+.lane-x{margin-left:auto;border:0;background:none;color:var(--p-2);cursor:pointer;font-size:13px;line-height:1;padding:2px 5px;border-radius:5px}
+.lane-x:hover{background:var(--p-hover)}
+
+/* on hold */
+.hold-group{font-size:10.5px;letter-spacing:.05em;color:var(--p-2);padding:6px 9px 2px;display:flex;flex-wrap:wrap;align-items:center;gap:5px;text-transform:uppercase}
+.hold-group .inline{text-transform:none;letter-spacing:0}
+.held .row{padding:4px 8px;align-items:center}
+.held .ico{width:20px;height:20px;border-radius:5px;font-size:8.5px;margin:0}
+.held .row-main{flex-direction:row;align-items:center;gap:8px}
+.held .row-title{padding-right:0;flex:1;font-weight:400;font-size:13px}
+.held .row-main{padding-right:28px}
+.held .st{font-size:10.5px;letter-spacing:.03em;color:var(--p-2);white-space:nowrap}
+.held .row-ctl{top:50%;transform:translateY(-50%)}
+
+/* stronger category display (scheme C, looks "dock" and "bold") */
+.sec.strong{font-size:12px;font-weight:600;color:var(--p-fg)}
+.sec.strong svg{width:12px;height:12px}
+.chip.strong{border-color:var(--p-fg);color:var(--p-fg);font-weight:500}
+.chip.strong svg{width:11px;height:11px}
+.dock{position:sticky;bottom:8px;z-index:3;margin:4px 8px 8px;padding:6px 8px 8px;border-radius:14px;background:var(--p-raise);border:1px solid var(--p-line)}
+body.is-peek .dock{position:static}
+.dock-head{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:2px 2px 6px;min-width:0}
+.dock-head svg{flex:none;width:13px;height:13px}
+.dock-head .hint{font-weight:400;color:var(--p-2);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.dock.empty{background:transparent;border-style:dashed;border-color:var(--p-2);padding-bottom:6px}
+.dock.empty .dock-head{padding-bottom:2px}
+.dock.empty .slots{display:none;margin-top:4px}
+body.is-dragging .dock.empty, body.is-peek .dock.empty{background:var(--p-raise)}
+body.is-dragging .dock.empty .slots, body.is-peek .dock.empty .slots{display:grid}
+body.is-dragging .dock.empty .hint, body.is-peek .dock.empty .hint{display:none}
+.slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.slot{font:inherit;color:var(--p-2);text-align:left;border:1px dashed var(--p-line);border-radius:10px;background:transparent;padding:5px 7px;display:flex;flex-direction:column;gap:2px;min-width:0;cursor:default}
+.slot .lab{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot .sub{font-size:10.5px;display:flex;align-items:center;gap:4px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.slot .n{display:inline-grid;place-items:center;min-width:15px;height:15px;border-radius:99px;background:var(--p-fg);color:var(--p-surface);font-size:10px;font-weight:700;padding:0 4px}
+.slot.has{border-style:solid;border-color:var(--p-2);background:var(--p-fill);color:var(--p-fg);cursor:pointer}
+.slot.has .sub{color:var(--p-2)}
+.slot[aria-expanded="true"]{border-color:var(--p-fg);box-shadow:0 0 0 1px var(--p-fg)}
+body.is-dragging .slot, body.is-peek .slot{border-style:dashed;border-color:var(--p-2)}
+body.is-dragging .slot:not(.has), body.is-peek .slot:not(.has){background:var(--p-drop)}
+.compact .slots{gap:4px}
+.compact .slot{padding:4px 5px}
+.compact .slot .lab{font-size:11px}
+.compact .slot .sub{font-size:10px;gap:3px}
+.tray{margin:0 -3px 6px;border-bottom:1px solid var(--p-line);padding-bottom:4px}
+.who{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;white-space:nowrap}
+.who svg{width:11px;height:11px}
+.look-bold .pinzone{background:var(--p-fill);padding:1px 0 3px}
+.look-bold .row.is-back{background:var(--p-fill)}
+.look-bold .slot.has{background:var(--p-fg);border-color:var(--p-fg);color:var(--p-surface)}
+.look-bold .slot.has .sub{color:inherit;opacity:.85}
+.look-bold .slot.has .n{background:var(--p-surface);color:var(--p-fg)}
+.look-bold .sec.strong{letter-spacing:.05em;text-transform:uppercase;font-size:11.5px}
+.look-bold .chip.strong{background:var(--p-fg);color:var(--p-surface)}
+.tl{display:flex;align-items:stretch}
+.seg-t{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:1px;padding:2px 0 3px;border-radius:8px;border:1px solid transparent;color:var(--p-2);cursor:default}
+.seg-t.today{flex-grow:1.8}
+.seg-t.has{color:var(--p-fg);cursor:pointer}
+.seg-t[aria-expanded="true"]{background:var(--p-fill)}
+.axis-l{position:relative;display:block;height:20px}
+.axis-l::before{content:"";position:absolute;left:0;right:0;top:50%;height:1.5px;margin-top:-.75px;background:var(--p-2);opacity:.6}
+.axis-l::after{content:"";position:absolute;left:0;top:5px;bottom:5px;width:1.5px;background:var(--p-2);opacity:.6}
+.seg-t.today .axis-l::after{display:none}
+.seg-t.next .axis-l::before{background:none;height:0;border-top:1.5px dashed var(--p-2);margin-top:-.75px}
+.now{position:absolute;left:0;top:2px;bottom:2px;width:3px;border-radius:2px;background:var(--p-fg);z-index:1}
+.seg-t .lab{font-size:11px;font-weight:600;padding-left:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seg-t .sub{font-size:10px;padding-left:4px;min-height:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--p-2);font-variant-numeric:tabular-nums}
+.seg-t.today.over .axis-l::after{display:block;left:var(--px,50%);top:2px;bottom:2px;width:2px;margin-left:-1px;opacity:1;background:var(--p-fg)}
+.mk{position:absolute;top:50%;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:50%;background:var(--tool);box-shadow:0 0 0 2px var(--p-raise);cursor:grab;z-index:2;touch-action:none}
+.mk::after{content:"";position:absolute;inset:-6px}
+.mk.wait{background:var(--p-raise);box-shadow:inset 0 0 0 2.5px var(--tool),0 0 0 2px var(--p-raise)}
+.mk.lifted{opacity:.3}
+.more{position:absolute;right:2px;top:50%;transform:translateY(-50%);font-size:9.5px;background:var(--p-raise);padding:0 2px;z-index:3}
+.seg-t.cap{flex:0 0 50px;align-items:center;margin-left:4px;border-style:dashed;border-color:var(--p-line)}
+.seg-t.cap .axis-l{width:100%;display:grid;place-items:center}
+.seg-t.cap .axis-l::before,.seg-t.cap .axis-l::after{display:none}
+.seg-t.cap svg{width:13px;height:13px}
+.seg-t.cap .lab{padding:0;font-weight:500;font-size:10.5px}
+body.is-dragging .seg-t, body.is-peek .seg-t{background:var(--p-drop)}
+body.is-dragging .seg-t.cap, body.is-peek .seg-t.cap{border-color:var(--p-2)}
+.dock.empty .tl{display:none}
+body.is-dragging .dock.empty .tl, body.is-peek .dock.empty .tl{display:flex;margin-top:4px}
+.compact .seg-t .lab{font-size:10.5px;padding-left:3px}
+.compact .seg-t.cap{flex-basis:44px}
+.chipghost .when{font-size:11px;color:var(--p-2);white-space:nowrap}
+.chipghost .when:empty{display:none}
+.lookrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
+.lookrow .fine{max-width:52em}
+.lookrow .lbl{font-size:13px;font-weight:600}
+
+/* matrix */
+.matrix{padding:0 10px 4px;display:grid;grid-template-columns:18px 1fr 1fr;gap:6px}
+.axis{font-size:10px;letter-spacing:.07em;color:var(--p-2);display:grid;place-items:center}
+.axis.v{writing-mode:vertical-rl;transform:rotate(180deg)}
+.quad{border:1.5px dashed var(--p-line);border-radius:12px;padding:6px;min-height:92px;display:flex;flex-direction:column;gap:3px;min-width:0;background:var(--p-drop)}
+.quad-name{font-size:11px;color:var(--p-2);padding:0 3px 2px}
+.tile{display:flex;align-items:center;gap:6px;padding:4px 5px;border-radius:8px;background:var(--p-raise);border:1px solid var(--p-line);cursor:grab;min-width:0;touch-action:pan-y}
+.tile.lifted{opacity:.35}
+.tile .ico{width:18px;height:18px;border-radius:5px;font-size:7.5px;margin:0}
+.tile .t{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.tile .dot{flex:none;font-size:9px;letter-spacing:.02em;padding:1px 5px;border-radius:99px;border:1px solid transparent}
+.unsorted{margin:6px 10px 0;border:1.5px dashed var(--p-line);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:3px}
+.unsorted .tiles{display:grid;grid-template-columns:1fr 1fr;gap:3px}
+.padq{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+
+/* drag ghost, popover */
+.ghost{position:fixed;z-index:50;pointer-events:none;background:var(--p-raise);border:1px solid var(--p-line);box-shadow:0 14px 34px rgba(0,0,0,.32);border-radius:10px;opacity:.96;margin:0}
+.ghost.peek{position:absolute;z-index:6}
+.chipghost{display:flex;align-items:center;gap:8px;padding:6px 12px 6px 6px;max-width:360px;font-size:13px}
+.chipghost .ico{width:22px;height:22px;border-radius:6px;font-size:9px;margin:0}
+.chipghost .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:200px}
+.cursor{position:absolute;left:-13px;top:-17px;width:18px;height:18px}
+.pop{position:absolute;z-index:60;min-width:190px;background:var(--p-raise);border:1px solid var(--p-line);border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.3);padding:5px;font-size:13px}
+.pop .ph{font-size:11px;color:var(--p-2);padding:4px 9px 3px}
+.pop button{display:flex;width:100%;justify-content:space-between;gap:16px;border:0;background:none;color:inherit;font:inherit;text-align:left;padding:5px 9px;border-radius:6px;cursor:pointer}
+.pop button:hover,.pop button:focus-visible{background:var(--p-hover)}
+.pop button span{color:var(--p-2);font-size:12px}
+.pop hr{border:0;height:1px;background:var(--p-line);margin:4px 6px}
+
+/* comparison */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:11px 14px;border-bottom:1px solid var(--line)}
+tr:last-child td,tr:last-child th{border-bottom:0}
+thead th{font-size:13px;color:var(--muted);font-weight:600}
+tbody th{font-weight:600;width:13%;color:var(--muted);font-size:13px}
+td{width:29%}
+.pick{background:var(--chrome-soft)}
+@media (prefers-reduced-motion: reduce){ *{transition:none!important} }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">AI RUNS · 设计原型 · 基线 codex/token-usage @ 04da81b</div>
+    <h1>把会话拖进分类：三种做法和一个建议</h1>
+    <div class="verdict">
+      <p><b>建议把 C（Hold）做成默认方案。</b>它不要求你给会话分类，只要你说它什么时候回来，到点它自己回到 Needs you。它同时顶替现有的 Ignore for Now，所以界面上的概念没有变多。</p>
+      <p>A（四象限）不建议做。B（自己命名的分组）最接近用户的原话，但不建议做默认。理由在原型下面的取舍表里。</p>
+    </div>
+    <p class="fine">下面的会话都是虚构的。蓝色控件是原型的脚手架，灰色、陶土色和墨色的部分才是产品界面。这只是设计：没有改代码，也没有任何一处在真机上验证过。</p>
+  </header>
+
+  <section>
+    <h2>真正要解决的痛点</h2>
+    <p class="lead">现在的列表按状态分组，它回答的是“现在轮到谁”。下面这些只有你自己知道，状态回答不了。</p>
+    <div class="cols">
+      <div>
+        <h3>四个痛点</h3>
+        <ul class="plain">
+          <li><b>等我的每一条看起来一样重。</b>Needs you 里并排六条，哪条卡着发布，哪条只是随口一问，列表看不出来。</li>
+          <li><b>“现在不处理”没有回来的路。</b>Ignore for Now 要等会话有新动作才回来，可一条在等你回答的会话不会有新动作。延后就等于忘掉。</li>
+          <li><b>球不在我手上，也不在 agent 手上。</b>在等同事确认，在等周四的发布窗口。它显示成 NEEDS INPUT，每扫一遍列表都要重想一次这条在等谁。</li>
+          <li><b>Done 不等于我做完了。</b>agent 说完成，我还要看 diff、合并、回消息。验收过的和没验收的混在一起。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>三个绕不开的约束</h3>
+        <ul class="plain">
+          <li><b>归类本身是工作。</b>一天十几个会话，多数活不过当天。要求每条都归一下的方案，第三天就没人用了。</li>
+          <li><b>会话自己会变。</b>待办不会动，会话会。刚拖进“不紧急”，两分钟后它来要批准。</li>
+          <li><b>会话不是任务。</b>周计划的单位是目标，同一个目标一周会换好几个会话。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>原型</h2>
+    <p class="fine">可以直接拖：按住任意一行拖到落点上。也可以点每行右上角的 ··· 用菜单完成同一件事。点一行等于回到那个会话，原型里假设你在那边回答了。上面的步骤按钮会把界面带到每个关键画面。</p>
+    <div class="bar">
+      <div class="seg" id="schemeTabs" role="group" aria-label="方案"></div>
+      <div class="seg" id="scenTabs" role="group" aria-label="场景"></div>
+    </div>
+    <div class="lookrow" id="lookRow"><span class="lbl">分类有多显眼</span><div class="seg" id="lookTabs" role="group" aria-label="分类显示强度"></div><p class="fine" id="lookNote"></p></div>
+    <div class="steps" id="steps" role="group" aria-label="操作路径"></div>
+    <div class="work">
+      <div class="desk" id="desk">
+        <div class="menubar" id="menubar"></div>
+        <div class="windows" id="windows">
+          <div class="win"><div class="win-label">主菜单</div><div class="panel" id="menu"></div></div>
+          <div class="win"><div class="win-label">浮窗</div><div class="floating" id="float"></div></div>
+        </div>
+      </div>
+      <aside class="side">
+        <div class="cap" aria-live="polite"><span class="tag" id="capTag"></span><p id="capText"></p></div>
+        <div class="nav">
+          <button class="btn" id="prev">上一步</button>
+          <button class="btn primary" id="next">下一步</button>
+          <button class="btn" id="reset">重置</button>
+        </div>
+        <div class="box">
+          <h3>自己推动时间和状态</h3>
+          <div class="nav">
+            <button class="btn" data-ev="ask">让一条已安排的会话来要批准</button>
+            <button class="btn" data-ev="h3">快进 3 小时</button>
+            <button class="btn" data-ev="am">到明早 9:00</button>
+            <button class="btn" data-ev="fri">到周五 9:00</button>
+          </div>
+        </div>
+        <div class="box" id="notes"></div>
+      </aside>
+    </div>
+  </section>
+
+  <section>
+    <h2>取舍：普通工作日和周计划</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th></th><th>A · Matrix 四象限</th><th>B · Lanes 自己命名的分组</th><th class="pick">C · Hold 约定回来的时间</th></tr></thead>
+        <tbody>
+          <tr><th>每条会话的成本</th><td>两个判断，而且每一条都要放，否则堆在 Unsorted。</td><td>一个判断，只对想归类的那几条。另外要管理分组本身：新建、改名、排序、删除。</td><td class="pick">只对“现在不处理”的那几条拖一次。其余的不用碰。</td></tr>
+          <tr><th>普通工作日</th><td>状态一小时变几十次，象限跟不上。真正的“紧急”其实是 Needs you，它是事实，用不着你判断。</td><td>还没轮到你的会话能安静地待在分组里。但已经在等你的会话归了类也还在 Needs you，照样计数。</td><td class="pick">把现在不处理的拖走，Needs you 和菜单栏数字只剩马上要做的。到点自己回来。</td></tr>
+          <tr><th>周计划</th><td>周一整理一次，当时很清楚。到周三一半会话已经结束，新开的都在 Unsorted。</td><td>This week 能看到这周承诺了什么。但到了周四没有任何提醒，Today 里还是周一放进去的东西。</td><td class="pick">展开 On hold，就是按回来时间排好的本周日程，等谁也写在上面。它只管已经存在的会话。</td></tr>
+          <tr><th>会话状态变了</th><td>留在原来的格子，和状态互相矛盾。让它自己跳格子，你的分类就白做了。</td><td>暂时回到 Needs you 并带着分组名，回答后回到分组。和现有 Pinned 的规则一样。</td><td class="pick">来要批准或提出新问题时，搁置自动解除，提前回到 Needs you。</td></tr>
+          <tr><th>占多少地方</th><td>需要一块 2×2 看板，384 宽的主菜单放不下，只能放进加宽的浮窗。</td><td>每个分组一行标题，空的也占。三个分组就是三行。</td><td class="pick">没有搁置时是一行提示。有搁置后是底部常驻的一条时间线，大约 70 点高，它同时就是落点。</td></tr>
+          <tr><th>新增的概念</th><td>四个象限，加上 Unsorted。</td><td>N 个分组，加上分组管理。</td><td class="pick">Hold 一个，同时去掉 Ignore for Now 和 Ignored。</td></tr>
+          <tr><th>没解决的</th><td>延后之后怎么回来；等别人。</td><td>延后之后怎么回来。</td><td class="pick">任意命名的归堆，比如按客户分。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="cols">
+      <div>
+        <h3>为什么不做 A</h3>
+        <p>四象限假设“紧急”要靠人来判断。在这里紧急是事实：会话在不在等你、等了多久，AI Runs 已经知道。四象限里真正需要你输入的只有“重要”这一个维度，而它就是现有的 Pin。为了一个已经有的开关去做一块看板，不值。</p>
+      </div>
+      <div>
+        <h3>为什么 B 不做默认</h3>
+        <p>名字由用户起，应用就不知道这个分组是什么意思，也就没法替你做任何事。“This week”到了周四不会提醒，“Follow up”不会催你去问。如果让分组可以把等你的会话藏起来，Needs you 又不再完整，这是产品最核心的承诺。B 给的是标签，痛点要的是行为。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>C 怎么接进现有功能</h2>
+    <div class="cols">
+      <div>
+        <h3>改动</h3>
+        <ul class="plain">
+          <li><b>Ignore for Now 并入 Hold。</b>Ignore 本来就是一个没有回来时间的搁置。Ignored 分组变成 On hold。入口还在原来的位置（Details 里），不新增按钮；拖动是同一个动作的手势。</li>
+          <li><b>回来的会话进 Needs you。</b>计入菜单栏数字，标着 Back from hold；等人的那条标着 Check back with 加名字。</li>
+          <li><b>Pinned 不变。</b>图钉仍是唯一的可见入口。拖到顶部等于点图钉，在 Pinned 里上下拖就是排优先级。往上是更早，往下是更晚，整个列表只有这一个方向。</li>
+          <li><b>Later（保存的回复和便签）不变。</b>Hold 的文案不用 Later 这个词，避免撞名。</li>
+          <li><b>默认时间先写死。</b>3 小时后、明早 9:00、周五 9:00，等人默认两天后提醒。先不加设置项。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>C 没解决的，和我不确定的</h3>
+        <ul class="plain">
+          <li>它不是字面意义上的自定义分类。如果用户真正想要的是按客户或项目把会话归堆，那是分组需求，浮窗的 Pinned 看板已经按项目分组，应该在那边延伸。</li>
+          <li>周计划里还没开工的事不是会话，三个方案都装不下。它们更适合现有的 Later 便签。</li>
+          <li>被搁置的会话如果在后台做完了，不会主动告诉你，要展开 On hold 才看得到它的最新状态。我认为这是对的，但值得你确认。</li>
+          <li>交接文档和 Codex 的设计我都没有找到，所以这一版还没有和 Codex 的方案对比。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+'use strict';
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const D = (d, h, m) => new Date(2026, 10, d, h, m).getTime();
+const DAY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- sample data (made up) ---------- */
+const SCEN = {
+  day: { name:'普通工作日', clock:D(24,10,40), sessions:[
+    {id:'s1', title:'Fix flaky login test', tool:'codex', host:'cx', state:'approve', ago:2, act:'wants to run <code>npm run e2e -- --retries 0</code>'},
+    {id:'s3', title:'Migrate billing tables', tool:'claude', host:'term', state:'input', ago:6, act:'asks Backfill before or after the deploy window?'},
+    {id:'s2', title:'Name the new onboarding', tool:'claude', host:'cl', state:'input', ago:41, act:'asks Which of the three names do you want?'},
+    {id:'s6', title:'Compare pricing pages', tool:'codex', host:'gp', state:'replied', ago:12, act:'Reply ready'},
+    {id:'s9', title:'Update Windows installer', tool:'codex', host:'cx', state:'working', ago:62, act:'Step 5 of 9 · Signing the package', pinned:true},
+    {id:'s4', title:'Release notes draft', tool:'claude', host:'term', state:'working', ago:4, act:'Step 3 of 7 · Drafting highlights'},
+    {id:'s5', title:'Refactor usage scanner', tool:'codex', host:'cx', state:'working', ago:20, act:'Running tests'},
+    {id:'s7', title:'Prepare weekly report', tool:'codex', host:'cx', state:'done', ago:5, act:'Checks passed.'},
+    {id:'s8', title:'Refine quick-note controls', tool:'claude', host:'term', state:'done', ago:64, act:'Checks passed.'}
+  ]},
+  week: { name:'周计划', clock:D(23,9,10), sessions:[
+    {id:'w5', title:'Fix flaky login test', tool:'codex', host:'cx', state:'approve', ago:2, act:'wants to run <code>npm run e2e -- --retries 0</code>'},
+    {id:'w4', title:'Migrate billing tables', tool:'claude', host:'term', state:'input', ago:6, act:'asks Backfill before or after the deploy window?'},
+    {id:'w2', title:'Windows preview crash on launch', tool:'codex', host:'cx', state:'input', ago:2900, act:'asks Can you get a crash log from an ARM machine?'},
+    {id:'w3', title:'Draft v1.2 release plan', tool:'claude', host:'cl', state:'replied', ago:4300, act:'Reply ready'},
+    {id:'w8', title:'Update Windows installer', tool:'codex', host:'cx', state:'working', ago:62, act:'Step 5 of 9 · Signing the package', pinned:true},
+    {id:'w7', title:'Refactor usage scanner', tool:'codex', host:'cx', state:'working', ago:20, act:'Running tests'},
+    {id:'w1', title:'Token usage dashboard polish', tool:'codex', host:'cx', state:'done', ago:3800, act:'Checks passed.'},
+    {id:'w6', title:'Safari extension spike', tool:'claude', host:'term', state:'done', ago:3900, act:'Summary ready.'},
+    {id:'w9', title:'README screenshots refresh', tool:'claude', host:'term', state:'done', ago:4400, act:'Checks passed.'}
+  ]}
+};
+const ARRIVALS = [
+  {id:'n3', title:'Audit hook installer', tool:'claude', host:'cl', state:'input', ago:25, act:'asks Should the backup file be overwritten?'},
+  {id:'n1', title:'Triage overnight CI failures', tool:'codex', host:'cx', state:'working', ago:12, act:'Reading logs'},
+  {id:'n2', title:'Translate README to Japanese', tool:'claude', host:'term', state:'done', ago:180, act:'Checks passed.'}
+];
+const QUADS = { do:{n:'Do first', sub:'Important · Urgent'}, plan:{n:'Schedule', sub:'Important · Not urgent'}, batch:{n:'Batch', sub:'Urgent · Not important'}, drop:{n:'Drop', sub:'Neither'} };
+const QRANK = { do:0, plan:1, batch:2, none:3, drop:4 };
+const HOSTTXT = { cl:'CL', cx:'CX', gp:'GP', term:'>_' };
+const HOSTNAME = { cl:'Claude', cx:'Codex', gp:'ChatGPT', term:'Terminal' };
+
+/* ---------- model ---------- */
+let M = null;
+let LOOK = 'line';
+const LOOKS = {
+  quiet:['安静', '上一版。On hold 是底部一行灰字，落点只在拖动时出现。问题就是你说的：分类平时几乎看不见。'],
+  dock:['四个格子', '时间线的简化版。On hold 是底部常驻的四个格子，每格带数字和回来的时刻，拖动时它们就是落点。好处是目标大、实现简单。代价是只有四个固定去处，看不出一周里哪天有几条回来。'],
+  line:['时间线', '你提的方向，我也建议它。On hold 是一条从“现在”向右走的时间线，搁置的会话是线上的点，拖到哪天就哪天回来，沿着线拖一个点就是改时间。界面里已经有两处在画过去（顶部的活动图、每行的小横条），这条线画的是之后，都以“现在”为界。我选横向：竖向已经被按状态排的列表占了，再放一条竖的时间轴会和它抢方向。两个风险要在真机上试：310 宽的浮窗里每一天只有四十多点宽；Today 段按半小时取整是否有必要。']
+};
+function reset(scheme, scenario){
+  const sc = SCEN[scenario];
+  M = { scheme, scenario, clock:sc.clock, base:sc.clock, arrived:false, holdOpen:false, slotOpen:null, doneOpen:true, peek:null, edit:null, note:null, step:0,
+    lanes:[{id:'today',name:'Today'},{id:'week',name:'This week'},{id:'follow',name:'Follow up'}],
+    sessions: sc.sessions.map((s, i) => ({ id:s.id, title:s.title, tool:s.tool, host:s.host, state:s.state, at:sc.clock - s.ago*6e4, act:s.act,
+      pinned: scheme === 'C' && !!s.pinned, order:i, quad:null, lane:null, who:'', hold:null, back:null, gone:false })) };
+}
+const S = id => M.sessions.find(s => s.id === id);
+const live = () => M.sessions.filter(s => !s.gone);
+function needs(s){ return !s.hold && (s.state === 'approve' || s.state === 'input' || s.state === 'replied' || !!s.back); }
+function needRank(s){ return s.state === 'approve' ? 0 : s.state === 'input' ? 1 : s.state === 'replied' ? 3 : 2; }
+
+/* ---------- time ---------- */
+function hm(t){ const d = new Date(t); let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return h + ':' + String(m).padStart(2,'0') + ' ' + ap; }
+function midnight(t){ const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }
+function dayDiff(a, b){ return Math.round((midnight(b) - midnight(a)) / 864e5); }
+function dayName(t){ const dd = dayDiff(M.clock, t); return dd === 0 ? 'Today' : dd === 1 ? 'Tomorrow' : DAY[new Date(t).getDay()]; }
+function when(t){ return dayName(t) + ' ' + hm(t); }
+function ago(t){ const m = Math.max(1, Math.round((M.clock - t) / 6e4)); if (m < 60) return m + 'm'; const h = Math.round(m / 60); if (h < 24) return h + 'h'; return Math.round(h / 24) + 'd'; }
+function atDay(off, h, m){ const d = new Date(M.clock); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + off, h, m).getTime(); }
+function holdUntil(kind){
+  const wd = new Date(M.clock).getDay();
+  if (kind === 'today') return M.clock + 3 * 36e5;
+  if (kind === 'tomorrow') return atDay(1, 9, 0);
+  if (kind === 'week'){ const toFri = 5 - wd; return toFri >= 2 ? atDay(toFri, 9, 0) : atDay(((8 - wd) % 7) || 7, 9, 0); }
+  return atDay(2, 9, 0);
+}
+function zhWhen(t){ const z = ['周日','周一','周二','周三','周四','周五','周六']; const dd = dayDiff(M.clock, t); return (dd === 0 ? '今天' : dd === 1 ? '明天' : z[new Date(t).getDay()]) + ' ' + hm(t); }
+
+/* ---------- mutations ---------- */
+function doHold(id, kind, who){ const s = S(id); s.hold = { kind, until:holdUntil(kind), who:who || '' }; s.back = null; }
+function doUnhold(id){ const s = S(id); s.hold = null; }
+function doPin(id, before){
+  const s = S(id); s.pinned = true;
+  const pins = live().filter(x => x.pinned && x.id !== id).sort((a, b) => a.order - b.order);
+  const i = before ? pins.findIndex(x => x.id === before) : 0;
+  pins.splice(i < 0 ? 0 : i, 0, s);
+  pins.forEach((x, n) => { x.order = n; });
+}
+function doLane(id, lane, who){ const s = S(id); s.lane = lane; if (who !== undefined) s.who = who; if (lane !== 'follow') s.who = ''; }
+function doQuad(id, q){ S(id).quad = q; }
+function doAsk(id){ const s = S(id); s.state = 'approve'; s.at = M.clock - 6e4; s.act = 'wants to run <code>./scripts/sign.sh --release</code>'; s.hold = null; s.back = null; }
+function doAdvance(t, changes){
+  M.clock = t; let back = 0;
+  Object.keys(changes || {}).forEach(id => { const s = S(id), c = changes[id]; if (!s) return;
+    if (c[0] === 'gone'){ s.gone = true; return; }
+    s.state = c[0]; s.at = t - c[1] * 6e4; s.act = c[2]; });
+  M.sessions.forEach(s => { if (s.hold && s.hold.until <= t){ s.back = { kind:s.hold.kind, who:s.hold.who }; s.hold = null; back++; } });
+  if (!M.arrived && dayDiff(M.base, t) >= 1){
+    M.arrived = true;
+    ARRIVALS.forEach((a, i) => M.sessions.push({ id:a.id, title:a.title, tool:a.tool, host:a.host, state:a.state, at:t - a.ago * 6e4, act:a.act,
+      pinned:false, order:100 + i, quad:null, lane:null, who:'', hold:null, back:null, gone:false }));
+  }
+  return back;
+}
+
+/* ---------- scripted paths ---------- */
+const STEPS = {
+  C:{
+    day:[
+      {l:'起点', c:'周二 10:40。四条在等你，状态分组对它们一视同仁。Update Windows installer 是之前钉住的。'},
+      {l:'拖动中', c:'按住 Name the new onboarding 往下拖。列表底部升起 Hold until，四个落点直接写着它回来的时刻。往上拖是 Pin，往下拖是 Hold。', d:'按住 Name the new onboarding 往下拖。底部的 On hold 展开成四个格子，每格写着它回来的时刻。往上拖是 Pin，往下拖是 Hold。', t:'按住 Name the new onboarding 往下拖。底部的 On hold 是一条从现在开始的时间线，拖到哪一天，它就哪一天回来。Today 这一段可以拖到具体时刻，拖动时光标旁会显示回来的时间。往上拖是 Pin，往下拖是 Hold。', run(){ M.peek = {id:'s2', drop:'hold:today'}; }},
+      {l:'放下', c:'松手。这一行离开 Needs you，菜单栏的数字从 4 变成 3。它收进 On hold 这一行，上面写着最早什么时候回来。', d:'松手。这一行飞进 Today 那一格，菜单栏的数字从 4 变成 3。格子亮起来，写着 1 条、1:40 PM 回来。从现在起这一排格子一直留在底部。', t:'松手。这一行变成时间线上的一个点，颜色仍然是工具的颜色，下面写着 1:40 PM。菜单栏的数字从 4 变成 3。从现在起这条线一直留在底部。', run(){ doHold('s2','today'); }},
+      {l:'等别人', c:'Migrate billing tables 问的是发布窗口，得先问 Li。拖到 Waiting on…，填一个名字。它不再算在等你，默认两天后回来提醒你去问。', d:'Migrate billing tables 问的是发布窗口，得先问 Li。拖到 Waiting 这一格，填一个名字。它不再算在等你，默认两天后回来提醒你去问。点一下有内容的格子，能看到里面是哪几条。', t:'Migrate billing tables 问的是发布窗口，得先问 Li。拖到最右边的 Waiting，填一个名字。它落在两天后的周四，是一个空心圈，下面写着 Li。想换一天去问，沿着线拖那个圈。点某一天能看到那天回来的是哪几条。', run(){ doHold('s3','waiting','Li'); M.holdOpen = true; M.slotOpen = 'waiting'; }},
+      {l:'到点回来', c:'下午 1:40。Name the new onboarding 自己回到 Needs you，标着 Back from hold。这三个小时里你没有记任何事。', d:'下午 1:40。Name the new onboarding 从 Today 那一格回到 Needs you，带着 Back from hold 标签，格子清空。这三个小时里你没有记任何事。', t:'下午 1:40。时间往前走，线上的点到了“现在”，Name the new onboarding 回到 Needs you，带着 Back from hold 标签。这三个小时里你没有记任何事。', run(){ doAdvance(D(24,13,40), {s1:['working',170,'Running the e2e suite'], s4:['done',8,'Checks passed.'], s5:['done',95,'Checks passed.']}); }},
+      {l:'周四早上', c:'周四 9:00。等 Li 的那条带着名字回来。夜里新开的三个会话按状态自己排好，没有一条需要你归类。', run(){ doAdvance(D(26,9,0), {s1:['gone'], s2:['gone'], s6:['gone'], s7:['gone'], s8:['gone'], s4:['gone'], s9:['done',900,'Installer signed.']}); }}
+    ],
+    week:[
+      {l:'周一起点', c:'周一 9:10。周末留下三条 Done 还没验收，两条从上周就在等。'},
+      {l:'排这一周', c:'四次拖动。Token usage dashboard polish 明早验收，发布计划周五再看，两条等人的各填一个名字。展开 On hold，就是按回来时间排好的本周日程。Needs you 只剩今天真要处理的一条。', d:'四次拖动。Token usage dashboard polish 明早验收，发布计划周五再看，两条等人的各填一个名字。底部这一排格子就是这一周的安排：明天 1 条，周五 1 条，等人 2 条。Needs you 只剩今天真要处理的一条。', t:'四次拖动。Token usage dashboard polish 拖到周二，发布计划拖到周五，两条等人的落在周三。这条线就是这一周的安排，一眼能看到哪天有几条回来。Needs you 只剩今天真要处理的一条。', run(){ doHold('w1','tomorrow'); doHold('w3','week'); doHold('w2','waiting','Sam'); doHold('w4','waiting','Li'); M.holdOpen = true; M.slotOpen = 'waiting'; }},
+      {l:'周二早上', c:'周二 9:00。Token usage dashboard polish 回来等你验收。其余三条继续搁置，不计数，也不提醒。', run(){ doAdvance(D(24,9,0), {w5:['done',1300,'Checks passed.'], w7:['done',1200,'Checks passed.']}); }},
+      {l:'周三早上', c:'周三 9:00。等人的两条带着名字回来。去问一句；还没回音就再搁两天。', run(){ doAdvance(D(25,9,0), {w1:['gone'], w9:['gone'], w5:['gone'], n2:['gone']}); }},
+      {l:'周五早上', c:'周五 9:00。发布计划回来了。这一周新开的会话从头到尾没让你分过类。局限也在这里：周计划里还没开工的事不是会话，Hold 装不下。', run(){ doAdvance(D(27,9,0), {w2:['working',30,'Reading the crash log'], w4:['done',600,'Backfill complete.'], w6:['gone'], w7:['gone'], n3:['gone']}); M.holdOpen = false; M.slotOpen = null; }}
+    ]
+  },
+  A:{
+    day:[
+      {l:'起点', c:'同一个早上。浮窗的 Runs 换成了四象限。九条会话都在 Unsorted，矩阵是空的。这个方案要你先干活才有东西看。'},
+      {l:'拖动中', c:'在主菜单里拖任意一行，底部升起 2×2 落点；也可以直接拖进浮窗的格子。每放一条要回答两个问题：重要吗，紧急吗。', run(){ M.peek = {id:'s1', drop:'quad:do'}; }},
+      {l:'排五条', c:'把在等你的四条和正在跑的安装包放好，五次拖动。还有四条留在 Unsorted。主菜单的 Needs you 按象限重新排了序。', run(){ doQuad('s1','do'); doQuad('s3','do'); doQuad('s2','plan'); doQuad('s6','batch'); doQuad('s9','plan'); }},
+      {l:'状态变了', c:'Update Windows installer 来要批准。主菜单里它进了 Needs you，矩阵里它还待在 Not urgent 那一列。要么矩阵说错，要么它自己跳格子，两种都让你的分类白做。', run(){ doAsk('s9'); }},
+      {l:'第二天', c:'周三 9:00。三个新会话落在 Unsorted，昨天排好的有两条已经结束。矩阵每天都要重排一遍。', run(){ doAdvance(D(25,9,0), {s1:['done',900,'Checks passed.'], s6:['gone'], s4:['done',1200,'Checks passed.'], s5:['done',1100,'Checks passed.'], s7:['gone'], s8:['gone']}); }}
+    ],
+    week:[
+      {l:'周一起点', c:'周一 9:10。九条会话，全在 Unsorted。'},
+      {l:'周一整理', c:'花几分钟把九条都放进格子。这是四象限最好看的时刻，也是它唯一省心的时刻。', run(){ doQuad('w5','do'); doQuad('w4','do'); doQuad('w2','plan'); doQuad('w3','plan'); doQuad('w1','plan'); doQuad('w8','plan'); doQuad('w7','batch'); doQuad('w6','drop'); doQuad('w9','drop'); }},
+      {l:'周三早上', c:'周三 9:00。两条删了，两条做完，Update Windows installer 从 Not urgent 变成在等你，三条新会话没分类。周一排的矩阵只剩一半还对得上。', run(){ doAdvance(D(25,9,0), {w5:['done',2500,'Checks passed.'], w7:['done',2400,'Checks passed.'], w9:['gone'], w6:['gone']}); doAsk('w8'); }}
+    ]
+  },
+  B:{
+    day:[
+      {l:'起点', c:'列表里多了三个你命名的分组：Today、This week、Follow up。空着的时候也各占一行。'},
+      {l:'拖动中', c:'拖动时每个分组都是落点，底部还有 New lane…，可以当场新建一个分类。', run(){ M.peek = {id:'s3', drop:'lane:follow'}; }},
+      {l:'归类四条', c:'Update Windows installer 进 Today，Prepare weekly report 进 This week，它们移进了分组。Name the new onboarding 和 Migrate billing tables 也归了类，可它们还在等你，所以留在 Needs you，只多了一个标签。菜单栏的数字没有变。', run(){ doLane('s9','today'); doLane('s7','week'); doLane('s2','week'); doLane('s3','follow','Li'); }},
+      {l:'它来找你', c:'Update Windows installer 来要批准，暂时回到 Needs you，带着 Today 标签。回答之后它自己回到分组。这条规则和现有的 Pinned 一样。', run(){ doAsk('s9'); }},
+      {l:'周四早上', c:'周四 9:00。你早就决定晚点处理的两条，这两天一直挂在 Needs you 里算着数。Today 里还是周二放进去的东西。分组是标签，应用不知道它的意思，所以什么都不会替你做。', run(){ doAdvance(D(26,9,0), {s1:['gone'], s6:['gone'], s4:['gone'], s5:['done',2450,'Checks passed.'], s8:['gone'], s9:['done',2600,'Installer signed.']}); }}
+    ],
+    week:[
+      {l:'周一起点', c:'周一 9:10。三个分组空着，九条会话按状态排着。'},
+      {l:'周一归类', c:'六条归进分组。This week 能看到这周承诺了什么，这是它比 A 强的地方。但在等你的三条仍然留在 Needs you，分类没有让它们安静下来。', run(){ doLane('w1','today'); doLane('w6','week'); doLane('w8','week'); doLane('w3','week'); doLane('w2','follow','Sam'); doLane('w4','follow','Li'); }},
+      {l:'周三早上', c:'周三 9:00。Today 里还是周一放进去的那条。Follow up 的两条没有人提醒你去问。新开的三个会话没有分类，哪怕它们属于同一个目标。', run(){ doAdvance(D(25,9,0), {w5:['gone'], w7:['done',2400,'Checks passed.'], w9:['gone']}); }}
+    ]
+  }
+};
+const NOTES = {
+  A:{ t:'A · Matrix', items:[
+    '浮窗的 Runs 变成重要 × 紧急的 2×2 看板。主菜单放不下看板，所以拖动时才在底部升起落点。',
+    '每条会话都要判断两次，没放的堆在 Unsorted。',
+    '现有的 Pin 被“重要”取代，每行右上角只留 ···。' ]},
+  B:{ t:'B · Lanes', items:[
+    '列表里多出几个你命名的分组，拖到分组上就归进去。点分组名可以改名，Follow up 会问你找谁。',
+    '还在等你的会话归了类也留在 Needs you，只带一个标签。等它不再需要你，才住进分组。',
+    '现有的 Pinned 被分组取代，每行右上角只留 ···。' ]},
+  C:{ t:'C · Hold', items:[
+    '往上拖是 Pin，往下拖是 Hold。落点写着回来的时刻：3 小时后、明早、周五，或者等某个人。',
+    '搁置的会话收成一行，不计数，不提醒，到点自己回到 Needs you。',
+    '它中途来要批准或提出新问题，会提前回来。',
+    '在 Pinned 里上下拖可以排先后。' ],
+    line:[
+    '往上拖是 Pin，往下拖是 Hold。底部的 On hold 是一条时间线：左端是现在，往右是今天剩下的时间、这周剩下的每一天，虚线后面是下周一。',
+    '每条搁置的会话是线上的一个点，颜色是工具的颜色。等人的是空心圈，下面写名字。',
+    '拖到哪一天，就哪一天早上 9:00 回来。Today 这一段按半小时取整。沿着线拖一个点，就是改它回来的时间。',
+    '点某一天可以看那天回来的是哪几条。到点的会话回到 Needs you，带着 Back from hold 标签。它中途来要批准会提前回来。',
+    '你自己安排的两组（Pinned、On hold）标题加了图标和粗体，应用自动排的状态分组保持原样。' ],
+    dock:[
+    '往上拖是 Pin，往下拖是 Hold。底部的 On hold 有四个格子：Today、Tomorrow、周五、Waiting。',
+    '格子平时显示里面有几条、最早什么时候回来。拖动时它们就是落点。点一下有内容的格子，可以看里面是哪几条。',
+    '搁置的会话不计数，不提醒，到点自己回到 Needs you，带着 Back from hold 标签。它中途来要批准会提前回来。',
+    '你自己安排的两组（Pinned、On hold）标题加了图标和粗体，应用自动排的状态分组保持原样。',
+    '在 Pinned 里上下拖可以排先后。' ]}
+};
+
+/* ---------- icons ---------- */
+const IC = {
+  fermata:(n) => '<svg viewBox="0 0 20 16" width="20" height="16" aria-hidden="true"><path d="M2.5 11.5a7.5 7.5 0 0 1 15 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="11" r="2.3" fill="' + (n ? 'var(--amber)' : 'currentColor') + '"/></svg>',
+  more:'<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg>',
+  pin:(on) => '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.6 2.2h4.8l-.6 4 2.3 2.4v1.1H3.9V8.6l2.3-2.4z" fill="' + (on ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 9.8v4.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+  chev:'<svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5 7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  clock:'<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.6V8l2.3 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  person:'<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.4" r="2.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 13.6c.6-2.6 2.6-4 5-4s4.4 1.4 5 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  up:'<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 8l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  x:'<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  quad:(q) => { const pos = {do:[0,0], plan:[5,0], batch:[0,5], drop:[5,5]}; let s = '<svg viewBox="0 0 9 9" aria-hidden="true">'; Object.keys(pos).forEach(k => { s += '<rect x="' + pos[k][0] + '" y="' + pos[k][1] + '" width="4" height="4" rx="1" fill="currentColor" opacity="' + (k === q ? 1 : .25) + '"/>'; }); return s + '</svg>'; },
+  cursor:'<svg class="cursor" viewBox="0 0 18 18" aria-hidden="true"><path d="M3 2l11 6.5-5 1.2-2.2 4.8z" fill="#fff" stroke="#111" stroke-width="1.2" stroke-linejoin="round"/></svg>'
+};
+
+/* ---------- rendering ---------- */
+function pill(s){
+  const t = '<i>' + ago(s.at) + '</i>';
+  if (s.state === 'approve') return '<span class="pill solid ' + s.tool + '">APPROVE ' + t + '</span>';
+  if (s.state === 'input') return '<span class="pill solid ' + s.tool + '">NEEDS INPUT ' + t + '</span>';
+  if (s.state === 'replied') return '<span class="pill light ' + s.tool + '">REPLIED ' + t + '</span>';
+  if (s.state === 'working') return '<span class="pill line ' + s.tool + '">WORKING ' + t + '</span>';
+  return '<span class="pill grey">✓ DONE ' + t + '</span>';
+}
+function stateWord(s){ return {approve:'APPROVE', input:'NEEDS INPUT', replied:'REPLIED', working:'WORKING', done:'DONE'}[s.state]; }
+function laneName(id){ const l = M.lanes.find(x => x.id === id); return l ? l.name : ''; }
+function extras(s, sec){
+  let h = '';
+  if (M.scheme === 'C' && s.back){
+    const txt = s.back.kind === 'waiting' ? 'Check back' + (s.back.who ? ' with ' + esc(s.back.who) : '') : 'Back from hold';
+    h += LOOK === 'quiet' ? '<span class="flag">' + txt + '</span>' : '<span class="chip strong">' + (s.back.kind === 'waiting' ? IC.person : IC.clock) + txt + '</span>';
+  }
+  if (M.scheme === 'B' && s.lane){
+    const editing = M.edit && M.edit.type === 'who' && M.edit.id === s.id;
+    if (sec === 'needs') h += '<span class="chip">' + esc(laneName(s.lane)) + (s.who && !editing ? ' · ' + esc(s.who) : '') + '</span>';
+    else if (s.lane === 'follow' && s.who && !editing) h += '<span class="chip">with ' + esc(s.who) + '</span>';
+    if (editing) h += '<input class="inline" id="edit-who" data-edit placeholder="with whom?" value="' + esc(M.edit.value || '') + '" aria-label="Follow up with whom">';
+  }
+  if (M.scheme === 'A' && s.quad) h += '<span class="chip">' + IC.quad(s.quad) + QUADS[s.quad].n + '</span>';
+  return h;
+}
+function rowHTML(s, surf, sec){
+  const compact = surf === 'f';
+  const showAct = !(compact && s.state === 'done');
+  const lifted = M.peek && M.peek.id === s.id ? ' lifted' : '';
+  let ctl = '<button class="ctl" data-act="menu" aria-label="Details and actions for ' + esc(s.title) + '">' + IC.more + '</button>';
+  if (M.scheme === 'C') ctl += '<button class="ctl" data-act="pin" aria-label="' + (s.pinned ? 'Unpin' : 'Pin to Top') + '" aria-pressed="' + (s.pinned ? 'true' : 'false') + '">' + IC.pin(s.pinned) + '</button>';
+  const drop = (M.scheme === 'C' && sec === 'pinned') ? ' data-drop="pinbefore:' + s.id + '"' : '';
+  return '<div class="row' + lifted + (M.scheme === 'C' && s.back ? ' is-back' : '') + '" data-drag data-id="' + s.id + '" data-key="' + surf + '-' + s.id + '" data-sec="' + sec + '"' + drop + ' tabindex="0" role="button" aria-label="' + esc(s.title) + ', ' + stateWord(s) + '">' +
+    '<span class="ico ' + s.host + '">' + HOSTTXT[s.host] + '</span>' +
+    '<div class="row-main"><div class="row-title">' + esc(s.title) + '</div>' +
+    '<div class="row-meta">' + pill(s) + extras(s, sec) + '</div>' +
+    (showAct ? '<div class="row-act">' + s.act + '</div>' : '') + '</div>' +
+    '<div class="row-ctl">' + ctl + '</div></div>';
+}
+function heldRowHTML(s, surf, slot, first){
+  let mid = '';
+  if (slot === 'waiting'){
+    const editing = surf === 'm' && M.edit && M.edit.type === 'hold' && M.edit.id === s.id;
+    mid = editing ? '<input class="inline" id="edit-who" data-edit placeholder="who or what" value="' + esc(M.edit.value || '') + '" aria-label="Waiting on whom">'
+                  : '<span class="who">' + IC.person + esc(s.hold.who || 'someone') + '</span>';
+  } else if (slot && first && s.hold.until !== first.hold.until){
+    mid = '<span class="st">' + (slot === 'later' ? DAY[new Date(s.hold.until).getDay()] + ' ' : '') + hm(s.hold.until) + '</span>';
+  }
+  return '<div class="row" data-drag data-id="' + s.id + '" data-key="' + surf + '-' + s.id + '" data-sec="hold" tabindex="0" role="button" aria-label="' + esc(s.title) + ', on hold">' +
+    '<span class="ico ' + s.host + '">' + HOSTTXT[s.host] + '</span>' +
+    '<div class="row-main"><div class="row-title">' + esc(s.title) + '</div>' + mid + '<span class="st">' + stateWord(s) + '</span></div>' +
+    '<div class="row-ctl"><button class="ctl" data-act="menu" aria-label="Actions for ' + esc(s.title) + '">' + IC.more + '</button></div></div>';
+}
+function slotOf(s){ if (s.hold.kind === 'waiting') return 'waiting'; const dd = dayDiff(M.clock, s.hold.until); return dd <= 0 ? 'today' : dd === 1 ? 'tomorrow' : 'later'; }
+function segments(){
+  const wd = new Date(M.clock).getDay(), segs = [], last = wd >= 1 && wd <= 5 ? 5 - wd : 0;
+  for (let o = 0; o <= last; o++) segs.push({k:'d' + o, off:o, label:o === 0 ? 'Today' : DAY[(wd + o) % 7]});
+  segs.push({k:'next', off:((8 - wd) % 7) || 7, label:'Mon'});
+  return segs;
+}
+function segOf(s){ const dd = dayDiff(M.clock, s.hold.until); if (dd <= 0) return 'd0'; return segments().some(g => g.k === 'd' + dd) ? 'd' + dd : 'next'; }
+function holdKey(s){ return LOOK === 'line' ? segOf(s) : slotOf(s); }
+function todayEnd(){ return Math.max(M.clock + 4 * 36e5, atDay(0, 21, 0)); }
+function segTime(k, f){
+  if (k === 'd0'){
+    const step = 30 * 6e4, t = M.clock + Math.max(0, Math.min(1, f)) * (todayEnd() - M.clock);
+    return Math.max(Math.round(t / step) * step, Math.ceil((M.clock + 15 * 6e4) / step) * step);
+  }
+  const g = segments().find(x => x.k === k); return atDay(g ? g.off : 1, 9, 0);
+}
+function lineHTML(surf){
+  const held = groups().held, segs = segments();
+  const by = k => held.filter(s => segOf(s) === k);
+  const waits = held.filter(x => x.hold.kind === 'waiting');
+  const want = M.slotOpen === 'waiting' ? (waits.length === 1 ? segOf(waits[0]) : null) : M.slotOpen;
+  const open = want && by(want).length ? want : null;
+  let h = '<div class="dock line' + (held.length ? '' : ' empty') + '" data-key="' + surf + '-dock">' +
+    '<div class="dock-head">' + IC.clock + '<span>On hold</span>' + (held.length ? '' : '<span class="hint">Drag a session onto the day you want it back</span>') + '</div>';
+  if (open){ const items = by(open); h += '<div class="tray held">' + items.map(x => heldRowHTML(x, surf, x.hold.kind === 'waiting' ? 'waiting' : 'time', items[0])).join('') + '</div>'; }
+  h += '<div class="tl">' + segs.map(g => {
+    const it = by(g.k), shown = it.slice(0, 4);
+    const marks = shown.map((x, i) => {
+      const f = g.k === 'd0' ? Math.max(.08, Math.min(.94, (x.hold.until - M.clock) / (todayEnd() - M.clock))) : (shown.length === 1 ? .5 : .3 + i * .5 / (shown.length - 1));
+      return '<span class="mk ' + x.tool + (x.hold.kind === 'waiting' ? ' wait' : '') + '" style="left:' + (f * 100).toFixed(1) + '%" data-drag data-id="' + x.id + '" data-key="' + surf + '-mk-' + x.id + '" title="' + esc(x.title) + ' · back ' + when(x.hold.until) + '"></span>';
+    }).join('') + (it.length > 4 ? '<span class="more">+' + (it.length - 4) + '</span>' : '');
+    const names = it.filter(x => x.hold.kind === 'waiting').map(x => esc(x.hold.who || 'someone')).join(', ');
+    const sub = open === g.k ? '' : names || (g.k === 'd0' && it.length ? hm(it[0].hold.until) : '');
+    const label = g.label;
+    return '<div class="seg-t' + (it.length ? ' has' : '') + (g.k === 'd0' ? ' today' : g.k === 'next' ? ' next' : '') + '" role="button" tabindex="0" data-seg="' + g.k + '" data-drop="seg:' + g.k + '" data-slot="' + g.k + '" data-key="' + surf + '-slot-' + g.k + '" data-sec="' + it.length + '" aria-expanded="' + (open === g.k) + '" aria-label="On hold, ' + label + ', ' + it.length + ' sessions">' +
+      '<span class="axis-l">' + (g.k === 'd0' ? '<i class="now"></i>' : '') + marks + '</span><span class="lab">' + label + '</span><span class="sub">' + sub + '</span></div>';
+  }).join('') +
+    '<div class="seg-t cap" data-drop="hold:waiting" aria-label="Waiting on someone"><span class="axis-l">' + IC.person + '</span><span class="lab">Waiting</span><span class="sub"></span></div></div></div>';
+  return h;
+}
+function dockHTML(surf){
+  if (LOOK === 'line') return lineHTML(surf);
+  const held = groups().held, w = holdUntil('week');
+  const by = k => held.filter(s => slotOf(s) === k);
+  const later = by('later'), laterDay = new Date(later.length ? later[0].hold.until : w).getDay();
+  const LONG = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const checkDay = t => dayDiff(M.clock, t) === 0 ? 'today' : DAY[new Date(t).getDay()];
+  const defs = [
+    {k:'today', drop:'hold:today', label:'Today', def:hm(holdUntil('today'))},
+    {k:'tomorrow', drop:'hold:tomorrow', label:'Tomorrow', def:hm(holdUntil('tomorrow'))},
+    {k:'later', drop:'hold:week', label:surf === 'f' ? DAY[laterDay] : LONG[laterDay], def:hm(w)},
+    {k:'waiting', drop:'hold:waiting', label:'Waiting', def:'on someone'}
+  ];
+  const open = M.slotOpen && by(M.slotOpen).length ? M.slotOpen : null;
+  let h = '<div class="dock' + (held.length ? '' : ' empty') + '" data-key="' + surf + '-dock">' +
+    '<div class="dock-head">' + IC.clock + '<span>On hold</span>' + (held.length ? '' : '<span class="hint">Drag a session here to get it back later</span>') + '</div>';
+  if (open){ const items = by(open); h += '<div class="tray held">' + items.map(x => heldRowHTML(x, surf, open, items[0])).join('') + '</div>'; }
+  h += '<div class="slots">' + defs.map(d => {
+    const it = by(d.k), sub = it.length ? (d.k === 'waiting' ? 'check ' + checkDay(it[0].hold.until) : hm(it[0].hold.until)) : d.def;
+    return '<button class="slot' + (it.length ? ' has' : '') + '" data-drop="' + d.drop + '" data-slot="' + d.k + '" data-key="' + surf + '-slot-' + d.k + '" data-sec="' + it.length + '" aria-expanded="' + (open === d.k) + '" aria-label="On hold, ' + d.label + ', ' + it.length + ' sessions">' +
+      '<span class="lab">' + d.label + '</span><span class="sub">' + (it.length ? '<b class="n">' + it.length + '</b>' : '') + sub + '</span></button>';
+  }).join('') + '</div></div>';
+  return h;
+}
+function secLabel(name, n, extra){ return '<div class="sec"><span>' + name + '</span><i>' + n + '</i>' + (extra || '') + '</div>'; }
+function rows(list, surf, sec){ return list.map(s => rowHTML(s, surf, sec)).join(''); }
+
+function groups(){
+  const L = live();
+  const need = L.filter(needs).sort((a, b) => {
+    if (M.scheme === 'A'){ const q = QRANK[a.quad || 'none'] - QRANK[b.quad || 'none']; if (q) return q; }
+    return needRank(a) - needRank(b) || a.at - b.at; });
+  const rest = L.filter(s => !needs(s) && !s.hold);
+  return { need, rest, held: L.filter(s => s.hold).sort((a, b) => a.hold.until - b.hold.until) };
+}
+function holdLabel(s){
+  if (s.hold.kind === 'waiting') return 'Waiting' + (s.hold.who ? ' on ' + esc(s.hold.who) : '') + ' · check back ' + dayName(s.hold.until);
+  return when(s.hold.until);
+}
+function shelfHTML(surf){
+  if (M.scheme === 'C'){
+    if (LOOK !== 'quiet') return dockHTML(surf);
+    const w = holdUntil('week'), wk = new Date(w).getDay() === 5 ? 'This week' : 'Next week';
+    return '<div class="shelf"><div class="shelf-title">Hold until</div><div class="shelf-grid">' +
+      '<div class="drop" data-drop="hold:today"><b>Today</b><span>' + hm(holdUntil('today')) + '</span></div>' +
+      '<div class="drop" data-drop="hold:tomorrow"><b>Tomorrow</b><span>' + hm(holdUntil('tomorrow')) + '</span></div>' +
+      '<div class="drop" data-drop="hold:week"><b>' + (wk === 'This week' ? 'Friday' : 'Monday') + '</b><span>' + hm(w) + '</span></div>' +
+      '<div class="drop" data-drop="hold:waiting"><b>Waiting on…</b><span>check ' + DAY[new Date(holdUntil('waiting')).getDay()] + '</span></div>' +
+      '</div></div>';
+  }
+  if (M.scheme === 'B'){
+    return '<div class="shelf"><div class="shelf-grid two">' +
+      '<div class="drop" data-drop="lane:new"><b>New lane…</b><span>name it after you drop</span></div>' +
+      '<div class="drop only-laned" data-drop="unlane"><b>No lane</b><span>back to its state group</span></div></div></div>';
+  }
+  return '<div class="shelf"><div class="shelf-title">Priority</div><div class="padq">' +
+    ['do','plan','batch','drop'].map(q => '<div class="drop" data-drop="quad:' + q + '"><b>' + QUADS[q].n + '</b><span>' + QUADS[q].sub + '</span></div>').join('') +
+    '<div class="drop only-quad" data-drop="quad:none" style="grid-column:1/-1"><b>Unsorted</b><span>clear its priority</span></div></div></div>';
+}
+function listHTML(surf){
+  const g = groups(); let h = '';
+  if (g.need.length) h += secLabel('Needs you', g.need.length) + rows(g.need, surf, 'needs');
+  if (M.scheme === 'C'){
+    const pinned = g.rest.filter(s => s.pinned).sort((a, b) => a.order - b.order);
+    if (pinned.length) h += '<div class="pinzone" data-drop="pin">' + (LOOK === 'quiet' ? secLabel('Pinned', pinned.length)
+      : '<div class="sec strong">' + IC.pin(true) + '<span>Pinned</span><i>' + pinned.length + '</i></div>') + rows(pinned, surf, 'pinned') + '</div>';
+    const working = g.rest.filter(s => !s.pinned && s.state === 'working');
+    if (working.length) h += secLabel('In progress', working.length) + rows(working, surf, 'working');
+    h += doneHTML(g.rest.filter(s => !s.pinned && s.state === 'done'), surf);
+    if (LOOK === 'quiet' && g.held.length){
+      const next = g.held[0];
+      h += '<button class="sec" data-toggle="hold" aria-expanded="' + M.holdOpen + '">' + IC.chev + '<span>On hold</span><i>' + g.held.length + '</i>' +
+        (M.holdOpen ? '' : '<span class="right">next back ' + when(next.hold.until) + '</span>') + '</button>';
+      if (M.holdOpen){
+        h += '<div class="held">'; let last = null;
+        g.held.forEach(s => {
+          const editing = surf === 'm' && M.edit && M.edit.type === 'hold' && M.edit.id === s.id;
+          const label = editing ? '\u0000' + s.id : holdLabel(s);
+          if (label !== last){
+            h += '<div class="hold-group">' + (editing
+              ? 'Waiting on <input class="inline" id="edit-who" data-edit placeholder="who or what" value="' + esc(M.edit.value || '') + '" aria-label="Waiting on whom"> · check back ' + dayName(s.hold.until)
+              : label) + '</div>';
+            last = label;
+          }
+          h += heldRowHTML(s, surf);
+        });
+        h += '</div>';
+      }
+    }
+  } else if (M.scheme === 'B'){
+    M.lanes.forEach(l => {
+      const inl = g.rest.filter(s => s.lane === l.id);
+      const editing = M.edit && M.edit.type === 'lane' && M.edit.lane === l.id && surf === 'm';
+      h += '<div class="lane" data-drop="lane:' + l.id + '"><div class="sec">' +
+        (editing ? '<input class="inline" id="edit-lane" data-edit value="' + esc(M.edit.value || '') + '" placeholder="Lane name" aria-label="Lane name">'
+                 : '<span class="lane-name" data-rename="' + l.id + '" title="Rename">' + esc(l.name) + '</span>') +
+        '<i>' + inl.length + '</i>' +
+        (!inl.length && !['today','week','follow'].includes(l.id) && !editing ? '<button class="lane-x" data-dellane="' + l.id + '" aria-label="Delete lane ' + esc(l.name) + '">×</button>' : '') +
+        '</div>' + rows(inl, surf, 'lane-' + l.id) + '</div>';
+    });
+    const working = g.rest.filter(s => !s.lane && s.state === 'working');
+    if (working.length) h += secLabel('In progress', working.length) + rows(working, surf, 'working');
+    h += doneHTML(g.rest.filter(s => !s.lane && s.state === 'done'), surf);
+  } else {
+    const working = g.rest.filter(s => s.state === 'working');
+    if (working.length) h += secLabel('In progress', working.length) + rows(working, surf, 'working');
+    h += doneHTML(g.rest.filter(s => s.state === 'done'), surf);
+  }
+  return h;
+}
+function doneHTML(done, surf){
+  if (!done.length) return '';
+  return '<button class="sec" data-toggle="done" aria-expanded="' + M.doneOpen + '">' + IC.chev + '<span>Done</span><i>' + done.length + '</i></button>' +
+    (M.doneOpen ? rows(done, surf, 'done') : '');
+}
+function topDrops(){
+  if (M.scheme !== 'C') return '';
+  return '<div class="topdrop pin" data-drop="pin">' + IC.pin(false) + 'Pin to Top</div><div class="topdrop unhold" data-drop="unhold">Bring back now</div>';
+}
+function menuHTML(){
+  const L = live(), nNeed = L.filter(needs).length, nWork = L.filter(s => s.state === 'working' && !s.hold).length;
+  return '<div class="p-head">' + topDrops() +
+    '<div class="p-title">' + IC.fermata(nNeed > 0) + '<span>AI Runs</span><span class="sp"></span></div>' +
+    '<div class="metrics"><div class="metric' + (nNeed ? '' : ' zero') + '"><b>' + nNeed + '</b><span>NEED YOU</span></div>' +
+    '<div class="metric' + (nWork ? '' : ' zero') + '"><b>' + nWork + '</b><span>WORKING</span></div>' +
+    '<div class="metric"><b>' + M.sessions.length + '</b><span>TODAY</span></div></div></div>' +
+    '<div class="sepline"></div><div class="list">' + listHTML('m') + '</div>' + shelfHTML('m') +
+    '<div class="sepline"></div><div class="p-foot"><span>Floating Window</span><span class="sp"></span><span>Settings…</span><span>···</span></div>';
+}
+function tileHTML(s){
+  const cls = (s.state === 'approve' || s.state === 'input') ? 'pill solid ' + s.tool : s.state === 'replied' ? 'pill light ' + s.tool : s.state === 'working' ? 'pill line ' + s.tool : 'pill grey';
+  const lifted = M.peek && M.peek.id === s.id ? ' lifted' : '';
+  return '<div class="tile' + lifted + '" data-drag data-id="' + s.id + '" data-key="f-' + s.id + '" data-sec="q-' + (s.quad || 'none') + '" tabindex="0" role="button" aria-label="' + esc(s.title) + ', ' + stateWord(s) + '">' +
+    '<span class="ico ' + s.host + '">' + HOSTTXT[s.host] + '</span><span class="t">' + esc(s.title) + '</span><span class="dot ' + cls + '">' + stateWord(s) + '</span></div>';
+}
+function floatHTML(){
+  const head = '<div class="f-head">' + topDrops() + IC.fermata(live().some(needs)) +
+    '<span class="tabs"><span class="on">' + (M.scheme === 'A' ? 'Matrix' : 'Runs') + '</span><span>Pinned</span></span><span class="sp"></span>' +
+    '<span class="f-ic">' + IC.up + '</span><span class="f-ic">' + IC.x + '</span></div>';
+  if (M.scheme !== 'A') return head + '<div class="list compact">' + listHTML('f') + '</div><div class="compact">' + shelfHTML('f') + '</div>';
+  const L = live(), q = k => L.filter(s => (s.quad || 'none') === k);
+  const cell = k => '<div class="quad" data-drop="quad:' + k + '"><div class="quad-name">' + QUADS[k].n + '</div>' + q(k).map(tileHTML).join('') + '</div>';
+  const un = q('none');
+  return head + '<div class="matrix"><span></span><span class="axis">URGENT</span><span class="axis">NOT URGENT</span>' +
+    '<span class="axis v">IMPORTANT</span>' + cell('do') + cell('plan') +
+    '<span class="axis v">NOT IMPORTANT</span>' + cell('batch') + cell('drop') + '</div>' +
+    '<div class="unsorted" data-drop="quad:none"><div class="quad-name">Unsorted ' + un.length + '</div><div class="tiles">' + un.map(tileHTML).join('') + '</div></div>';
+}
+function menubarHTML(){
+  const n = live().filter(needs).length, d = new Date(M.clock);
+  return '<span class="mb-item" title="AI Runs menu bar icon">' + IC.fermata(n > 0) + (n ? '<span class="mb-count">' + n + '</span>' : '') + '</span>' +
+    '<span class="mb-item">' + DAY[d.getDay()] + ' ' + d.getDate() + ' Nov&nbsp; ' + hm(M.clock) + '</span>';
+}
+
+function snapshot(){ const m = new Map(); $$('#windows [data-key]').forEach(el => m.set(el.dataset.key, { r:el.getBoundingClientRect(), sec:el.dataset.sec })); return m; }
+function play(prev){
+  const docky = M.scheme === 'C' && LOOK !== 'quiet';
+  $$('#windows [data-key]').forEach(el => {
+    const key = el.dataset.key, a = prev.get(key), b = el.getBoundingClientRect();
+    if (!a){
+      if (key.indexOf('-mk-') > 0){ el.animate([{transform:'scale(0)'}, {transform:'scale(1.6)', offset:.6}, {transform:'scale(1)'}], {duration:420, delay:360, fill:'backwards', easing:'ease-out'}); return; }
+      const s = M.sessions.find(x => x.id === key.slice(2)), from = (s && prev.get(key[0] + '-mk-' + s.id)) || prev.get(key[0] + '-dock');
+      if (docky && s && s.back && from) el.animate([{opacity:0, transform:'translate(' + (from.r.left - b.left) + 'px,' + (from.r.top - b.top) + 'px)'}, {opacity:1, transform:'none'}], {duration:520, easing:'cubic-bezier(.2,.8,.2,1)'});
+      else el.animate([{opacity:0, transform:'translateY(8px)'}, {opacity:1, transform:'none'}], {duration:280, easing:'ease-out'});
+      return;
+    }
+    const dx = a.r.left - b.left, dy = a.r.top - b.top;
+    if (el.dataset.seg) return;
+    if (el.dataset.slot){ if (a.sec !== el.dataset.sec) el.animate([{transform:'scale(1)'}, {transform:'scale(1.09)'}, {transform:'scale(1)'}], {duration:520, delay:260, easing:'ease-out'}); return; }
+    if (Math.abs(dx) + Math.abs(dy) > 1) el.animate([{transform:'translate(' + dx + 'px,' + dy + 'px)'}, {transform:'none'}], {duration:420, easing:'cubic-bezier(.2,.8,.2,1)'});
+    if (a.sec !== el.dataset.sec) el.animate([{backgroundColor:'var(--p-fill)'}, {backgroundColor:'var(--p-fill)', offset:.6}, {backgroundColor:'transparent'}], {duration:1500, easing:'ease-out'});
+  });
+  if (!docky) return;
+  prev.forEach((a, key) => {
+    if (key.indexOf('-slot-') > 0 || key.slice(1) === '-dock') return;
+    if ($('#windows [data-key="' + key + '"]')) return;
+    const s = M.sessions.find(x => x.id === key.slice(2)); if (!s || !s.hold) return;
+    const slot = $('#windows [data-key="' + key[0] + '-mk-' + s.id + '"]') || $('#windows [data-key="' + key[0] + '-slot-' + holdKey(s) + '"]'); if (!slot) return;
+    const sr = slot.getBoundingClientRect(), g = chipGhost(s);
+    g.style.left = a.r.left + 'px'; g.style.top = a.r.top + 'px'; g.style.transformOrigin = '0 0';
+    document.body.appendChild(g);
+    const an = g.animate([{transform:'none', opacity:1}, {transform:'translate(' + (sr.left - a.r.left) + 'px,' + (sr.top - a.r.top) + 'px) scale(.6)', opacity:.15}], {duration:520, easing:'cubic-bezier(.3,.7,.2,1)'});
+    an.onfinish = () => g.remove(); an.oncancel = () => g.remove();
+  });
+}
+function kindOf(s){ if (M.scheme === 'C') return s.hold ? 'held' : s.pinned ? 'pinned' : 'plain'; if (M.scheme === 'B') return s.lane ? 'laned' : 'plain'; return s.quad ? 'quad' : 'plain'; }
+let rendering = false;
+function render(still){
+  closePop();
+  const prev = snapshot();
+  rendering = true;
+  $('#menubar').innerHTML = menubarHTML();
+  $('#menu').innerHTML = menuHTML();
+  const f = $('#float'); f.className = 'floating' + (M.scheme === 'A' ? ' wide' : ''); f.innerHTML = floatHTML();
+  $('#desk').className = 'desk look-' + LOOK;
+  rendering = false;
+  document.body.classList.toggle('is-peek', !!M.peek);
+  document.body.dataset.dk = M.peek ? kindOf(S(M.peek.id)) : '';
+  placePeek(); chrome();
+  const inp = $('[data-edit]'); if (inp){ inp.focus(); const v = inp.value; inp.setSelectionRange(v.length, v.length); }
+  if (!still && !reduceMotion) play(prev);
+}
+function chipGhost(s){ const g = document.createElement('div'); g.className = 'ghost chipghost'; g.innerHTML = '<span class="ico ' + s.host + '">' + HOSTTXT[s.host] + '</span><span class="t">' + esc(s.title) + '</span><span class="when"></span>'; return g; }
+function placePeek(){
+  $$('.ghost.peek').forEach(e => e.remove());
+  if (!M.peek) return;
+  const pdrop = LOOK === 'line' && M.peek.drop === 'hold:today' ? 'seg:d0' : M.peek.drop;
+  const row = $('#menu [data-id="' + M.peek.id + '"]'), tgt = $('#menu [data-drop="' + pdrop + '"]'), host = $('#windows');
+  if (!row || !tgt) return;
+  const hr = host.getBoundingClientRect(), tr = tgt.getBoundingClientRect();
+  const g = chipGhost(S(M.peek.id)); g.classList.add('peek');
+  if (pdrop === 'seg:d0') $('.when', g).textContent = 'Back today ' + hm(holdUntil('today'));
+  g.style.left = Math.max(20, tr.left - hr.left + Math.min(tr.width / 2, 60) + 12) + 'px';
+  g.style.top = (tr.top - hr.top + Math.min(tr.height / 2, 30) + 14) + 'px';
+  g.insertAdjacentHTML('beforeend', IC.cursor);
+  host.appendChild(g); tgt.classList.add('over');
+  if (tgt.scrollIntoView && !placePeek.quiet) tgt.scrollIntoView({block:'nearest', behavior: reduceMotion ? 'auto' : 'smooth'});
+}
+
+/* ---------- scaffold chrome ---------- */
+function buildChrome(){
+  $('#schemeTabs').innerHTML = [['A','A · Matrix',''],['B','B · Lanes',''],['C','C · Hold','建议默认']].map(x =>
+    '<button data-scheme="' + x[0] + '">' + x[1] + (x[2] ? '<small>' + x[2] + '</small>' : '') + '</button>').join('');
+  $('#scenTabs').innerHTML = Object.keys(SCEN).map(k => '<button data-scen="' + k + '">' + SCEN[k].name + '</button>').join('');
+  $('#lookTabs').innerHTML = ['line', 'dock', 'quiet'].map(k => '<button data-look="' + k + '">' + LOOKS[k][0] + (k === 'line' ? '<small>建议</small>' : '') + '</button>').join('');
+}
+function buildSteps(){
+  const st = STEPS[M.scheme][M.scenario];
+  $('#steps').innerHTML = st.map((s, i) => '<button data-step="' + i + '"><i>' + (i + 1) + '</i>' + s.l + '</button>').join('');
+  const n = NOTES[M.scheme];
+  const items = M.scheme === 'C' && LOOK !== 'quiet' ? n[LOOK] : n.items;
+  $('#notes').innerHTML = '<h3>' + n.t + ' 的规则</h3><ul>' + items.map(x => '<li>' + x + '</li>').join('') + '</ul>';
+}
+function chrome(){
+  $$('#schemeTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.scheme === M.scheme));
+  $$('#scenTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.scen === M.scenario));
+  $$('#lookTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.look === LOOK));
+  $('#lookRow').hidden = M.scheme !== 'C'; $('#lookNote').textContent = LOOKS[LOOK][1];
+  const st = STEPS[M.scheme][M.scenario];
+  $$('#steps button').forEach((b, i) => { if (i === M.step && !M.note) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); });
+  $('#capTag').textContent = M.note ? '你刚才的操作' : '第 ' + (M.step + 1) + ' 步，共 ' + st.length + ' 步 · ' + st[M.step].l;
+  const cs = st[M.step];
+  $('#capText').textContent = M.note || (M.scheme === 'C' && ((LOOK === 'line' && cs.t) || (LOOK === 'dock' && cs.d))) || cs.c;
+  $('#prev').disabled = M.step === 0 && !M.note;
+  $('#next').disabled = M.step >= st.length - 1 && !M.note;
+  $('#next').textContent = M.note ? '回到第 ' + (M.step + 1) + ' 步' : '下一步';
+}
+function goStep(i, scheme, scenario){
+  scheme = scheme || M.scheme; scenario = scenario || M.scenario;
+  const rebuild = !M || scheme !== M.scheme || scenario !== M.scenario;
+  const st = STEPS[scheme][scenario]; i = Math.max(0, Math.min(st.length - 1, i));
+  reset(scheme, scenario);
+  for (let k = 0; k <= i; k++){ M.peek = null; if (st[k].run) st[k].run(); }
+  M.step = i;
+  if (rebuild) buildSteps();
+  render(rebuild);
+}
+function free(note){ M.peek = null; M.note = note; render(); }
+
+/* ---------- user actions ---------- */
+function applyDrop(id, drop, at){
+  const s = S(id); if (!s) return;
+  const p = drop.split(':'), name = '「' + s.title + '」';
+  if (p[0] === 'hold'){
+    doHold(id, p[1]); M.holdOpen = p[1] === 'waiting' || M.holdOpen; if (p[1] === 'waiting') M.slotOpen = LOOK === 'line' ? segOf(s) : 'waiting';
+    if (p[1] === 'waiting'){ M.edit = {type:'hold', id, value:''}; free(name + '在等别人。填一个名字，它默认' + zhWhen(s.hold.until).split(' ')[0] + '回来提醒你去问。这段时间它不计入 Needs you。'); }
+    else free(name + '搁置到' + zhWhen(s.hold.until) + '。它不再计入 Needs you，到点自己回来；中途来要批准或有新问题会提前回来。');
+  } else if (p[0] === 'seg'){
+    const until = at || segTime(p[1], .5), waiting = !!(s.hold && s.hold.kind === 'waiting');
+    s.hold = { kind: waiting ? 'waiting' : 'time', until, who: waiting ? s.hold.who : '' }; s.back = null;
+    free(waiting ? name + '改到' + zhWhen(until).split(' ')[0] + '再去问。' : name + '搁置到' + zhWhen(until) + '。它变成时间线上的一个点，不再计入 Needs you，到点自己回来。沿着线拖这个点可以改时间。');
+  } else if (p[0] === 'unhold'){ doUnhold(id); free(name + '提前拿回来了，按它现在的状态归位。'); }
+  else if (p[0] === 'pin'){ if (s.hold) doUnhold(id); doPin(id); free('钉住了' + name + '。它排在 Needs you 下面，一直看得见。'); }
+  else if (p[0] === 'pinbefore'){ if (p[1] === id) return; if (s.hold) doUnhold(id); doPin(id, p[1]); free(name + '排到了前面。Pinned 里的顺序就是你的优先级。'); }
+  else if (p[0] === 'lane'){
+    if (p[1] === 'new'){ const l = {id:'l' + Date.now(), name:'New lane'}; M.lanes.push(l); doLane(id, l.id); M.edit = {type:'lane', lane:l.id, value:''}; free('新建了一个分类，先给它起名。' + (needs(s) ? name + '还在等你，所以仍留在 Needs you。' : '')); return; }
+    doLane(id, p[1], p[1] === 'follow' ? s.who : undefined);
+    if (p[1] === 'follow') M.edit = {type:'who', id, value:s.who || ''};
+    free(needs(s) ? name + '贴上了 ' + laneName(p[1]) + ' 的标签，但它还在等你，所以留在 Needs you，照样计数。分组不知道自己是不是“先别吵我”。' : name + '移进了 ' + laneName(p[1]) + '。');
+  } else if (p[0] === 'unlane'){ s.lane = null; s.who = ''; free(name + '离开了分组，回到按状态排的位置。'); }
+  else if (p[0] === 'quad'){ doQuad(id, p[1] === 'none' ? null : p[1]); free(p[1] === 'none' ? name + '回到了 Unsorted。' : name + '放进了 ' + QUADS[p[1]].n + '（' + QUADS[p[1]].sub + '）。'); }
+}
+function openSession(id){
+  const s = S(id), name = '「' + s.title + '」', app = HOSTNAME[s.host];
+  if (s.hold){ free('点击会在 ' + app + ' 里打开' + name + '。打开不会解除搁置。'); return; }
+  if (s.state === 'approve' || s.state === 'input' || s.state === 'replied'){
+    s.state = 'working'; s.at = M.clock; s.act = 'Continuing after your reply'; s.back = null;
+    const where = M.scheme === 'B' && s.lane ? '回到 ' + laneName(s.lane) + ' 分组' : M.scheme === 'C' && s.pinned ? '回到 Pinned' : '进入 In progress';
+    free('点击会在 ' + app + ' 里打开' + name + '。原型假设你在那边回答了，所以它变回 WORKING，' + where + '。'); return;
+  }
+  if (s.back){ s.back = null; free('你打开看过了' + name + '，它回到按状态排的位置。'); return; }
+  free('点击会在 ' + app + ' 里打开' + name + '。');
+}
+function commitEdit(){
+  if (!M.edit || rendering) return;
+  const e = M.edit, v = (e.value || '').trim(); M.edit = null;
+  if (e.type === 'hold'){ const s = S(e.id); if (s && s.hold){ s.hold.who = v; M.note = v ? '「' + s.title + '」在等 ' + v + '，' + zhWhen(s.hold.until).split(' ')[0] + '回来提醒你。' : M.note; } }
+  if (e.type === 'who'){ const s = S(e.id); if (s) s.who = v; }
+  if (e.type === 'lane'){ const l = M.lanes.find(x => x.id === e.lane); if (l && v) l.name = v; }
+  render();
+}
+function runEvent(ev){
+  if (ev === 'ask'){
+    const L = live(); let s;
+    if (M.scheme === 'C') s = L.find(x => x.hold && x.state !== 'approve') || L.find(x => x.pinned && !needs(x)) || L.find(x => x.state === 'working');
+    else if (M.scheme === 'B') s = L.find(x => x.lane && !needs(x)) || L.find(x => x.state === 'working');
+    else s = L.find(x => (x.quad === 'plan' || x.quad === 'drop') && !needs(x)) || L.find(x => x.state === 'working');
+    if (!s){ free('现在没有可以来要批准的会话。'); return; }
+    const wasHeld = !!s.hold, name = '「' + s.title + '」'; doAsk(s.id);
+    if (M.scheme === 'C') free(name + '来要批准。' + (wasHeld ? '搁置自动解除，它' : '它') + '回到 Needs you。批准会卡住 agent，所以任何安排都拦不住它。');
+    else if (M.scheme === 'B') free(name + '来要批准，回到 Needs you' + (s.lane ? '，带着 ' + laneName(s.lane) + ' 标签。回答之后它自己回到分组。' : '。'));
+    else free(name + '来要批准。主菜单里它进了 Needs you' + (s.quad ? '，矩阵里它还在 ' + QUADS[s.quad].n + '（' + QUADS[s.quad].sub + '）。' : '。'));
+    return;
+  }
+  const wd = new Date(M.clock).getDay();
+  const t = ev === 'h3' ? M.clock + 3 * 36e5 : ev === 'am' ? atDay(1, 9, 0) : atDay(wd < 5 ? 5 - wd : 7, 9, 0);
+  const back = doAdvance(t, {});
+  const tail = M.scheme === 'C' ? (back ? back + ' 条搁置的会话到点回来了。' : '还没有搁置的会话到点。') : '分类没有任何变化，也没有任何提醒。';
+  free('时间到了' + ['周日','周一','周二','周三','周四','周五','周六'][new Date(t).getDay()] + ' ' + hm(t) + '。' + tail);
+}
+
+/* ---------- popover ---------- */
+let pop = null;
+function closePop(){ if (pop){ pop.remove(); pop = null; } }
+function openPop(btn, id){
+  closePop(); const s = S(id); let h = '';
+  const item = (label, drop, hint) => '<button data-pdrop="' + drop + '">' + label + (hint ? '<span>' + hint + '</span>' : '') + '</button>';
+  if (M.scheme === 'C'){
+    if (s.hold) h += item('Bring back now', 'unhold') + '<hr>';
+    const w = holdUntil('week');
+    h += '<div class="ph">Hold until</div>' + item('Today', 'hold:today', hm(holdUntil('today'))) + item('Tomorrow', 'hold:tomorrow', hm(holdUntil('tomorrow'))) +
+      item(DAY[new Date(w).getDay()], 'hold:week', hm(w)) + item('Waiting on…', 'hold:waiting', 'check back ' + DAY[new Date(holdUntil('waiting')).getDay()]);
+  } else if (M.scheme === 'B'){
+    h += '<div class="ph">Move to</div>' + M.lanes.map(l => item(esc(l.name), 'lane:' + l.id)).join('') + item('New lane…', 'lane:new') + (s.lane ? item('No lane', 'unlane') : '');
+  } else {
+    h += '<div class="ph">Priority</div>' + ['do','plan','batch','drop'].map(q => item(QUADS[q].n, 'quad:' + q, QUADS[q].sub)).join('') + (s.quad ? item('Unsorted', 'quad:none') : '');
+  }
+  h += '<hr><button data-pact="open">Open in ' + HOSTNAME[s.host] + '</button><button data-pact="remove">Remove from List</button>';
+  pop = document.createElement('div'); pop.className = 'pop'; pop.dataset.id = id; pop.setAttribute('role', 'menu'); pop.innerHTML = h;
+  document.body.appendChild(pop);
+  const r = btn.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let x = r.right + window.scrollX - pw, y = r.bottom + window.scrollY + 4;
+  x = Math.max(window.scrollX + 8, Math.min(x, window.scrollX + document.documentElement.clientWidth - pw - 8));
+  if (r.bottom + ph + 12 > window.innerHeight && r.top - ph - 4 > 0) y = r.top + window.scrollY - ph - 4;
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
+  const first = $('button', pop); if (first) first.focus();
+}
+
+/* ---------- drag ---------- */
+let drag = null, swallowClick = false;
+document.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch' || e.button !== 0) return;
+  if (e.target.closest('button,input,.pop')) return;
+  const el = e.target.closest('[data-drag]'); if (!el) return;
+  drag = { id:el.dataset.id, x:e.clientX, y:e.clientY, el, active:false, ghost:null, over:null };
+});
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (!drag.active){
+    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
+    closePop();
+    if (M.peek){ M.peek = null; render(true); drag.el = $('#windows [data-id="' + drag.id + '"]') || drag.el; }
+    if (M.edit) commitEdit();
+    drag.active = true;
+    const g = chipGhost(S(drag.id));
+    document.body.appendChild(g); drag.ghost = g;
+    $$('#windows [data-id="' + drag.id + '"]').forEach(x => x.classList.add('lifted'));
+    document.body.classList.add('is-dragging'); document.body.dataset.dk = kindOf(S(drag.id));
+  }
+  drag.ghost.style.left = (e.clientX + 12) + 'px'; drag.ghost.style.top = (e.clientY + 14) + 'px';
+  const hit = document.elementFromPoint(e.clientX, e.clientY);
+  let t = hit && hit.closest('[data-drop]');
+  if (t && t.dataset.drop === 'pin' && document.body.dataset.dk !== 'plain' && document.body.dataset.dk !== 'held') t = null;
+  if (t !== drag.over){ if (drag.over) drag.over.classList.remove('over'); if (t) t.classList.add('over'); drag.over = t; }
+  drag.at = null;
+  if (t && t.dataset.seg){ const r = t.getBoundingClientRect(); drag.at = segTime(t.dataset.seg, (e.clientX - r.left) / r.width);
+    if (t.dataset.seg === 'd0') t.style.setProperty('--px', (Math.min(1, (drag.at - M.clock) / (todayEnd() - M.clock)) * 100).toFixed(1) + '%'); }
+  $('.when', drag.ghost).textContent = drag.at ? 'Back ' + when(drag.at).replace('Today', 'today').replace('Tomorrow', 'tomorrow') : (t && t.dataset.drop === 'hold:waiting' ? 'Waiting on…' : '');
+  e.preventDefault();
+});
+function endDrag(apply){
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (!d.active) return;
+  swallowClick = true; setTimeout(() => { swallowClick = false; }, 0);
+  d.ghost.remove(); document.body.classList.remove('is-dragging'); document.body.dataset.dk = '';
+  $$('.lifted').forEach(x => x.classList.remove('lifted')); $$('.over').forEach(x => x.classList.remove('over'));
+  if (apply && d.over) applyDrop(d.id, d.over.dataset.drop, d.at);
+}
+document.addEventListener('pointerup', () => endDrag(true));
+document.addEventListener('pointercancel', () => endDrag(false));
+
+/* ---------- events ---------- */
+document.addEventListener('click', e => {
+  if (swallowClick){ e.preventDefault(); return; }
+  const t = e.target;
+  const pb = t.closest('.pop button');
+  if (pb){ const id = pop.dataset.id; closePop(); if (pb.dataset.pdrop) applyDrop(id, pb.dataset.pdrop); else if (pb.dataset.pact === 'open') openSession(id); else { S(id).gone = true; free('「' + S(id).title + '」从列表里移除了。'); } return; }
+  if (pop && !t.closest('.pop')) closePop();
+  let b;
+  if ((b = t.closest('[data-scheme]'))) return goStep(0, b.dataset.scheme, M.scenario);
+  if ((b = t.closest('[data-scen]'))) return goStep(0, M.scheme, b.dataset.scen);
+  if ((b = t.closest('[data-step]'))) return goStep(+b.dataset.step);
+  if (t.closest('#prev')) return goStep(M.note ? M.step : M.step - 1);
+  if (t.closest('#next')) return goStep(M.note ? M.step : M.step + 1);
+  if (t.closest('#reset')) return goStep(0);
+  if ((b = t.closest('[data-ev]'))) return runEvent(b.dataset.ev);
+  if ((b = t.closest('[data-look]'))){ LOOK = b.dataset.look; if (M.slotOpen !== 'waiting') M.slotOpen = null; buildSteps(); return render(); }
+  if ((b = t.closest('[data-slot]'))){
+    if (!b.classList.contains('has')) return free('这里还是空的。把一条会话拖过来，或者用每行的 ··· 菜单。');
+    M.slotOpen = M.slotOpen === b.dataset.slot ? null : b.dataset.slot; M.peek = null; return render();
+  }
+  if (t.closest('[data-edit]')) return;
+  if ((b = t.closest('[data-act]'))){
+    const id = b.closest('[data-id]').dataset.id;
+    if (b.dataset.act === 'menu') openPop(b, id);
+    else { const s = S(id); if (s.pinned){ s.pinned = false; free('取消钉住「' + s.title + '」。'); } else applyDrop(id, 'pin'); }
+    return;
+  }
+  if ((b = t.closest('[data-toggle]'))){ if (b.dataset.toggle === 'hold') M.holdOpen = !M.holdOpen; else M.doneOpen = !M.doneOpen; M.peek = null; return render(); }
+  if ((b = t.closest('[data-rename]'))){ const l = M.lanes.find(x => x.id === b.dataset.rename); M.edit = {type:'lane', lane:l.id, value:l.name}; return render(true); }
+  if ((b = t.closest('[data-dellane]'))){ M.lanes = M.lanes.filter(x => x.id !== b.dataset.dellane); return free('删掉了一个空分组。'); }
+  if ((b = t.closest('#windows [data-id]'))) return openSession(b.dataset.id);
+});
+document.addEventListener('input', e => { if (e.target.matches('[data-edit]') && M.edit) M.edit.value = e.target.value; });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape'){ closePop(); if (drag) endDrag(false); return; }
+  if (e.target.matches && e.target.matches('[data-edit]')){ if (e.key === 'Enter'){ e.preventDefault(); commitEdit(); } return; }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.seg-t[data-slot]')){ e.preventDefault(); e.target.click(); return; }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('#windows [data-id]')){ e.preventDefault(); openSession(e.target.dataset.id); }
+});
+document.addEventListener('focusout', e => { if (e.target.matches && e.target.matches('[data-edit]')) setTimeout(() => { if (M.edit && !$('[data-edit]:focus')) commitEdit(); }, 0); });
+let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { if (M.peek){ placePeek.quiet = true; placePeek(); placePeek.quiet = false; } }, 120); });
+
+buildChrome();
+goStep(0, 'C', 'day');
+})();
+</script>
+
+</body>
+</html>
