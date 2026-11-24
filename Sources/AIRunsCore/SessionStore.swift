@@ -77,8 +77,11 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// Set while the row's state comes from Claude's own Threads list rather
     /// than from hooks (a thread working in the cloud).
     public var native: NativeSighting?
-    /// Set by "Ignore for Now"; see `isIgnored`.
+    /// Set by "Ignore for Now" in earlier versions; see `isIgnored`. New
+    /// actions use `hold`; rows already ignored keep this until they move on.
     public var ignored: Bool?
+    /// Set by "Hold until…"; see `isHeld` and `isBackFromHold`.
+    public internal(set) var hold: SessionHold?
     /// The project's main conversation has its own identity, separate from child threads.
     public var projectMainId: String?
     /// Identity evidence from an open page; this never refreshes native state evidence.
@@ -96,6 +99,8 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var isDone: Bool { state == .yourTurn && outcome == .done }
     /// Waiting on the user: approval, a question, or a reply AI Runs can't classify.
     public var needsUser: Bool {
+        // A hold decides on its own: hidden until due, then back until opened.
+        if hold != nil { return isBackFromHold || state == .needsApproval }
         guard waitsOnUser, !isIgnored else { return false }
         if isPinned, state == .yourTurn, outcome == .replied, native?.state != .readyForReview { return false }
         return true
@@ -242,7 +247,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
             return
         }
         if event.kind == .sessionEnd {
-            if var pinned = session, pinned.isPinned {
+            if var pinned = session, pinned.isPinned || pinned.hold != nil {
                 guard event.at >= pinned.lastEventAt else { return }
                 pinned.lastEventAt = event.at
                 if !pinned.isDone { pinned.clearObservedState() }
@@ -290,6 +295,8 @@ public struct SessionStore: Codable, Equatable, Sendable {
         current.native = nil
         // Whatever it reports next is a new moment.
         current.ignored = nil
+        // Approval never waits. A returned hold is over once the user talks to it.
+        if event.kind == .needsApproval || (userPrompt != nil && current.isBackFromHold) { current.hold = nil }
         if let cwd = event.cwd { current.cwd = cwd }
         if let path = event.transcriptPath { current.transcriptPath = path }
         if event.terminal != TerminalContext() { current.terminal = event.terminal }
@@ -428,6 +435,9 @@ public struct SessionStore: Codable, Equatable, Sendable {
             } else {
                 if own.isPinned, sessions[key]?.isPinned == false {
                     sessions[key]?.pinnedAt = own.pinnedAt
+                }
+                if let hold = own.hold, sessions[key]?.hold == nil {
+                    sessions[key]?.hold = hold
                 }
                 record(nil, for: executor, at: event.at)
             }
@@ -687,6 +697,74 @@ public struct SessionStore: Codable, Equatable, Sendable {
         record(SpanKind(session), for: id, at: at)
     }
 
+    // MARK: - Hold
+
+    /// "Hold until…": out of Needs you and the count until `until`, or, with
+    /// `waitingOn`, until the user checks back. Refused for a session waiting
+    /// for approval, and for a time that has already passed. Replaces an old
+    /// "Ignore for Now" on the same row.
+    @discardableResult
+    public mutating func hold(id: String, until: Date, waitingOn: String? = nil, at now: Date) -> Bool {
+        guard var session = sessions[id], session.canHold, until > now else { return false }
+        session.hold = SessionHold(until: until, waitingOn: waitingOn.map(Self.cleanName), heldAt: now)
+        session.ignored = nil
+        sessions[id] = session
+        record(SpanKind(session), for: id, at: now)
+        return true
+    }
+
+    /// Moves a hold to another time and keeps whether it waits on someone and their name.
+    @discardableResult
+    public mutating func reschedule(id: String, until: Date, at now: Date) -> Bool {
+        guard let current = sessions[id]?.hold else { return hold(id: id, until: until, at: now) }
+        return hold(id: id, until: until, waitingOn: current.waitingOn, at: now)
+    }
+
+    /// Names who the user waits on; an empty name means nobody in particular.
+    public mutating func setWaitingName(id: String, _ name: String) {
+        guard sessions[id]?.hold?.isWaiting == true else { return }
+        sessions[id]?.hold?.waitingOn = Self.cleanName(name)
+    }
+
+    /// "Bring back now": the hold ends and the session shows as it really is.
+    public mutating func bringBack(id: String, at now: Date = Date()) {
+        guard sessions[id]?.hold != nil else { return }
+        sessions[id]?.hold = nil
+        if let session = sessions[id] { record(SpanKind(session), for: id, at: now) }
+    }
+
+    /// The user opened a session that came back: its "Back from hold" is done.
+    /// Opening before it is due keeps the hold.
+    public mutating func acknowledgeReturn(id: String) {
+        guard sessions[id]?.isBackFromHold == true else { return }
+        sessions[id]?.hold = nil
+    }
+
+    /// Brings back every hold whose time has come, including ones missed while
+    /// the Mac slept or the app was closed. Returns true when anything changed.
+    @discardableResult
+    public mutating func reconcileHolds(now: Date) -> Bool {
+        var changed = false
+        for (key, session) in sessions {
+            guard let hold = session.hold, hold.returnedAt == nil, hold.until <= now else { continue }
+            sessions[key]?.hold?.returnedAt = now
+            changed = true
+        }
+        return changed
+    }
+
+    /// Held sessions, soonest back first.
+    public var held: [Session] {
+        sessions.values.filter(\.isHeld).sorted {
+            let a = $0.hold?.until ?? .distantFuture, b = $1.hold?.until ?? .distantFuture
+            return a == b ? $0.id < $1.id : a < b
+        }
+    }
+
+    private static func cleanName(_ name: String) -> String {
+        TextUtils.truncate(name.trimmingCharacters(in: .whitespacesAndNewlines), limit: 40)
+    }
+
     public mutating func setPinned(id: String, _ pinned: Bool, at date: Date = Date()) {
         guard var session = sessions[id], session.isPinned != pinned else { return }
         session.pinnedAt = pinned ? date : nil
@@ -728,7 +806,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
         for (key, session) in sessions {
             let lastSeen = max(session.lastEventAt, session.nativeView?.seenAt ?? .distantPast)
             guard now.timeIntervalSince(lastSeen) >= age else { continue }
-            if session.isPinned {
+            if session.isPinned || session.hold != nil {
                 guard session.state == .working else { continue }
                 sessions[key]?.clearObservedState()
             } else {
@@ -750,6 +828,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// sessions, most recently started first.
     public func ordered() -> [Session] {
         func rank(_ session: Session) -> Int {
+            if session.isBackFromHold, session.state != .needsApproval { return 1 }
             switch session.state {
             case .needsApproval: return 0
             case .yourTurn:

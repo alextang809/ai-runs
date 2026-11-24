@@ -43,6 +43,7 @@ extension Session {
 /// withdrawn.
 public struct AlertPlanner: Sendable {
     private var seen: [String: String] = [:]
+    private static let heldSuffix = "|held"
 
     public init() {}
 
@@ -51,7 +52,10 @@ public struct AlertPlanner: Sendable {
     public mutating func prime(_ sessions: [Session], now: Date = Date()) {
         seen = [:]
         for session in sessions {
-            if let signature = session.alertSignature(now: now) { seen[session.id] = signature }
+            if let signature = session.alertSignature(now: now) {
+                seen[session.id] = session.hold != nil && session.alertKind(now: now) != .approval
+                    ? signature + Self.heldSuffix : signature
+            }
         }
     }
 
@@ -64,7 +68,17 @@ public struct AlertPlanner: Sendable {
         var current: [String: String] = [:]
         for session in sessions {
             guard let kind = session.alertKind(now: now), let signature = session.alertSignature(now: now) else { continue }
+            if session.hold != nil, kind != .approval {
+                // On hold, and also when the hold comes due: silent. Its
+                // notification and reminder are withdrawn, and the moment is
+                // remembered so it isn't announced once the hold is over.
+                current[session.id] = signature + Self.heldSuffix
+                if let previous = seen[session.id], previous != current[session.id] { ended.append(session.id) }
+                continue
+            }
             current[session.id] = signature
+            // The same moment the user already put on hold is not news.
+            if seen[session.id] == signature + Self.heldSuffix { continue }
             if seen[session.id] != signature {
                 if seen[session.id] != nil { ended.append(session.id) }
                 if enabled.contains(kind) { post.append(session) }
