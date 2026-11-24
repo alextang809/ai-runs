@@ -13,7 +13,8 @@ Design only. No file under `Sources/`, `Tests/` or `Scripts/` is touched on this
 
 ## Found
 
-- Baseline read: `main` at f6a7fd5 (`MenuColumn.swift`, `MenuPinnedNext.swift`,
+- Baseline read: `codex/token-usage` at 04da81b, not `main` as this note first said. Codex pointed out
+  that `main` (f6a7fd5) is 8 commits behind it and lacks the live pin; GitHub confirms it. Files read: (`MenuColumn.swift`, `MenuPinnedNext.swift`,
   `BoardPanel.swift`, `FloatingWindow.swift`, `RunViews.swift`,
   `MenuSessionPresentation.swift`, `AIRunsCore/PinBoard.swift`, `docs/panel.png`, `docs/flyout.png`).
 - Urgency is already known from session state (APPROVE, NEEDS INPUT, REPLIED), so

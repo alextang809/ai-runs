@@ -1017,6 +1017,7 @@ function free(note){ M.peek = null; M.note = note; render(); }
 function applyDrop(id, drop, at){
   const s = S(id); if (!s) return;
   const p = drop.split(':'), name = '「' + s.title + '」';
+  if ((p[0] === 'hold' || p[0] === 'seg') && s.state === 'approve' && !s.hold) return free(name + '正在等你批准，不能搁置。批准不等人，这和现在 Ignore for Now 的规则一样。');
   if (p[0] === 'hold'){
     doHold(id, p[1]); M.holdOpen = p[1] === 'waiting' || M.holdOpen; if (p[1] === 'waiting') M.slotOpen = LOOK === 'line' ? segOf(s) : 'waiting';
     if (p[1] === 'waiting'){ M.edit = {type:'hold', id, value:''}; free(name + '在等别人。填一个名字，它默认' + zhWhen(s.hold.until).split(' ')[0] + '回来提醒你去问。这段时间它不计入 Needs you。'); }

@@ -1,6 +1,7 @@
 # Session categories: Hold, shown as a timeline
 
-Design only. Nothing here is built. Baseline is `main` at f6a7fd5.
+Design only. Nothing here is built. The mock follows `codex/token-usage` at 04da81b,
+which is 8 commits ahead of `main` (f6a7fd5) and has the live session pin.
 Alex has seen the prototype and said he is happy with it (2026-11-24).
 
 ## How to look at it
@@ -105,6 +106,23 @@ tick on the line shows where the dot will land.
    Hold never uses the word "Later".
 8. Defaults are fixed for now, with no settings: +3 h, 9:00 next day, 9:00 Friday
    (next Monday when Friday is less than two days away), check-back after two days.
+
+## Changed after Codex's review (2026-11-24)
+
+These override the sections above where they differ.
+
+- A session waiting for approval cannot be held: no drag, no menu item. (Fixed in the prototype.)
+- Drop targets are the whole labelled day. Today is one target with a preset (+3 h) in the first
+  version, without half-hour positions. The floating window needs targets of at least 40 pt.
+- Dots show what is held. The tray row is the sure way to reschedule; dragging a dot stays only
+  if it is reliable on the Mac.
+- The "who or what" field appears in the window where the drag started, and the name is optional.
+  (The prototype always shows it in the menu panel.)
+- Hold replaces "Ignore for Now" for new actions; Alex agreed. Rows already ignored keep their
+  behaviour and get a way to set a real Hold.
+- A hold coming due posts no notification. Pinned reordering is deferred.
+- First build: dock at the bottom on both surfaces, as one shared view, so that moving it to the
+  top of the menu panel stays a small change. Alex decides the position after seeing it on the Mac.
 
 ## Not verified
 
