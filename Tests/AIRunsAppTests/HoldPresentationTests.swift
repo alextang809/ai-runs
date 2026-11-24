@@ -101,6 +101,64 @@ final class HoldPresentationTests: XCTestCase {
         XCTAssertEqual(active, [true, false, true, false])
     }
 
+    func testTheReleasePointDecidesNotTheLastHover() throws {
+        let store = waitingStore(["one"])
+        let row = try XCTUnwrap(store.sessions[key("one")])
+        let drag = HoldDragState()
+        drag.targets = [.segment(1): CGRect(x: 0, y: 100, width: 40, height: 42),
+                        .segment(2): CGRect(x: 40, y: 100, width: 40, height: 42)]
+        drag.changed(row, at: CGPoint(x: 38, y: 120))
+        XCTAssertEqual(drag.hovered, .segment(1))
+        // A fast release just across the boundary, with no move event in between.
+        XCTAssertEqual(drag.ended(at: CGPoint(x: 42, y: 120))?.target, .segment(2))
+    }
+
+    func testStateWordsReadAsASentenceInTheTray() {
+        XCTAssertEqual(HoldText.sentence("NEEDS INPUT"), "Needs input")
+        XCTAssertEqual(HoldText.sentence("DONE"), "Done")
+    }
+
+    func testWaitingAgainAfterAReturnGetsANewTimeAndKeepsTheName() throws {
+        let real = Date()
+        var store = waitingStore(["one"])
+        XCTAssertTrue(store.hold(id: key("one"), until: real.addingTimeInterval(-60), waitingOn: "Li",
+                                 at: real.addingTimeInterval(-600)))
+        store.reconcileHolds(now: real)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(testingRoot: root, store: store)
+        XCTAssertTrue(model.store.sessions[key("one")]?.isBackFromHold == true)
+
+        XCTAssertTrue(model.holdWaiting(sessionId: key("one")))
+        let hold = try XCTUnwrap(model.store.sessions[key("one")]?.hold)
+        XCTAssertNil(hold.returnedAt)
+        XCTAssertGreaterThan(hold.until, real)
+        XCTAssertEqual(hold.waitingName, "Li")
+        XCTAssertEqual(model.messagePlace, .hold, "The confirmation shows next to the line")
+        XCTAssertNotNil(model.undo)
+
+        model.performUndo()
+        XCTAssertTrue(model.store.sessions[key("one")]?.isBackFromHold == true, "Undo puts the returned hold back")
+    }
+
+    func testTooLateForTodayChangesNothingAndSaysSo() throws {
+        let store = waitingStore(["one"])
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(testingRoot: root, store: store)
+        let row = try XCTUnwrap(model.store.sessions[key("one")])
+        let drag = HoldDragState()
+        // Whatever the hour of the test run, a day target always holds.
+        HoldDrop.perform(.segment(model.holdPlan.segments.last?.daysAhead ?? 7), session: row, model: model, drag: drag)
+        XCTAssertTrue(model.store.sessions[key("one")]?.isHeld == true)
+        model.bringBack(sessionId: key("one"))
+        HoldDrop.perform(.waiting, session: row, model: model, drag: drag)
+        XCTAssertEqual(drag.editingWaitingID, key("one"), "The name is asked for in the window that was used")
+        XCTAssertNotNil(drag.openSegment)
+    }
+
     func testNoTargetMeansNoChange() throws {
         let store = waitingStore(["one"])
         let row = try XCTUnwrap(store.sessions[key("one")])

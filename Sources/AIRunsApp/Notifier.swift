@@ -29,7 +29,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Opens a session by its ID (set by the app model).
     var open: ((String) -> Void)?
-    /// Holds a session for three hours by its ID (set by the app model).
+    /// Holds a session until later today by its ID (set by the app model).
     var hold: ((String) -> Void)?
 
     private var planner = AlertPlanner()
@@ -60,7 +60,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.delegate = self
         let open = UNNotificationAction(identifier: Self.openAction, title: "Open", options: [.foreground])
         let snooze = UNNotificationAction(identifier: Self.snoozeAction, title: "Snooze 15m", options: [])
-        let hold = UNNotificationAction(identifier: Self.holdAction, title: "Hold 3 Hours", options: [])
+        let hold = UNNotificationAction(identifier: Self.holdAction, title: "Hold", options: [])
         center.setNotificationCategories([
             UNNotificationCategory(identifier: Self.category, actions: [open, snooze], intentIdentifiers: []),
             UNNotificationCategory(identifier: Self.waitingCategory, actions: [open, snooze, hold], intentIdentifiers: []),

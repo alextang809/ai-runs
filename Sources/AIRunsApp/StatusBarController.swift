@@ -97,7 +97,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
                 string: " \(needsYou)",
                 attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold),
                              .foregroundColor: Icons.amber])
-            button.setAccessibilityLabel("AI Runs, \(needsYou) holding for you")
+            button.setAccessibilityLabel("AI Runs, \(needsYou) need you")
         } else {
             button.attributedTitle = NSAttributedString(string: "")
             button.setAccessibilityLabel("AI Runs")

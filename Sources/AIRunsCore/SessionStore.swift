@@ -734,10 +734,23 @@ public struct SessionStore: Codable, Equatable, Sendable {
     }
 
     /// The user opened a session that came back: its "Back from hold" is done.
-    /// Opening before it is due keeps the hold.
-    public mutating func acknowledgeReturn(id: String) {
-        guard sessions[id]?.isBackFromHold == true else { return }
+    /// Opening before it is due keeps the hold. Pass the hold that was showing
+    /// when the user clicked, so a slow open can't clear a newer hold.
+    public mutating func acknowledgeReturn(id: String, of opened: SessionHold? = nil) {
+        guard let hold = sessions[id]?.hold, hold.returnedAt != nil else { return }
+        if let opened, opened != hold { return }
         sessions[id]?.hold = nil
+    }
+
+    /// Undo of a hold command: puts back the hold and the old "Ignore for Now"
+    /// exactly as they were. A hold that came due in the meantime stays due.
+    public mutating func restoreHold(id: String, hold: SessionHold?, ignored: Bool?, at now: Date) {
+        guard var session = sessions[id] else { return }
+        session.hold = hold
+        session.ignored = ignored
+        sessions[id] = session
+        reconcileHolds(now: now)
+        if let session = sessions[id] { record(SpanKind(session), for: id, at: now) }
     }
 
     /// Brings back every hold whose time has come, including ones missed while
@@ -748,6 +761,8 @@ public struct SessionStore: Codable, Equatable, Sendable {
         for (key, session) in sessions {
             guard let hold = session.hold, hold.returnedAt == nil, hold.until <= now else { continue }
             sessions[key]?.hold?.returnedAt = now
+            // From here on the agent waits on the user again.
+            if let back = sessions[key] { record(SpanKind(back), for: key, at: now) }
             changed = true
         }
         return changed

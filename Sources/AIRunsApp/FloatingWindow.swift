@@ -177,6 +177,11 @@ final class FloatingController: NSObject {
     }
 
     func rename(_ id: String) { actions?.renameSession(id) }
+
+    /// The panel never takes the keyboard by itself. Typing a name into the
+    /// Waiting field is the one time the user asks it to. AI Runs is not
+    /// activated, so the app in front stays in front.
+    func takeKeyboard() { panel?.makeKey() }
     func editCard(_ card: PinCard) { actions?.editCard(card) }
 }
 
@@ -302,7 +307,7 @@ struct FloatingCard: View {
         FloatingSurface(radius: 20) {
             VStack(spacing: 0) {
                 header
-                if let message = model.message {
+                if let message = model.message, model.messagePlace == .header {
                     Text(message)
                         .font(AppTypography.section).foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -318,6 +323,7 @@ struct FloatingCard: View {
             }
             .frame(width: 310)
             .holdDragSurface(holdDrag, plan: model.holdPlan)
+            .onAppear { holdDrag.requestKeyboard = { controller.takeKeyboard() } }
         }
     }
 
@@ -427,6 +433,7 @@ struct FloatingCard: View {
             }
         }
         if !sessions.isEmpty {
+            Divider().padding(.horizontal, 10).padding(.top, 4)
             HoldDock(model: model, drag: holdDrag, held: menu.held, compact: true,
                      open: { controller.open($0) }, drop: drop)
         }
@@ -475,9 +482,9 @@ struct FloatingCard: View {
                 HStack(spacing: 12) {
                     Button(Jumper.openLabel(for: session)) { controller.open(session) }
                         .buttonStyle(.borderless)
-                    if session.canHold {
-                        Menu("Hold Until") {
-                            HoldMenuItems(commands: HoldDrop.commands(session, model: model, drag: holdDrag))
+                    if session.canHold || session.hold != nil {
+                        Menu(session.hold == nil ? "Hold Until" : "On Hold") {
+                            HoldMenuItems(commands: HoldDrop.commands(session, model: model, drag: holdDrag), flat: true)
                         }
                         .menuStyle(.borderlessButton)
                         .fixedSize()
@@ -547,7 +554,7 @@ private struct FloatingRow: View {
         .overlay(alignment: .bottomTrailing) {
             if hovering, let hold, session.needsUser, session.canHold, !session.isBackFromHold {
                 Menu {
-                    HoldMenuItems(commands: hold)
+                    HoldMenuItems(commands: hold, flat: true)
                 } label: {
                     Text("Hold").font(AppTypography.section)
                 }

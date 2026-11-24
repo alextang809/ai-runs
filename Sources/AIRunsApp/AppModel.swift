@@ -11,6 +11,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var now = Date()
     /// A short confirmation shown in the panel header or as a toast.
     @Published private(set) var message: String?
+    /// Where `message` belongs: the header, or next to the On hold line when
+    /// it answers something the user just did there.
+    enum MessagePlace { case header, hold }
+    @Published private(set) var messagePlace: MessagePlace = .header
     /// Offered next to `message` for a few seconds after removing something.
     @Published private(set) var undo: (() -> Void)?
 
@@ -62,6 +66,7 @@ final class AppModel: ObservableObject {
         Notifier.shared.open = { [weak self] id in self?.open(sessionId: id) }
         Notifier.shared.hold = { [weak self] id in
             guard let self else { return }
+            // Later today, or tomorrow morning when it is already late.
             self.hold(sessionId: id, until: HoldPlan(now: Date()).date(for: .later))
         }
         Notifier.shared.update(sessions: Array(store.sessions.values))
@@ -468,8 +473,9 @@ final class AppModel: ObservableObject {
 
     // MARK: - Messages
 
-    func show(_ text: String, undo: (() -> Void)? = nil) {
+    func show(_ text: String, place: MessagePlace = .header, undo: (() -> Void)? = nil) {
         messageWork?.cancel()
+        messagePlace = place
         message = text
         self.undo = undo
         let work = DispatchWorkItem { [weak self] in
@@ -516,7 +522,7 @@ final class AppModel: ObservableObject {
         guard let session = store.sessions[sessionId] else { return }
         Jumper.open(session: session, opened: { [weak self] in
             self?.markSessionRead(session)
-            self?.acknowledgeReturn(sessionId)
+            self?.acknowledgeReturn(sessionId, of: session.hold)
         }, show: { [weak self] in self?.show($0) })
     }
 
@@ -530,23 +536,28 @@ final class AppModel: ObservableObject {
     /// can't be held (approval, or a time that has passed).
     @discardableResult
     func hold(sessionId: String, until: Date) -> Bool {
-        let previous = store.sessions[sessionId]?.hold
+        let before = store.sessions[sessionId]
         var updated = store
         guard updated.reschedule(id: sessionId, until: until, at: Date()) else { return refuseHold(sessionId) }
-        commitHold(updated, sessionId: sessionId, previous: previous)
+        commitHold(updated, sessionId: sessionId, before: before)
         return true
     }
 
-    /// "Waiting on…": held until the user checks back, by default at 9:00 two days from now.
+    /// "Waiting on…": held until the user checks back, by default at 9:00 two
+    /// days from now. A session already waiting keeps its check-back time and
+    /// name; one that came back gets a new time and keeps its name.
     @discardableResult
     func holdWaiting(sessionId: String) -> Bool {
-        let previous = store.sessions[sessionId]?.hold
-        let until = previous?.isWaiting == true ? previous!.until : holdPlan.date(for: .waiting)
+        let before = store.sessions[sessionId]
+        let previous = before?.hold
+        let now = Date()
+        let keepsTime = previous?.isWaiting == true && previous?.returnedAt == nil && (previous?.until ?? now) > now
+        let until = keepsTime ? previous?.until ?? holdPlan.date(for: .waiting) : holdPlan.date(for: .waiting)
         var updated = store
-        guard updated.hold(id: sessionId, until: until, waitingOn: previous?.waitingOn ?? "", at: Date()) else {
+        guard updated.hold(id: sessionId, until: until, waitingOn: previous?.waitingOn ?? "", at: now) else {
             return refuseHold(sessionId)
         }
-        commitHold(updated, sessionId: sessionId, previous: previous)
+        commitHold(updated, sessionId: sessionId, before: before)
         return true
     }
 
@@ -559,38 +570,39 @@ final class AppModel: ObservableObject {
 
     /// "Bring back now".
     func bringBack(sessionId: String) {
-        guard let previous = store.sessions[sessionId]?.hold else { return }
+        guard let before = store.sessions[sessionId], before.hold != nil else { return }
         store.bringBack(id: sessionId)
         saveSessions()
-        show("Back in your list") { [weak self] in self?.restoreHold(previous, sessionId: sessionId) }
+        show("Back in your list", place: .hold) { [weak self] in self?.restoreHold(from: before) }
     }
 
-    private func acknowledgeReturn(_ sessionId: String) {
+    /// Says something next to the On hold line (a hint, or why nothing happened).
+    func showHoldNote(_ text: String) { show(text, place: .hold) }
+
+    private func acknowledgeReturn(_ sessionId: String, of opened: SessionHold?) {
         guard store.sessions[sessionId]?.isBackFromHold == true else { return }
-        store.acknowledgeReturn(id: sessionId)
+        store.acknowledgeReturn(id: sessionId, of: opened)
         saveSessions()
     }
 
-    private func commitHold(_ updated: SessionStore, sessionId: String, previous: SessionHold?) {
+    private func commitHold(_ updated: SessionStore, sessionId: String, before: Session?) {
         store = updated
         saveSessions()
         guard let hold = store.sessions[sessionId]?.hold else { return }
-        let text = hold.isWaiting ? "Waiting · check back \(holdPlan.when(hold.until))" : "On hold · \(holdPlan.backText(hold.until))"
-        show(text) { [weak self] in self?.restoreHold(previous, sessionId: sessionId) }
+        let when = holdPlan.when(hold.until)
+        show(hold.isWaiting ? "Check back \(when)" : "Back \(when)", place: .hold) { [weak self] in
+            if let before { self?.restoreHold(from: before) }
+        }
     }
 
-    private func restoreHold(_ previous: SessionHold?, sessionId: String) {
-        if let previous {
-            store.hold(id: sessionId, until: max(previous.until, Date().addingTimeInterval(60)),
-                       waitingOn: previous.waitingOn, at: Date())
-        } else {
-            store.bringBack(id: sessionId)
-        }
+    /// Undo: the hold and the old "Ignore for Now" go back to what they were.
+    private func restoreHold(from before: Session) {
+        store.restoreHold(id: before.id, hold: before.hold, ignored: before.ignored, at: Date())
         saveSessions()
     }
 
     private func refuseHold(_ sessionId: String) -> Bool {
-        if store.sessions[sessionId]?.canHold == false { show("Approvals can’t wait. Answer it first.") }
+        if store.sessions[sessionId]?.canHold == false { show("Approvals can’t wait. Answer it first.", place: .hold) }
         return false
     }
 

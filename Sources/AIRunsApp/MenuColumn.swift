@@ -76,6 +76,7 @@ struct MenuColumn: View {
                     // of the footer's height budget. Moving it under the numbers
                     // means moving this one view into the header stack.
                     if !model.store.sessions.isEmpty {
+                        SeparatorLine()
                         holdDock
                     }
                     SeparatorLine()
@@ -118,7 +119,7 @@ struct MenuColumn: View {
                     .accessibilityHidden(true)
                 Text("AI Runs").font(AppTypography.appTitle)
                 Spacer()
-                if let message = model.message {
+                if let message = model.message, model.messagePlace == .header {
                     Text(message)
                         .font(AppTypography.metadata)
                         .foregroundStyle(Color.secondary)

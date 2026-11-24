@@ -131,7 +131,9 @@ not conversation messages.
 
 - "Hold until…" (replaces "Ignore for Now" for new actions): a held run leaves
   Needs you and the count and sits on the On hold line until its time (Today +3 h,
-  a day at 9:00, or Waiting: check back in two days). When due it comes back to
+  never past 22:00 and gone after 20:00; a day at 9:00; or Waiting: check back in
+  two days). Its tray row always says when it is back, and held time is not
+  "waited on you". When due it comes back to
   Needs you with "Back from hold" and counts until opened; no notification. APPROVE
   can't be held, and an approval ends a hold. Rows ignored by earlier versions keep
   their Ignored section and "Stop Ignoring".

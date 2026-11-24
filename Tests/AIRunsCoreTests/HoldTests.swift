@@ -291,11 +291,82 @@ final class HoldTests: XCTestCase {
         XCTAssertEqual(plan.segments.last?.daysAhead, 7)
     }
 
-    func testLateEveningLaterNamesTheNextDay() {
-        let plan = HoldPlan(now: date(2026, 11, 24, 22, 30), calendar: calendar)
-        XCTAssertEqual(plan.date(for: .later), date(2026, 11, 25, 1, 30))
-        XCTAssertEqual(plan.title(for: .later), "Tomorrow 1:30 AM")
-        XCTAssertEqual(plan.segment(for: plan.date(for: .later)).label, "Wed")
+    func testTodayNeverMeansTheMiddleOfTheNight() {
+        // 6:30 PM: three hours later is 9:30 PM, still this evening.
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 18, 30), calendar: calendar).laterToday, date(2026, 11, 24, 21, 30))
+        // 7:30 PM: three hours later is past 10 PM, so it is 9 PM instead.
+        let evening = HoldPlan(now: date(2026, 11, 24, 19, 30), calendar: calendar)
+        XCTAssertEqual(evening.laterToday, date(2026, 11, 24, 21))
+        XCTAssertEqual(evening.title(for: .later), "Today 9:00 PM")
+        XCTAssertEqual(evening.segments.first?.dropDate, date(2026, 11, 24, 21))
+        // 9:40 PM: there is no Today any more; the line and the menu say so.
+        let late = HoldPlan(now: date(2026, 11, 24, 21, 40), calendar: calendar)
+        XCTAssertNil(late.laterToday)
+        XCTAssertEqual(late.presets, [.tomorrow, .week])
+        XCTAssertEqual(late.segments.first?.label, "Today")
+        XCTAssertNil(late.segments.first?.dropDate)
+        XCTAssertEqual(late.date(for: .later), date(2026, 11, 25, 9), "The notification's Hold falls back to tomorrow morning")
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 13), calendar: calendar).presets, [.later, .tomorrow, .week])
+    }
+
+    func testWeekendDatesAreNeverReadAsMonday() {
+        let plan = HoldPlan(now: date(2026, 11, 27, 10), calendar: calendar) // Friday
+        let saturday = plan.date(for: .tomorrow)
+        XCTAssertEqual(saturday, date(2026, 11, 28, 9))
+        XCTAssertEqual(plan.segment(for: saturday).label, "Mon")
+        XCTAssertFalse(plan.isOnLabelledDay(saturday))
+        XCTAssertEqual(plan.returnText(saturday), "Sat 9:00 AM")
+        let monday = date(2026, 11, 30, 9)
+        XCTAssertTrue(plan.isOnLabelledDay(monday))
+        XCTAssertEqual(plan.returnText(monday), "9:00 AM")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 27, 13)), "1:00 PM")
+        XCTAssertEqual(plan.returnText(date(2026, 12, 8, 9)), "Tue 8 Dec 9:00 AM")
+    }
+
+    func testHeldTimeIsNotTimeTheAgentWaitedOnTheUser() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        XCTAssertEqual(store.history?[key]?.last?.kind, .waiting)
+        store.hold(id: key, until: now.addingTimeInterval(3600), at: now)
+        XCTAssertEqual(store.history?[key]?.last?.kind, .background)
+        store.reconcileHolds(now: now.addingTimeInterval(3601))
+        XCTAssertEqual(store.history?[key]?.last?.kind, .waiting, "Back in Needs you, the clock runs again")
+    }
+
+    func testUndoRestoresTheOldIgnoreAndThePreviousHold() throws {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.setIgnored(id: key, true, at: now)
+        let before = try XCTUnwrap(store.sessions[key])
+        store.hold(id: key, until: now.addingTimeInterval(3600), at: now)
+        XCTAssertEqual(store.needsUserCount, 0)
+        store.restoreHold(id: key, hold: before.hold, ignored: before.ignored, at: now.addingTimeInterval(5))
+        let restored = try XCTUnwrap(store.sessions[key])
+        XCTAssertTrue(restored.isIgnored)
+        XCTAssertNil(restored.hold)
+        XCTAssertEqual(store.needsUserCount, 0, "Still ignored, so still not counted")
+
+        // Undo of "Bring back now" on a hold that came due meanwhile: it is due, not hidden.
+        store.hold(id: key, until: now.addingTimeInterval(60), at: now.addingTimeInterval(6))
+        let held = try XCTUnwrap(store.sessions[key])
+        store.bringBack(id: key, at: now.addingTimeInterval(7))
+        store.restoreHold(id: key, hold: held.hold, ignored: held.ignored, at: now.addingTimeInterval(120))
+        XCTAssertTrue(store.sessions[key]?.isBackFromHold == true)
+    }
+
+    func testASlowOpenCannotClearANewerHold() throws {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.hold(id: key, until: now.addingTimeInterval(60), at: now)
+        store.reconcileHolds(now: now.addingTimeInterval(61))
+        let opened = try XCTUnwrap(store.sessions[key]?.hold)
+        // Before the open finishes the user holds it again and that comes due too.
+        store.hold(id: key, until: now.addingTimeInterval(200), at: now.addingTimeInterval(62))
+        store.reconcileHolds(now: now.addingTimeInterval(201))
+        store.acknowledgeReturn(id: key, of: opened)
+        XCTAssertTrue(store.sessions[key]?.isBackFromHold == true)
+        store.acknowledgeReturn(id: key, of: store.sessions[key]?.hold)
+        XCTAssertNil(store.sessions[key]?.hold)
     }
 
     func testJustBeforeMidnightNeverSchedulesIntoThePast() {

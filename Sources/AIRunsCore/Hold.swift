@@ -60,7 +60,7 @@ public struct HoldPlan: Sendable {
 
     /// The quick choices in a row's menu, and what dropping on the line does.
     public enum Preset: String, CaseIterable, Sendable {
-        /// Three hours from now.
+        /// Later today: three hours from now, while that is still this evening.
         case later
         /// 9:00 tomorrow.
         case tomorrow
@@ -72,12 +72,15 @@ public struct HoldPlan: Sendable {
 
     public static let laterInterval: TimeInterval = 3 * 3600
     public static let morningHour = 9
+    /// "Today" never means later than this hour; nobody wants a session back at night.
+    public static let eveningHour = 21
+    static let latestHour = 22
     /// Never closer than this, so a hold always means something.
     static let minimumLead: TimeInterval = 15 * 60
 
     public func date(for preset: Preset) -> Date {
         switch preset {
-        case .later: return now.addingTimeInterval(Self.laterInterval)
+        case .later: return laterToday ?? morning(daysAhead: 1)
         case .tomorrow: return morning(daysAhead: 1)
         case .week:
             let toFriday = 6 - weekday(now) // Friday is 6 in a Gregorian weekday
@@ -85,6 +88,26 @@ public struct HoldPlan: Sendable {
         case .waiting: return morning(daysAhead: 2)
         }
     }
+
+    /// When "Today" brings a session back: three hours from now. In the
+    /// evening that would be at night, so it is 21:00 instead while that is at
+    /// least an hour away, and after that there is no "Today" any more.
+    public var laterToday: Date? {
+        let candidate = now.addingTimeInterval(Self.laterInterval)
+        let today = calendar.startOfDay(for: now)
+        if let latest = calendar.date(bySettingHour: Self.latestHour, minute: 0, second: 0, of: today),
+           calendar.isDate(candidate, inSameDayAs: now), candidate <= latest {
+            return candidate
+        }
+        if let evening = calendar.date(bySettingHour: Self.eveningHour, minute: 0, second: 0, of: today),
+           evening.timeIntervalSince(now) >= 3600 {
+            return evening
+        }
+        return nil
+    }
+
+    /// The quick choices on offer right now. "Today" is left out late in the evening.
+    public var presets: [Preset] { laterToday == nil ? [.tomorrow, .week] : [.later, .tomorrow, .week] }
 
     /// 9:00 on the day `days` after today, never in the past.
     public func morning(daysAhead days: Int) -> Date {
@@ -111,7 +134,8 @@ public struct HoldPlan: Sendable {
         public var label: String
         /// True for the stretch into next Monday, drawn dashed for the weekend.
         public var isNextWeek: Bool
-        public var dropDate: Date
+        /// Nil for Today late in the evening: nothing can be dropped there.
+        public var dropDate: Date?
         public var id: Int { daysAhead }
         public var isToday: Bool { daysAhead == 0 }
     }
@@ -124,7 +148,7 @@ public struct HoldPlan: Sendable {
         var result = (0...lastWeekday).map { offset in
             Segment(daysAhead: offset, label: offset == 0 ? "Today" : dayName(daysAhead: offset),
                     isNextWeek: false,
-                    dropDate: offset == 0 ? date(for: .later) : morning(daysAhead: offset))
+                    dropDate: offset == 0 ? laterToday : morning(daysAhead: offset))
         }
         result.append(Segment(daysAhead: daysToNextMonday, label: dayName(daysAhead: daysToNextMonday),
                               isNextWeek: true, dropDate: morning(daysAhead: daysToNextMonday)))
@@ -148,6 +172,25 @@ public struct HoldPlan: Sendable {
     /// True when `date` falls after the line's last stretch, so its row must say the full date.
     public func isBeyondLine(_ date: Date) -> Bool {
         daysAhead(of: date) > (segments.last?.daysAhead ?? 0)
+    }
+
+    /// True when `date` is on the very day its stretch is named after. A
+    /// Saturday sits on the dashed stretch into Monday and is not.
+    public func isOnLabelledDay(_ date: Date) -> Bool {
+        max(0, daysAhead(of: date)) == segment(for: date).daysAhead
+    }
+
+    /// When a held session comes back, as said under its stretch and in its
+    /// tray: just the time on the stretch's own day ("3:00 PM"), otherwise the
+    /// day too ("Sat 9:00 AM", "Tue 8 Dec 9:00 AM"), so a weekend date is never
+    /// read as Monday.
+    public func returnText(_ date: Date) -> String {
+        if isOnLabelledDay(date) { return time(date) }
+        let days = daysAhead(of: date)
+        let day = isBeyondLine(date)
+            ? Self.formatter("EEE d MMM", calendar: calendar).string(from: date)
+            : dayName(daysAhead: days)
+        return "\(day) \(time(date))"
     }
 
     // MARK: Words

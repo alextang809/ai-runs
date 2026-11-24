@@ -520,20 +520,16 @@ struct HeaderDashboard: View {
 
     @ViewBuilder private var todayLine: some View {
         let waited = TextUtils.duration(stats.waitedToday)
-        HStack(spacing: 0) {
-            Text("Agents waited on you ")
-            Text(waited == "now" ? "0m" : waited)
-                .font(AppTypography.elapsed)
-                .foregroundStyle(stats.waitedToday >= 60 ? Color.primary : .secondary)
-            Text(" today")
-            if let average = stats.averageReply {
-                Text(" · you replied in ")
-                Text(Self.short(average))
-                    .font(AppTypography.elapsed)
-                    .foregroundStyle(.primary)
-                Text(" on average")
-            }
-        }
+        // One text, so the spaces between the words and the numbers are kept.
+        let waitedText = Text(waited == "now" ? "0m" : waited)
+            .font(AppTypography.elapsed)
+            .foregroundStyle(stats.waitedToday >= 60 ? Color.primary : .secondary)
+        let replied = stats.averageReply.map { average in
+            Text(" · you replied in ")
+                + Text(Self.short(average)).font(AppTypography.elapsed).foregroundStyle(.primary)
+                + Text(" on average")
+        } ?? Text("")
+        (Text("Agents waited on you ") + waitedText + Text(" today") + replied)
         .font(AppTypography.metadata)
         .foregroundStyle(.secondary)
         .lineLimit(1)

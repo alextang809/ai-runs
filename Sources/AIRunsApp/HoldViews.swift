@@ -38,6 +38,9 @@ final class HoldDragState: ObservableObject {
     var targets: [HoldTarget: CGRect] = [:]
     /// Called when a drag starts and ends, so the menu can freeze its hover details.
     var onActiveChange: ((Bool) -> Void)?
+    /// Makes this window take the keyboard for the "who or what" field. The
+    /// floating window never takes it by itself.
+    var requestKeyboard: (() -> Void)?
 
     private var cancelled = false
     private var endedAt: Date?
@@ -53,15 +56,21 @@ final class HoldDragState: ObservableObject {
             installEscape()
         }
         location = point
-        let hit = targets.first { $0.value.contains(point) && accepts($0.key, session) }?.key
+        let hit = target(at: point, for: session)
         if hovered != hit { hovered = hit }
     }
 
-    /// The pointer went up. Returns where it landed, or nil for nowhere or after Escape.
-    func ended() -> (session: Session, target: HoldTarget)? {
+    /// The pointer went up at `point`. Returns the target under it, or nil for
+    /// nowhere or after Escape. The release point decides, not the last hover.
+    func ended(at point: CGPoint? = nil) -> (session: Session, target: HoldTarget)? {
         defer { finish() }
-        guard !cancelled, let session = dragged, let target = hovered else { return nil }
+        guard !cancelled, let session = dragged,
+              let target = target(at: point ?? location, for: session) else { return nil }
         return (session, target)
+    }
+
+    private func target(at point: CGPoint, for session: Session) -> HoldTarget? {
+        targets.first { $0.value.contains(point) && accepts($0.key, session) }?.key
     }
 
     /// Escape during a drag: it changes nothing. True when a drag was cancelled.
@@ -158,8 +167,8 @@ extension View {
                     guard session.canHold else { return }
                     drag.changed(session, at: value.location)
                 }
-                .onEnded { _ in
-                    guard let landed = drag.ended() else { return }
+                .onEnded { value in
+                    guard let landed = drag.ended(at: value.location) else { return }
                     drop(landed.session, landed.target)
                 },
             including: session.canHold ? .all : .subviews
@@ -170,13 +179,14 @@ extension View {
 // MARK: - Words
 
 enum HoldText {
-    static let hint = "Drag a session onto the day you want it back"
+    static let hint = "Drag a session onto a day"
+    static let tooLate = "Too late for today. Pick a day."
 
     static func readout(_ target: HoldTarget?, plan: HoldPlan) -> String? {
         switch target {
         case .segment(let days)?:
             guard let segment = plan.segments.first(where: { $0.daysAhead == days }) else { return nil }
-            return plan.backText(segment.dropDate)
+            return segment.dropDate.map(plan.backText) ?? "Too late today"
         case .waiting?: return "Waiting on…"
         case .pin?: return "Pin to Top"
         case .bringBack?: return "Bring back now"
@@ -190,6 +200,11 @@ enum HoldText {
             return "Waiting on \(hold.waitingName ?? "someone") · check back \(plan.when(hold.until))"
         }
         return "On hold until \(plan.when(hold.until))"
+    }
+
+    /// A state word inside a sentence: "NEEDS INPUT" becomes "Needs input".
+    static func sentence(_ word: String) -> String {
+        word.prefix(1).uppercased() + word.dropFirst().lowercased()
     }
 }
 
@@ -218,35 +233,45 @@ struct HoldCommands {
         var id: String { title }
     }
 
-    var presets: [Choice] {
-        [HoldPlan.Preset.later, .tomorrow, .week].map { Choice(title: plan.title(for: $0), date: plan.date(for: $0)) }
+    /// Today (while it isn't too late), Tomorrow, and Friday or next Monday.
+    var presets: [Choice] { plan.presets.map(choice) }
+    var tomorrow: Choice { choice(.tomorrow) }
+
+    private func choice(_ preset: HoldPlan.Preset) -> Choice {
+        Choice(title: plan.title(for: preset), date: plan.date(for: preset))
     }
 }
 
 /// "Hold Until" with its choices, and "Bring Back Now" for a held session.
-/// For context menus and the ··· menus.
+/// `flat` lists the choices directly, for a menu that already says Hold.
 struct HoldMenuItems: View {
     let commands: HoldCommands
+    var flat = false
 
     var body: some View {
         if commands.session.hold != nil {
             Button("Bring Back Now", systemImage: "arrow.uturn.up", action: commands.bringBack)
         }
         if commands.session.canHold {
-            Menu {
-                ForEach(commands.presets) { preset in
-                    Button(preset.title) { commands.hold(preset.date) }
-                }
-                Divider()
-                Button(commands.plan.title(for: .waiting), action: commands.waiting)
-            } label: {
-                Label("Hold Until", systemImage: "clock")
+            if flat {
+                if commands.session.hold != nil { Divider() }
+                choices
+            } else {
+                Menu { choices } label: { Label("Hold Until", systemImage: "clock") }
             }
         } else {
             Button("Hold Until", systemImage: "clock") {}
                 .disabled(true)
                 .help("Approvals can’t wait")
         }
+    }
+
+    @ViewBuilder private var choices: some View {
+        ForEach(commands.presets) { preset in
+            Button(preset.title) { commands.hold(preset.date) }
+        }
+        Divider()
+        Button(commands.plan.title(for: .waiting), action: commands.waiting)
     }
 }
 
@@ -332,6 +357,18 @@ private struct HoldDragChip: View {
     }
 }
 
+/// A surface that floats over the list while a row is dragged.
+private struct RaisedBackground: View {
+    var hot = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.97))
+            .overlay(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(hot ? 0.12 : 0.03)))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(hot ? 0.4 : 0.14), lineWidth: 1))
+    }
+}
+
 /// Above the list while dragging: "Pin to Top" for a row, "Bring back now" for a held session.
 struct HoldTopTarget: View {
     @ObservedObject var drag: HoldDragState
@@ -348,11 +385,7 @@ struct HoldTopTarget: View {
                     .foregroundStyle(hot ? Color.primary : .secondary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 36)
-                    .background(RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.96)))
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(hot ? 0.12 : 0.05)))
-                    .overlay(RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(Color.primary.opacity(hot ? 0.5 : 0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                    .background(RaisedBackground(hot: hot))
                     .holdTarget(target)
                     .padding(.horizontal, 8)
                     .padding(.top, 4)
@@ -366,7 +399,9 @@ struct HoldTopTarget: View {
 
 /// "On hold": a line from now through next Monday, with a dot per held
 /// session, the Waiting end cap, and a tray for the day that is open. Shared
-/// by the menu panel and the floating window; it sits outside the scrolled list.
+/// by the menu panel and the floating window; it sits outside the scrolled
+/// list. It is the quietest part of the panel: a section label and a grey
+/// line, no card. Only what the user arranged (the dots) carries colour.
 struct HoldDock: View {
     @ObservedObject var model: AppModel
     @ObservedObject var drag: HoldDragState
@@ -376,29 +411,39 @@ struct HoldDock: View {
     let open: (Session) -> Void
     let drop: (Session, HoldTarget) -> Void
 
+    private var inset: CGFloat { compact ? 10 : 14 }
+
     var body: some View {
         let plan = model.holdPlan
-        let empty = held.isEmpty
         VStack(alignment: .leading, spacing: 0) {
-            if empty {
-                header(empty: !drag.isActive)
-                    // While a row is dragged, the line rises over the end of the
-                    // list instead of pushing it, so nothing under the pointer moves.
+            if held.isEmpty {
+                // Nothing held: one line. While a row is dragged the line rises
+                // over the end of the list instead of pushing it, so nothing
+                // under the pointer moves and the panel keeps its height.
+                header
                     .overlay(alignment: .bottom) {
                         if drag.isActive {
-                            dockBody(plan: plan, empty: true)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .background(DockBackground(dashed: false))
+                            VStack(alignment: .leading, spacing: 0) {
+                                header
+                                line(plan)
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
+                            .background(RaisedBackground().padding(.horizontal, 4))
                         }
                     }
-                    .background(DockBackground(dashed: !drag.isActive))
             } else {
-                dockBody(plan: plan, empty: false)
-                    .background(DockBackground(dashed: false))
+                header
+                if let days = drag.openSegment {
+                    let items = held.filter { Self.days($0, plan) == days }
+                    if !items.isEmpty {
+                        HoldTray(model: model, drag: drag, items: items, plan: plan, compact: compact,
+                                 open: open, drop: drop)
+                            .padding(.horizontal, inset - 6)
+                    }
+                }
+                line(plan)
             }
         }
-        .padding(.horizontal, compact ? 4 : 8)
-        .padding(.vertical, 4)
         .onChange(of: held.map(\.id)) { _, ids in
             // A tray closes once nothing is left in it.
             if let days = drag.openSegment, !held.contains(where: { Self.days($0, plan) == days }) {
@@ -412,57 +457,50 @@ struct HoldDock: View {
         plan.segment(for: session.hold?.until ?? plan.now).daysAhead
     }
 
-    private func header(empty: Bool) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "clock").font(.system(size: 11, weight: .semibold))
-            Text("On hold").font(AppTypography.section.weight(.semibold))
-            if empty {
+    private func line(_ plan: HoldPlan) -> some View {
+        HoldLine(drag: drag, held: held, plan: plan, compact: compact, waitingTapped: {
+            // The first waiting session's tray, or what the cap is for.
+            if let first = held.first(where: { $0.hold?.isWaiting == true }) {
+                let days = Self.days(first, plan)
+                drag.openSegment = drag.openSegment == days ? nil : days
+            } else {
+                model.showHoldNote("Drag a session here when it waits on someone")
+            }
+        })
+        .padding(.horizontal, inset - 4)
+        .padding(.bottom, 5)
+    }
+
+    /// Same weight as "Pinned 2" and the other section labels. To its right:
+    /// what just happened here, with Undo, or else how to use the line.
+    private var header: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "clock").font(.system(size: 10, weight: .medium))
+            Text("On hold").font(AppTypography.section)
+            if !held.isEmpty { Text("\(held.count)").font(AppTypography.elapsed) }
+            Spacer(minLength: 8)
+            if let message = model.message, model.messagePlace == .hold {
+                Text(message)
+                    .font(AppTypography.section)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if model.undo != nil {
+                    Button("Undo") { model.performUndo() }
+                        .buttonStyle(.plain)
+                        .font(AppTypography.section.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+            } else if !drag.isActive {
                 Text(HoldText.hint)
                     .font(AppTypography.section)
-                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .opacity(0.8)
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 6)
-        .padding(.bottom, empty ? 6 : 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    private func dockBody(plan: HoldPlan, empty: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header(empty: false)
-            if let days = drag.openSegment {
-                let items = held.filter { Self.days($0, plan) == days }
-                if !items.isEmpty {
-                    HoldTray(model: model, drag: drag, items: items, plan: plan, compact: compact,
-                             open: open, drop: drop)
-                    Divider().padding(.horizontal, 8).padding(.bottom, 4)
-                }
-            }
-            HoldLine(drag: drag, held: held, plan: plan, compact: compact)
-                .padding(.horizontal, 6)
-                .padding(.bottom, 6)
-        }
-    }
-}
-
-private struct DockBackground: View {
-    let dashed: Bool
-
-    var body: some View {
-        if dashed {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.secondary.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-        } else {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.94))
-                .overlay(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
-        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, inset)
+        .frame(height: 24)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -472,6 +510,7 @@ private struct HoldLine: View {
     let held: [Session]
     let plan: HoldPlan
     let compact: Bool
+    let waitingTapped: () -> Void
 
     static let height: CGFloat = 42
     /// The floating window needs drop targets at least this wide.
@@ -502,20 +541,24 @@ private struct HoldLine: View {
 
     private var waitingCap: some View {
         let hot = drag.hovered == .waiting
+        let count = held.filter { $0.hold?.isWaiting == true }.count
         return VStack(spacing: 2) {
-            Image(systemName: "person").font(.system(size: 11, weight: .semibold))
+            Image(systemName: count > 0 ? "person.fill" : "person").font(.system(size: 11, weight: .medium))
                 .frame(height: 16)
-            Text("Waiting").font(.system(size: compact ? 10 : 10.5, weight: .medium))
+            Text("Waiting").font(.system(size: compact ? 10 : 10.5, weight: count > 0 ? .semibold : .regular))
         }
-        .foregroundStyle(drag.isActive ? Color.primary : .secondary)
+        .foregroundStyle(drag.isActive || count > 0 ? Color.primary : .secondary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hot ? 0.14 : (drag.isActive ? 0.05 : 0))))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(Color.secondary.opacity(drag.isActive ? 0.8 : 0.4), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+        // A plain grey well: a place to drop, not a button and not "unknown".
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hot ? 0.16 : (drag.isActive ? 0.08 : 0.04))))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: waitingTapped)
         .holdTarget(.waiting)
-        .help("Drag here when it waits on someone; check back in two days")
+        .help("Drop here when it waits on someone; check back in two days")
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Waiting on someone")
+        .accessibilityLabel("Waiting on someone, \(count) session\(count == 1 ? "" : "s")")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default, waitingTapped)
     }
 }
 
@@ -527,16 +570,18 @@ private struct HoldSegmentView: View {
 
     private var isOpen: Bool { drag.openSegment == segment.daysAhead && !items.isEmpty }
     private var hot: Bool { drag.hovered == .segment(segment.daysAhead) }
+    /// Today late in the evening: shown, but nothing can be dropped on it.
+    private var closed: Bool { segment.dropDate == nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             axis.frame(height: 14)
             Text(segment.label)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11, weight: items.isEmpty ? .regular : .semibold))
                 .foregroundStyle(items.isEmpty ? Color.secondary : Color.primary)
                 .lineLimit(1)
                 .padding(.leading, 4)
-            Text(isOpen ? "" : sub)
+            Text(sub)
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -546,33 +591,46 @@ private struct HoldSegmentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 8).fill(fill))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard !items.isEmpty else { return }
-            drag.openSegment = isOpen ? nil : segment.daysAhead
+        // The open day is marked by a thin rule under it, not a filled tab.
+        .overlay(alignment: .bottom) {
+            if isOpen {
+                Capsule().fill(Color.primary.opacity(0.55)).frame(height: 1.5).padding(.horizontal, 4)
+            }
         }
+        .opacity(drag.isActive && closed ? 0.45 : 1)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: toggle)
         .holdTarget(.segment(segment.daysAhead))
+        .help(items.isEmpty ? "" : "Show what comes back here")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("On hold, \(segment.label), \(items.count) session\(items.count == 1 ? "" : "s")")
         .accessibilityAddTraits(items.isEmpty ? [] : .isButton)
         .accessibilityValue(isOpen ? "Expanded" : "")
-        .accessibilityAction {
-            guard !items.isEmpty else { return }
-            drag.openSegment = isOpen ? nil : segment.daysAhead
-        }
+        .accessibilityAction(.default, toggle)
+    }
+
+    private func toggle() {
+        guard !items.isEmpty else { return }
+        drag.openSegment = isOpen ? nil : segment.daysAhead
     }
 
     private var fill: Color {
-        if hot { return Color.primary.opacity(0.16) }
-        if isOpen { return Color.primary.opacity(0.08) }
+        if hot { return Color.primary.opacity(closed ? 0.05 : 0.16) }
         return drag.isActive ? Color.primary.opacity(0.04) : .clear
     }
 
-    /// Waiting names, else for Today the first return time.
+    /// Under the label, whether or not the tray is open: who it waits on, or
+    /// when the first one is back. A date that isn't this stretch's own day
+    /// (a Saturday before Monday) names its day.
     private var sub: String {
+        if drag.isActive, closed { return "too late" }
         let names = items.compactMap(\.hold).filter(\.isWaiting).map { $0.waitingName ?? "someone" }
         if !names.isEmpty { return names.joined(separator: ", ") }
-        if segment.isToday, let first = items.first?.hold { return plan.time(first.until) }
+        guard let first = items.first?.hold?.until else { return "" }
+        if segment.isToday { return plan.time(first) }
+        if !plan.isOnLabelledDay(first) {
+            return plan.isBeyondLine(first) ? "and later" : "from \(plan.dayName(daysAhead: plan.daysAhead(of: first)))"
+        }
         return ""
     }
 
@@ -598,7 +656,7 @@ private struct HoldSegmentView: View {
                 let shown = Array(items.prefix(4))
                 ForEach(Array(shown.enumerated()), id: \.element.id) { index, session in
                     HoldDot(session: session)
-                        .position(x: width * fraction(session, index: index, count: shown.count), y: mid)
+                        .position(x: Self.dotX(fraction(session, index: index, in: shown), width: width), y: mid)
                 }
                 if items.count > 4 {
                     Text("+\(items.count - 4)")
@@ -610,17 +668,38 @@ private struct HoldSegmentView: View {
         }
     }
 
-    private func fraction(_ session: Session, index: Int, count: Int) -> CGFloat {
-        if segment.isToday, let until = session.hold?.until {
+    /// A dot never touches the "now" bar or the next day's tick: it must read
+    /// as later, not as due.
+    static func dotX(_ fraction: CGFloat, width: CGFloat) -> CGFloat {
+        let low: CGFloat = 13, high = max(13, width - 8)
+        return min(high, max(low, fraction * width))
+    }
+
+    private func fraction(_ session: Session, index: Int, in shown: [Session]) -> CGFloat {
+        guard let until = session.hold?.until else { return 0.5 }
+        if segment.isToday {
             let end = max(plan.now.addingTimeInterval(4 * 3600), endOfToday)
-            let f = until.timeIntervalSince(plan.now) / max(1, end.timeIntervalSince(plan.now))
-            return CGFloat(min(0.94, max(0.12, f)))
+            return CGFloat(until.timeIntervalSince(plan.now) / max(1, end.timeIntervalSince(plan.now)))
         }
-        return count == 1 ? 0.5 : 0.25 + CGFloat(index) * 0.5 / CGFloat(count - 1)
+        if segment.isNextWeek {
+            // The dashed part is the weekend; Monday itself is at the far end.
+            let weekend = shown.filter { !plan.isOnLabelledDay($0.hold?.until ?? until) }
+            if let place = weekend.firstIndex(where: { $0.id == session.id }) {
+                return Self.spread(place, of: weekend.count, from: 0.2, to: 0.55)
+            }
+            let monday = shown.filter { plan.isOnLabelledDay($0.hold?.until ?? until) }
+            let place = monday.firstIndex(where: { $0.id == session.id }) ?? 0
+            return Self.spread(place, of: monday.count, from: 0.72, to: 0.92)
+        }
+        return Self.spread(index, of: shown.count, from: 0.3, to: 0.8)
+    }
+
+    static func spread(_ index: Int, of count: Int, from: CGFloat, to: CGFloat) -> CGFloat {
+        count <= 1 ? (from + to) / 2 : from + CGFloat(index) * (to - from) / CGFloat(count - 1)
     }
 
     private var endOfToday: Date {
-        plan.calendar.date(bySettingHour: 21, minute: 0, second: 0, of: plan.now) ?? plan.now
+        plan.calendar.date(bySettingHour: HoldPlan.eveningHour, minute: 0, second: 0, of: plan.now) ?? plan.now
     }
 }
 
@@ -654,111 +733,142 @@ private struct HoldTray: View {
     let open: (Session) -> Void
     let drop: (Session, HoldTarget) -> Void
 
+    static let rowHeight: CGFloat = 38
+    /// More rows than this scroll inside the tray, so a busy day still fits a short screen.
+    static let visibleRows = 4
+
     var body: some View {
+        if items.count > Self.visibleRows {
+            ScrollView(.vertical) { rows }
+                .frame(height: Self.rowHeight * (CGFloat(Self.visibleRows) + 0.5))
+        } else {
+            rows
+        }
+    }
+
+    private var rows: some View {
         VStack(spacing: 0) {
             ForEach(items) { session in
-                HoldTrayRow(model: model, drag: drag, session: session, plan: plan,
-                            showsTime: showsTime(session), compact: compact,
+                HoldTrayRow(model: model, drag: drag, session: session, plan: plan, compact: compact,
                             open: { open(session) })
+                    .frame(height: Self.rowHeight)
                     .holdDraggable(session, drag: drag, drop: drop)
             }
         }
-        .padding(.horizontal, 2)
-        .padding(.bottom, 4)
-    }
-
-    /// The return time is shown when it differs from the first row's, or the
-    /// date is past the line (then with its full date).
-    private func showsTime(_ session: Session) -> Bool {
-        guard let until = session.hold?.until, session.hold?.isWaiting != true else { return false }
-        if plan.isBeyondLine(until) { return true }
-        return session.id != items.first?.id && until != items.first?.hold?.until
     }
 }
 
+/// A held session: its title and, always, when it comes back. The time is the
+/// control: click it to move the hold or bring the session back now. Clicking
+/// the row opens the session and keeps the hold.
 private struct HoldTrayRow: View {
     @ObservedObject var model: AppModel
     @ObservedObject var drag: HoldDragState
     let session: Session
     let plan: HoldPlan
-    let showsTime: Bool
     let compact: Bool
     let open: () -> Void
     @State private var name = ""
+    @State private var hovering = false
     @FocusState private var nameFocused: Bool
 
     private var editing: Bool { drag.editingWaitingID == session.id }
+    private var commands: HoldCommands { HoldDrop.commands(session, model: model, drag: drag) }
 
     var body: some View {
-        HStack(spacing: 7) {
+        let hold = session.hold ?? SessionHold(until: model.now, heldAt: model.now)
+        HStack(spacing: 8) {
             AppIcon(bundleId: Jumper.hostBundle(for: session))
-                .scaleEffect(0.7)
-                .frame(width: 18, height: 18)
-            Text(session.currentTopicTitle)
-                .font(compact ? AppTypography.body.weight(.semibold) : AppTypography.body)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let hold = session.hold, hold.isWaiting {
-                if editing {
-                    TextField("who or what", text: $name)
-                        .textFieldStyle(.roundedBorder)
-                        .font(AppTypography.section)
-                        .frame(width: compact ? 84 : 110)
-                        .focused($nameFocused)
-                        .onSubmit(commit)
-                        .onAppear {
-                            name = hold.waitingName ?? ""
-                            nameFocused = true
-                        }
-                        .onChange(of: nameFocused) { _, focused in if !focused { commit() } }
-                        .accessibilityLabel("Waiting on whom")
-                } else {
-                    Label(hold.waitingName ?? "someone", systemImage: "person")
-                        .font(AppTypography.section)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .onTapGesture { drag.editingWaitingID = session.id }
-                }
-            } else if showsTime, let until = session.hold?.until {
-                Text(plan.isBeyondLine(until) ? plan.when(until) : plan.time(until))
-                    .font(AppTypography.elapsed)
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
+                .scaleEffect(0.77)
+                .frame(width: 20, height: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.currentTopicTitle)
+                    .font(compact ? AppTypography.body.weight(.semibold) : AppTypography.rowTitle)
+                    .lineLimit(1)
+                detail(hold)
             }
-            Text(RunText.stateWord(session, now: model.now))
-                .font(AppTypography.badge)
-                .foregroundStyle(.secondary)
-                .fixedSize()
-            Menu {
-                HoldMenuItems(commands: HoldDrop.commands(session, model: model, drag: drag))
-                if session.hold?.isWaiting == true {
-                    Button("Name Who It Waits On…") { drag.editingWaitingID = session.id }
-                }
-                Divider()
-                Button(Jumper.openLabel(for: session), action: open)
-                Button("Remove from List") { model.remove(sessionId: session.id) }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(AppTypography.controlIcon)
-                    .frame(width: 22, height: 20)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Hold, bring back or open")
-            .accessibilityLabel("Actions for \(session.currentTopicTitle)")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            whenMenu(hold)
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 3)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.06 : 0)))
         .contentShape(Rectangle())
+        .onHover { hovering = $0 }
         .onTapGesture {
             guard !drag.consumesClick(), !editing else { return }
             open()
         }
+        .contextMenu {
+            Button(Jumper.openLabel(for: session), action: open)
+            HoldMenuItems(commands: commands)
+            Divider()
+            Button("Remove from List") { model.remove(sessionId: session.id) }
+        }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(session.currentTopicTitle), \(HoldText.status(session.hold ?? SessionHold(until: model.now, heldAt: model.now), plan: plan)), \(RunText.stateWord(session, now: model.now))")
+        .accessibilityLabel("\(session.currentTopicTitle), \(HoldText.status(hold, plan: plan)), \(RunText.stateWord(session, now: model.now))")
         .accessibilityAction(named: "Open", open)
         .accessibilityAction(named: "Bring Back Now") { model.bringBack(sessionId: session.id) }
+    }
+
+    /// Second line: who it waits on (click to name), and its real state in words.
+    @ViewBuilder private func detail(_ hold: SessionHold) -> some View {
+        let state = HoldText.sentence(RunText.stateWord(session, now: model.now))
+        HStack(spacing: 4) {
+            if hold.isWaiting {
+                Image(systemName: "person").font(.system(size: 9, weight: .medium))
+                if editing {
+                    TextField("who or what", text: $name)
+                        .textFieldStyle(.plain)
+                        .font(AppTypography.section)
+                        .foregroundStyle(.primary)
+                        .frame(width: compact ? 90 : 120)
+                        .padding(.horizontal, 4)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .textBackgroundColor)))
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.25), lineWidth: 1))
+                        .focused($nameFocused)
+                        .onSubmit(commit)
+                        .onAppear {
+                            name = hold.waitingName ?? ""
+                            // The floating window doesn't take the keyboard by itself.
+                            drag.requestKeyboard?()
+                            DispatchQueue.main.async { nameFocused = true }
+                        }
+                        .onChange(of: nameFocused) { _, focused in if !focused { commit() } }
+                        .accessibilityLabel("Waiting on whom")
+                } else {
+                    Text(hold.waitingName ?? "name who…")
+                        .underline(hold.waitingName == nil, pattern: .dot)
+                        .lineLimit(1)
+                        .onTapGesture { drag.editingWaitingID = session.id }
+                        .help("Name who or what this waits on")
+                    Text("·")
+                }
+            }
+            if !editing { Text(state).lineLimit(1) }
+        }
+        .font(AppTypography.section)
+        .foregroundStyle(.secondary)
+    }
+
+    /// "3:00 PM ⌄", "Sat 9:00 AM ⌄": when it comes back, and the menu to change that.
+    private func whenMenu(_ hold: SessionHold) -> some View {
+        Menu {
+            HoldMenuItems(commands: commands, flat: true)
+            if hold.isWaiting {
+                Button("Name Who It Waits On…") { drag.editingWaitingID = session.id }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(plan.returnText(hold.until)).font(AppTypography.elapsed)
+                Image(systemName: "chevron.down").font(.system(size: 7.5, weight: .semibold))
+            }
+            .foregroundStyle(.primary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("\(HoldText.status(hold, plan: plan)). Click to change.")
+        .accessibilityLabel("Back \(plan.when(hold.until)). Change")
     }
 
     private func commit() {
@@ -779,7 +889,8 @@ enum HoldDrop {
         switch target {
         case .segment(let days):
             guard let segment = plan.segments.first(where: { $0.daysAhead == days }) else { return }
-            model.hold(sessionId: session.id, until: segment.dropDate)
+            guard let date = segment.dropDate else { return model.showHoldNote(HoldText.tooLate) }
+            model.hold(sessionId: session.id, until: date)
         case .waiting:
             guard model.holdWaiting(sessionId: session.id) else { return }
             editWaiting(session.id, model: model, drag: drag)
@@ -804,17 +915,20 @@ enum HoldDrop {
 }
 
 extension View {
-    /// VoiceOver and keyboard users reach the same Hold commands without dragging.
+    /// VoiceOver and keyboard users reach the same Hold commands without
+    /// dragging. Each action is offered only while it can do something.
     @ViewBuilder func holdAccessibilityActions(_ commands: HoldCommands?) -> some View {
-        if let commands {
-            let tomorrow = commands.presets[1]
-            self
-                .accessibilityAction(named: Text("Hold Until \(tomorrow.title)")) {
-                    if commands.session.canHold { commands.hold(tomorrow.date) }
-                }
-                .accessibilityAction(named: Text("Bring Back Now")) {
-                    if commands.session.hold != nil { commands.bringBack() }
-                }
+        if let commands, commands.session.canHold || commands.session.hold != nil {
+            let tomorrow = commands.tomorrow
+            let canHold = commands.session.canHold, held = commands.session.hold != nil
+            if canHold, held {
+                accessibilityAction(named: Text("Hold Until \(tomorrow.title)")) { commands.hold(tomorrow.date) }
+                    .accessibilityAction(named: Text("Bring Back Now"), commands.bringBack)
+            } else if canHold {
+                accessibilityAction(named: Text("Hold Until \(tomorrow.title)")) { commands.hold(tomorrow.date) }
+            } else {
+                accessibilityAction(named: Text("Bring Back Now"), commands.bringBack)
+            }
         } else {
             self
         }
