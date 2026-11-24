@@ -540,6 +540,7 @@ private struct HoldSegmentView: View {
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .padding(.leading, 4)
                 .frame(height: 13)
         }

@@ -129,8 +129,12 @@ not conversation messages.
   `airuns-hook`; each config file is backed up once as `*.airuns-backup`.
   Codex hook changes need the user's approval again, so don't change them lightly.
 
-- "Ignore for Now" on a run that waits on you (not on APPROVE): the row stays,
-  in an Ignored section, without counting or reminding, until the run moves on.
+- "Hold until…" (replaces "Ignore for Now" for new actions): a held run leaves
+  Needs you and the count and sits on the On hold line until its time (Today +3 h,
+  a day at 9:00, or Waiting: check back in two days). When due it comes back to
+  Needs you with "Back from hold" and counts until opened; no notification. APPROVE
+  can't be held, and an approval ends a hold. Rows ignored by earlier versions keep
+  their Ignored section and "Stop Ignoring".
 
 ## Privacy
 
