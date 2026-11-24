@@ -502,6 +502,9 @@ struct SessionFlyout: View {
         if let others = Overlap.sameRepo(Array(model.store.sessions.values))[session.id] {
             rows.append(("Also running here", others.map(\.currentTopicTitle).sorted().joined(separator: ", ")))
         }
+        if let hold = session.hold {
+            rows.append((hold.returnedAt == nil ? "On hold" : "Was on hold", HoldText.status(hold, plan: model.holdPlan)))
+        }
         rows.append(("Started", Self.clock.string(from: session.startedAt)))
         // Only when AI Runs saw the turn start; otherwise the number means nothing.
         if session.needsUser, let since = session.waitingSince, since.timeIntervalSince(session.turnStartedAt) >= 60 {
@@ -515,11 +518,21 @@ struct SessionFlyout: View {
             },
             FlyoutAction(title: "Rename…") { actions.renameSession(session.id) },
         ]
-        if RunText.canIgnore(session) {
-            flyoutActions.insert(FlyoutAction(title: RunText.ignoreTitle(session)) {
-                model.setIgnored(sessionId: session.id, !session.isIgnored)
-            }, at: 1)
+        // Hold replaces "Ignore for Now"; rows ignored by earlier versions keep "Stop Ignoring".
+        var holdActions: [FlyoutAction] = []
+        let commands = HoldDrop.commands(session, model: model, drag: ui.holdDrag)
+        if session.hold != nil {
+            holdActions.append(FlyoutAction(title: "Bring Back Now") { commands.bringBack() })
         }
+        if session.canHold {
+            holdActions.append(FlyoutAction(title: "Hold Until…") { HoldPopUp.show(commands) })
+        }
+        if session.isIgnored {
+            holdActions.append(FlyoutAction(title: "Stop Ignoring") {
+                model.setIgnored(sessionId: session.id, false)
+            })
+        }
+        flyoutActions.insert(contentsOf: holdActions, at: 1)
         // Only for sessions that live in a terminal; desktop and web users never need a command.
         if let bundle = Jumper.bundleId(for: session.terminal), Jumper.terminalBundles.contains(bundle) {
             flyoutActions.append(FlyoutAction(title: "Copy Resume Command") {

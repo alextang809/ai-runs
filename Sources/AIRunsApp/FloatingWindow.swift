@@ -295,6 +295,8 @@ struct FloatingCard: View {
     @State private var showRecent = false
     @State private var revealWatchedID: String?
     @State private var runsHeight: CGFloat = 170
+    /// This window's own drag onto the On hold line.
+    @StateObject private var holdDrag = HoldDragState()
 
     var body: some View {
         FloatingSurface(radius: 20) {
@@ -315,6 +317,7 @@ struct FloatingCard: View {
                 }
             }
             .frame(width: 310)
+            .holdDragSurface(holdDrag, plan: model.holdPlan)
         }
     }
 
@@ -349,10 +352,15 @@ struct FloatingCard: View {
         .modifier(WindowDrag(controller: controller))
     }
 
+    /// "Stop Ignoring", for rows ignored by earlier versions. New rows use Hold.
     private func ignoreAction(for session: Session) -> (() -> Void)? {
-        guard RunText.canIgnore(session) else { return nil }
+        guard session.isIgnored else { return nil }
         let id = session.id
-        return { model.setIgnored(sessionId: id, true) }
+        return { model.setIgnored(sessionId: id, false) }
+    }
+
+    private func drop(_ session: Session, on target: HoldTarget) {
+        HoldDrop.perform(target, session: session, model: model, drag: holdDrag)
     }
 
     @ViewBuilder private var runs: some View {
@@ -410,12 +418,17 @@ struct FloatingCard: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             .frame(height: min(runsHeight, 340))
+            .overlay(alignment: .top) { HoldTopTarget(drag: holdDrag) }
             .task(id: revealWatchedID) {
                 guard let id = revealWatchedID else { return }
                 await Task.yield()
                 guard !Task.isCancelled else { return }
                 scroll.scrollTo(id, anchor: .center)
             }
+        }
+        if !sessions.isEmpty {
+            HoldDock(model: model, drag: holdDrag, held: menu.held, compact: true,
+                     open: { controller.open($0) }, drop: drop)
         }
         ThreadsHint(model: model).padding(.horizontal, 14).padding(.bottom, 9)
     }
@@ -435,7 +448,10 @@ struct FloatingCard: View {
 
     @ViewBuilder private func runRow(_ session: Session) -> some View {
         FloatingRow(session: session, now: model.now,
-                    open: { controller.open(session) },
+                    open: {
+                        guard !holdDrag.consumesClick() else { return }
+                        controller.open(session)
+                    },
                     rename: { controller.rename(session.id) },
                     togglePin: {
                         model.toggleSessionPin(session.id)
@@ -450,13 +466,24 @@ struct FloatingCard: View {
                         }
                     },
                     remove: { model.remove(sessionId: session.id) },
-                    ignore: ignoreAction(for: session))
+                    ignore: ignoreAction(for: session),
+                    hold: HoldDrop.commands(session, model: model, drag: holdDrag))
+            .holdDraggable(session, drag: holdDrag, drop: drop)
         if detailSessionID == session.id {
             VStack(alignment: .leading, spacing: 6) {
                 SessionReplyView(session: session, model: model)
-                Button(Jumper.openLabel(for: session)) { controller.open(session) }
-                    .font(AppTypography.body)
-                    .buttonStyle(.borderless)
+                HStack(spacing: 12) {
+                    Button(Jumper.openLabel(for: session)) { controller.open(session) }
+                        .buttonStyle(.borderless)
+                    if session.canHold {
+                        Menu("Hold Until") {
+                            HoldMenuItems(commands: HoldDrop.commands(session, model: model, drag: holdDrag))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                    }
+                }
+                .font(AppTypography.body)
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 6)
@@ -474,8 +501,10 @@ private struct FloatingRow: View {
     let togglePin: () -> Void
     let details: () -> Void
     let remove: () -> Void
-    /// "Ignore for Now"; nil when this run can't be ignored.
+    /// "Stop Ignoring" for a row ignored by an earlier version; nil otherwise.
     var ignore: (() -> Void)? = nil
+    /// "Hold Until" and "Bring Back Now".
+    var hold: HoldCommands? = nil
     @State private var hovering = false
 
     var body: some View {
@@ -491,6 +520,7 @@ private struct FloatingRow: View {
                     }
                     HStack {
                         StatePill(session: session, now: now)
+                        if session.isBackFromHold, let hold = session.hold { HoldReturnChip(hold: hold) }
                         Spacer(minLength: 0)
                     }
                     if session.isPinned {
@@ -512,19 +542,24 @@ private struct FloatingRow: View {
                     .padding(.trailing, SessionRowControls.width + 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
         }
-        // A waiting run can be set aside right here: it leaves this window and
-        // stays in the panel's Ignored section.
+        // A run that waits on the user can be set aside right here: it moves
+        // to the On hold line and comes back when its time comes.
         .overlay(alignment: .bottomTrailing) {
-            if hovering, let ignore {
-                Button("Ignore", action: ignore)
-                    .buttonStyle(.plain)
-                    .font(AppTypography.section)
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
-                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.3), lineWidth: 1))
-                    .padding(.trailing, 8).padding(.bottom, 5)
-                    .help("Stop counting this until it asks something new")
-                    .accessibilityLabel("Ignore \(session.currentTopicTitle) for now")
+            if hovering, let hold, session.needsUser, session.canHold, !session.isBackFromHold {
+                Menu {
+                    HoldMenuItems(commands: hold)
+                } label: {
+                    Text("Hold").font(AppTypography.section)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .padding(.horizontal, 8).padding(.vertical, 2)
+                .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.3), lineWidth: 1))
+                .padding(.trailing, 8).padding(.bottom, 5)
+                .help("Put this aside until a time you choose")
+                .accessibilityLabel("Hold \(session.currentTopicTitle)")
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -536,11 +571,13 @@ private struct FloatingRow: View {
         .help(RunText.place(session))
         .contextMenu {
             Button("Open", action: open)
-            if let ignore { Button("Ignore for Now", action: ignore) }
+            if let hold { HoldMenuItems(commands: hold) }
+            if let ignore { Button("Stop Ignoring", action: ignore) }
             Button("Rename…", action: rename)
             Button(SessionRowControls.pinTitle(session), action: togglePin)
             Divider()
             Button("Remove from List", action: remove)
         }
+        .holdAccessibilityActions(hold)
     }
 }

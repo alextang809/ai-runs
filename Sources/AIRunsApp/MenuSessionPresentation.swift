@@ -9,10 +9,16 @@ struct MenuSessionPresentation {
     let unknown: [Session]
     let done: [Session]
     let ignored: [Session]
+    /// On hold and not yet due: shown only on the On hold line, soonest first.
+    let held: [Session]
 
     init(sessions: [Session]) {
         needs = sessions.filter(\.needsUser)
-        let others = sessions.filter { !$0.needsUser }
+        held = sessions.filter(\.isHeld).sorted {
+            let a = $0.hold?.until ?? .distantFuture, b = $1.hold?.until ?? .distantFuture
+            return a == b ? $0.id < $1.id : a < b
+        }
+        let others = sessions.filter { !$0.needsUser && !$0.isHeld }
         pinned = others.filter(\.isPinned).sorted {
             $0.pinnedAt == $1.pinnedAt ? $0.id < $1.id : ($0.pinnedAt ?? .distantPast) > ($1.pinnedAt ?? .distantPast)
         }

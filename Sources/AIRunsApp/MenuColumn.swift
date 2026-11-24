@@ -25,9 +25,17 @@ struct MenuColumn: View {
     @ObservedObject var model: AppModel
     @ObservedObject var ui: PanelUIState
     let actions: PanelActions
+    @ObservedObject private var drag: HoldDragState
     @State private var heights: [MenuPart: CGFloat] = [:]
     @State private var showRecent = false
     @State private var revealWatchedID: String?
+
+    init(model: AppModel, ui: PanelUIState, actions: PanelActions) {
+        _model = ObservedObject(wrappedValue: model)
+        _ui = ObservedObject(wrappedValue: ui)
+        self.actions = actions
+        _drag = ObservedObject(wrappedValue: ui.holdDrag)
+    }
 
     private var hasActiveSessions: Bool {
         MenuSessionPresentation(sessions: model.store.ordered()).hasActiveSessions
@@ -61,7 +69,15 @@ struct MenuColumn: View {
                     }
                 }
                 .frame(height: sessionHeight)
+                // "Pin to Top" or "Bring back now" while a row is dragged, over the list.
+                .overlay(alignment: .top) { HoldTopTarget(drag: drag) }
                 VStack(spacing: 0) {
+                    // On hold sits below the list, above the footer, and is part
+                    // of the footer's height budget. Moving it under the numbers
+                    // means moving this one view into the header stack.
+                    if !model.store.sessions.isEmpty {
+                        holdDock
+                    }
                     SeparatorLine()
                     MenuQuickActions(manager: model.accounts,
                                      openAccounts: { actions.showAccounts() },
@@ -77,7 +93,22 @@ struct MenuColumn: View {
             .onPreferenceChange(MenuHeightPreference.self) { updated in
                 if heights != updated { heights = updated }
             }
+            .holdDragSurface(drag, plan: model.holdPlan)
         }
+    }
+
+    private var holdDock: some View {
+        HoldDock(model: model, drag: drag, held: MenuSessionPresentation(sessions: model.store.ordered()).held,
+                 open: { session in
+                     actions.closePanel()
+                     model.open(sessionId: session.id)
+                 },
+                 drop: drop)
+            .onHover { if $0 { ui.hoverOff() } }
+    }
+
+    private func drop(_ session: Session, on target: HoldTarget) {
+        HoldDrop.perform(target, session: session, model: model, drag: drag)
     }
 
     private var header: some View {
@@ -257,20 +288,24 @@ struct MenuColumn: View {
                                ui.cancelHover()
                                model.remove(sessionId: session.id)
                            },
-                           ignore: ignoreAction(for: session)) {
+                           ignore: ignoreAction(for: session),
+                           hold: HoldDrop.commands(session, model: model, drag: drag)) {
+                    guard !drag.consumesClick() else { return }
                     actions.closePanel()
                     model.open(sessionId: session.id)
                 }
+                .holdDraggable(session, drag: drag, drop: drop)
                 .id(session.id)
             }
         }
         .padding(.horizontal, 5)
     }
 
+    /// "Stop Ignoring", for rows ignored by earlier versions. New rows use Hold.
     private func ignoreAction(for session: Session) -> (() -> Void)? {
-        guard RunText.canIgnore(session) else { return nil }
-        let id = session.id, ignored = session.isIgnored
-        return { model.setIgnored(sessionId: id, !ignored) }
+        guard session.isIgnored else { return nil }
+        let id = session.id
+        return { model.setIgnored(sessionId: id, false) }
     }
 
     @ViewBuilder private var bottomMenu: some View {

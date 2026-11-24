@@ -34,6 +34,7 @@ final class AppModel: ObservableObject {
     /// Bartender or the menu bar can leave Finder or Bartender in front.
     private var lastPinnableApp: NSRunningApplication?
     private var activationObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
 
     /// Isolated state for native UI tests; no hooks, observers, or polling start.
     init(testingRoot: URL, store: SessionStore = SessionStore(), board: PinBoard = PinBoard()) {
@@ -53,12 +54,16 @@ final class AppModel: ObservableObject {
         reader = EventLogReader(url: paths.events, offset: cursor?.offset ?? 0)
         store = JSONFile.load(SessionStore.self, from: paths.sessions) ?? SessionStore()
         store.tidy()
+        store.reconcileHolds(now: Date())
         board = JSONFile.load(PinBoard.self, from: paths.pins) ?? PinBoard()
         recoverCodexConversations()
         installHelper()
         upgradeHooks()
         Notifier.shared.open = { [weak self] id in self?.open(sessionId: id) }
-        Notifier.shared.ignore = { [weak self] id in self?.setIgnored(sessionId: id, true) }
+        Notifier.shared.hold = { [weak self] id in
+            guard let self else { return }
+            self.hold(sessionId: id, until: HoldPlan(now: Date()).date(for: .later))
+        }
         Notifier.shared.update(sessions: Array(store.sessions.values))
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -67,6 +72,12 @@ final class AppModel: ObservableObject {
             MainActor.assumeIsolated {
                 if FrontWindowCapture.isPinnable(app) { self?.lastPinnableApp = app }
             }
+        }
+        // Holds that came due while the Mac slept come back as soon as it wakes.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
         }
         if let front = NSWorkspace.shared.frontmostApplication, FrontWindowCapture.isPinnable(front) {
             lastPinnableApp = front
@@ -221,6 +232,7 @@ final class AppModel: ObservableObject {
     private func tick() {
         now = Date()
         var updated = store
+        updated.reconcileHolds(now: now)
         updated.pruneStale(now: now)
         updated.expireSightings(now: now)
         if updated != store {
@@ -502,8 +514,84 @@ final class AppModel: ObservableObject {
 
     func open(sessionId: String) {
         guard let session = store.sessions[sessionId] else { return }
-        Jumper.open(session: session, opened: { [weak self] in self?.markSessionRead(session) },
-                    show: { [weak self] in self?.show($0) })
+        Jumper.open(session: session, opened: { [weak self] in
+            self?.markSessionRead(session)
+            self?.acknowledgeReturn(sessionId)
+        }, show: { [weak self] in self?.show($0) })
+    }
+
+    // MARK: - Hold
+
+    /// Dates for the line and the menus, from the clock and calendar right now.
+    var holdPlan: HoldPlan { HoldPlan(now: Date()) }
+
+    /// Holds a session until `until`, or moves its hold there. A session that
+    /// waits on someone keeps waiting, with its name. Returns false when it
+    /// can't be held (approval, or a time that has passed).
+    @discardableResult
+    func hold(sessionId: String, until: Date) -> Bool {
+        let previous = store.sessions[sessionId]?.hold
+        var updated = store
+        guard updated.reschedule(id: sessionId, until: until, at: Date()) else { return refuseHold(sessionId) }
+        commitHold(updated, sessionId: sessionId, previous: previous)
+        return true
+    }
+
+    /// "Waiting on…": held until the user checks back, by default at 9:00 two days from now.
+    @discardableResult
+    func holdWaiting(sessionId: String) -> Bool {
+        let previous = store.sessions[sessionId]?.hold
+        let until = previous?.isWaiting == true ? previous!.until : holdPlan.date(for: .waiting)
+        var updated = store
+        guard updated.hold(id: sessionId, until: until, waitingOn: previous?.waitingOn ?? "", at: Date()) else {
+            return refuseHold(sessionId)
+        }
+        commitHold(updated, sessionId: sessionId, previous: previous)
+        return true
+    }
+
+    func setWaitingName(sessionId: String, _ name: String) {
+        guard store.sessions[sessionId]?.hold?.isWaiting == true,
+              store.sessions[sessionId]?.hold?.waitingOn != name else { return }
+        store.setWaitingName(id: sessionId, name)
+        saveSessions()
+    }
+
+    /// "Bring back now".
+    func bringBack(sessionId: String) {
+        guard let previous = store.sessions[sessionId]?.hold else { return }
+        store.bringBack(id: sessionId)
+        saveSessions()
+        show("Back in your list") { [weak self] in self?.restoreHold(previous, sessionId: sessionId) }
+    }
+
+    private func acknowledgeReturn(_ sessionId: String) {
+        guard store.sessions[sessionId]?.isBackFromHold == true else { return }
+        store.acknowledgeReturn(id: sessionId)
+        saveSessions()
+    }
+
+    private func commitHold(_ updated: SessionStore, sessionId: String, previous: SessionHold?) {
+        store = updated
+        saveSessions()
+        guard let hold = store.sessions[sessionId]?.hold else { return }
+        let text = hold.isWaiting ? "Waiting · check back \(holdPlan.when(hold.until))" : "On hold · \(holdPlan.backText(hold.until))"
+        show(text) { [weak self] in self?.restoreHold(previous, sessionId: sessionId) }
+    }
+
+    private func restoreHold(_ previous: SessionHold?, sessionId: String) {
+        if let previous {
+            store.hold(id: sessionId, until: max(previous.until, Date().addingTimeInterval(60)),
+                       waitingOn: previous.waitingOn, at: Date())
+        } else {
+            store.bringBack(id: sessionId)
+        }
+        saveSessions()
+    }
+
+    private func refuseHold(_ sessionId: String) -> Bool {
+        if store.sessions[sessionId]?.canHold == false { show("Approvals can’t wait. Answer it first.") }
+        return false
     }
 
     func resolve(sessionId: String) {

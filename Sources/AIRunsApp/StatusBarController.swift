@@ -224,6 +224,8 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
             if event.keyCode == 53 { // Escape
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    // Escape first cancels a drag, then closes details, then the panel.
+                    if self.ui.holdDrag.cancel() { return }
                     if !self.ui.closeExplicitDetails() { self.closePanel() }
                 }
                 return nil
@@ -402,7 +404,19 @@ final class PanelUIState: ObservableObject {
     @Published var addingNote = false
     @Published var draft = ""
     @Published var boardVisible = false
+    /// The drag onto the On hold line in this panel.
+    let holdDrag = HoldDragState()
+    /// Hover details stay put while a row is dragged.
+    private var hoverSuspended = false
     private var clearWork: DispatchWorkItem?
+
+    init() {
+        holdDrag.onActiveChange = { [weak self] active in
+            guard let self else { return }
+            if active { self.cancelHover() }
+            self.hoverSuspended = active
+        }
+    }
 
     private var switchWork: DispatchWorkItem?
 
@@ -410,7 +424,7 @@ final class PanelUIState: ObservableObject {
     /// moment, so passing over rows on the way to a button doesn't flip the
     /// details back and forth.
     func hoverOn(_ target: Target) {
-        guard explicitDetails == nil else { return }
+        guard explicitDetails == nil, !hoverSuspended else { return }
         clearWork?.cancel()
         switchWork?.cancel()
         guard hover != target else { return }
@@ -465,6 +479,8 @@ final class PanelUIState: ObservableObject {
 
     func reset() {
         expandedNextCardID = nil
+        holdDrag.cancel()
+        holdDrag.editingWaitingID = nil
         cancelHover()
         addingNote = false
         draft = ""

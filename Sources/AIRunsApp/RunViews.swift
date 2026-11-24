@@ -18,8 +18,10 @@ struct SessionRow: View {
     let togglePin: () -> Void
     let details: () -> Void
     let remove: () -> Void
-    /// "Ignore for Now" or "Stop Ignoring"; nil when this run can't be ignored.
+    /// "Stop Ignoring" for a row ignored by an earlier version; nil otherwise.
     var ignore: (() -> Void)? = nil
+    /// "Hold Until" and "Bring Back Now".
+    var hold: HoldCommands? = nil
     let open: () -> Void
 
     private var key: PanelUIState.Target { .session(session.id) }
@@ -42,6 +44,7 @@ struct SessionRow: View {
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         StatePill(session: session, now: now)
+                        if session.isBackFromHold, let hold = session.hold { HoldReturnChip(hold: hold) }
                         if session.hasUnreadReply { UnreadReplyLabel() }
                         Spacer(minLength: 0)
                     }
@@ -86,6 +89,7 @@ struct SessionRow: View {
         }
         .contextMenu {
             Button("Open", action: open)
+            if let hold { HoldMenuItems(commands: hold) }
             if let ignore { Button(RunText.ignoreTitle(session), action: ignore) }
             Button("Rename…", action: rename)
             Button(SessionRowControls.pinTitle(session), action: togglePin)
@@ -98,8 +102,10 @@ struct SessionRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
         .accessibilityAction(named: Text(SessionRowControls.pinTitle(session)), togglePin)
+        .holdAccessibilityActions(hold)
         .accessibilityLabel("\(session.currentTopicTitle), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(workDuration.map { ". Observed working time, \($0)" } ?? "")\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
-        .accessibilityValue(session.hasUnreadReply ? "New reply" : "")
+        .accessibilityValue([session.hasUnreadReply ? "New reply" : nil,
+                             session.isBackFromHold ? session.hold?.returnText : nil].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
         .overlay(alignment: .topTrailing) {
             SessionRowControls(session: session, togglePin: togglePin, details: details)
