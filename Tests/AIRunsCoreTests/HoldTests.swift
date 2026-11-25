@@ -256,16 +256,45 @@ final class HoldTests: XCTestCase {
 
     func testPresetsOnATuesday() {
         let plan = HoldPlan(now: date(2026, 11, 24, 13, 40), calendar: calendar) // Tuesday
-        XCTAssertEqual(plan.date(for: .later), date(2026, 11, 24, 16, 40))
+        XCTAssertEqual(plan.date(for: .later), date(2026, 11, 24, 17), "4:40 PM rounds up to the half hour")
         XCTAssertEqual(plan.date(for: .tomorrow), date(2026, 11, 25, 9))
         XCTAssertEqual(plan.date(for: .week), date(2026, 11, 27, 9))
         XCTAssertEqual(plan.date(for: .waiting), date(2026, 11, 26, 9))
         XCTAssertEqual(plan.segments.map(\.label), ["Today", "Wed", "Thu", "Fri", "Mon"])
         XCTAssertEqual(plan.segments.last?.isNextWeek, true)
         XCTAssertEqual(plan.segments[2].dropDate, date(2026, 11, 26, 9))
-        XCTAssertEqual(plan.title(for: .later), "Today 4:40 PM")
-        XCTAssertEqual(plan.title(for: .week), "Fri 9:00 AM")
-        XCTAssertEqual(plan.backText(date(2026, 11, 26, 9)), "Back Thu 9:00 AM")
+        XCTAssertEqual(plan.title(for: .later), "Today 5:00 PM")
+        XCTAssertEqual(plan.title(for: .tomorrow), "Tomorrow")
+        XCTAssertEqual(plan.title(for: .week), "Fri")
+        XCTAssertEqual(plan.title(for: .waiting), "Waiting on… · check back Thu")
+        XCTAssertEqual(plan.backText(date(2026, 11, 26, 9)), "Back Thu", "A day, not a false 9:00")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 26, 9)), "Thu")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 24, 17)), "5:00 PM")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 25, 1, 30)), "Wed 1:30 AM", "An unusual time on a later day keeps its time")
+    }
+
+    func testTodayRoundsUpToTheHalfHour() {
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 10), calendar: calendar).laterToday, date(2026, 11, 24, 13))
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 10, 1), calendar: calendar).laterToday, date(2026, 11, 24, 13, 30))
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 10, 30), calendar: calendar).laterToday, date(2026, 11, 24, 13, 30))
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 10, 31), calendar: calendar).laterToday, date(2026, 11, 24, 14))
+    }
+
+    func testComputedDatesSkipTheWeekend() {
+        let friday = HoldPlan(now: date(2026, 11, 27, 10), calendar: calendar)
+        XCTAssertEqual(friday.date(for: .tomorrow), date(2026, 11, 30, 9))
+        XCTAssertEqual(friday.title(for: .tomorrow), "Mon")
+        XCTAssertEqual(friday.presets, [.later, .tomorrow], "Monday is offered once")
+        let thursday = HoldPlan(now: date(2026, 11, 26, 10), calendar: calendar)
+        XCTAssertEqual(thursday.date(for: .waiting), date(2026, 11, 30, 9))
+        XCTAssertEqual(thursday.date(for: .tomorrow), date(2026, 11, 27, 9))
+        XCTAssertEqual(thursday.presets, [.later, .tomorrow, .week])
+        let saturday = HoldPlan(now: date(2026, 11, 28, 10), calendar: calendar)
+        XCTAssertEqual(saturday.date(for: .tomorrow), date(2026, 11, 30, 9))
+        XCTAssertEqual(saturday.presets, [.later, .tomorrow])
+        let sunday = HoldPlan(now: date(2026, 11, 29, 10), calendar: calendar)
+        XCTAssertEqual(sunday.date(for: .tomorrow), date(2026, 11, 30, 9))
+        XCTAssertEqual(sunday.date(for: .week), date(2026, 12, 4, 9))
     }
 
     func testThursdayWeekPresetMovesToMonday() {
@@ -310,17 +339,17 @@ final class HoldTests: XCTestCase {
     }
 
     func testWeekendDatesAreNeverReadAsMonday() {
+        // Held on a Saturday by an earlier version, or by a rule that later changed.
         let plan = HoldPlan(now: date(2026, 11, 27, 10), calendar: calendar) // Friday
-        let saturday = plan.date(for: .tomorrow)
-        XCTAssertEqual(saturday, date(2026, 11, 28, 9))
+        let saturday = date(2026, 11, 28, 9)
         XCTAssertEqual(plan.segment(for: saturday).label, "Mon")
         XCTAssertFalse(plan.isOnLabelledDay(saturday))
-        XCTAssertEqual(plan.returnText(saturday), "Sat 9:00 AM")
+        XCTAssertEqual(plan.returnText(saturday), "Sat")
         let monday = date(2026, 11, 30, 9)
         XCTAssertTrue(plan.isOnLabelledDay(monday))
-        XCTAssertEqual(plan.returnText(monday), "9:00 AM")
+        XCTAssertEqual(plan.returnText(monday), "Mon")
         XCTAssertEqual(plan.returnText(date(2026, 11, 27, 13)), "1:00 PM")
-        XCTAssertEqual(plan.returnText(date(2026, 12, 8, 9)), "Tue 8 Dec 9:00 AM")
+        XCTAssertEqual(plan.returnText(date(2026, 12, 8, 9)), "Tue 8 Dec")
     }
 
     func testHeldTimeIsNotTimeTheAgentWaitedOnTheUser() {
@@ -377,25 +406,28 @@ final class HoldTests: XCTestCase {
 
     func testSegmentsForDatesPastTheLine() {
         let plan = HoldPlan(now: date(2026, 11, 26, 10), calendar: calendar) // Thursday
-        // Waiting from Thursday checks back on Saturday, which sits on Monday's stretch.
-        let saturday = plan.date(for: .waiting)
-        XCTAssertEqual(saturday, date(2026, 11, 28, 9))
-        XCTAssertEqual(plan.segment(for: saturday).label, "Mon")
+        // Waiting from Thursday checks back on Monday, not on the Saturday in between.
+        XCTAssertEqual(plan.segment(for: plan.date(for: .waiting)).label, "Mon")
+        XCTAssertTrue(plan.isOnLabelledDay(plan.date(for: .waiting)))
         XCTAssertEqual(plan.segment(for: plan.now.addingTimeInterval(-3600)).label, "Today")
         let later = date(2026, 12, 8, 9)
         XCTAssertTrue(plan.isBeyondLine(later))
-        XCTAssertEqual(plan.when(later), "Tue 8 Dec 9:00 AM")
+        XCTAssertEqual(plan.when(later), "Tue 8 Dec")
     }
 
     func testDaylightSavingChanges() {
-        // US clocks go back on 2026-11-01 and forward on 2026-03-08.
+        // US clocks go back on 2026-11-01 and forward on 2026-03-08 (both Sundays).
         let fallBack = HoldPlan(now: date(2026, 10, 31, 20), calendar: calendar)
-        XCTAssertEqual(local(fallBack.date(for: .tomorrow)).hour, 9)
-        XCTAssertEqual(local(fallBack.date(for: .tomorrow)).day, 1)
+        XCTAssertEqual(local(fallBack.morning(daysAhead: 1)).hour, 9)
+        XCTAssertEqual(local(fallBack.morning(daysAhead: 1)).day, 1)
+        XCTAssertEqual(local(fallBack.date(for: .tomorrow)).day, 2, "Saturday's Tomorrow is Monday")
         let springForward = HoldPlan(now: date(2026, 3, 7, 20), calendar: calendar)
-        XCTAssertEqual(local(springForward.date(for: .tomorrow)).hour, 9)
+        XCTAssertEqual(local(springForward.morning(daysAhead: 1)).hour, 9)
         XCTAssertEqual(local(springForward.date(for: .waiting)).day, 9)
         XCTAssertEqual(springForward.daysAhead(of: springForward.date(for: .waiting)), 2)
+        let midday = HoldPlan(now: date(2026, 3, 8, 10, 10), calendar: calendar)
+        XCTAssertEqual(local(midday.laterToday!).hour, 13)
+        XCTAssertEqual(local(midday.laterToday!).minute, 30)
     }
 
     func testTimeZoneDecidesTheDay() {

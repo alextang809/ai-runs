@@ -527,7 +527,7 @@ private struct FloatingRow: View {
                     }
                     HStack {
                         StatePill(session: session, now: now)
-                        if session.isBackFromHold, let hold = session.hold { HoldReturnChip(hold: hold) }
+                        if session.isBackFromHold, let hold = session.hold { HoldReturnChip(hold: hold, compact: true) }
                         Spacer(minLength: 0)
                     }
                     if session.isPinned {

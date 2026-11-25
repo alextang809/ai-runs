@@ -194,7 +194,7 @@ enum HoldText {
         }
     }
 
-    /// "On hold until Thu 9:00 AM", "Waiting on Li · check back Thu 9:00 AM".
+    /// "On hold until Thu", "Waiting on Li · check back Thu".
     static func status(_ hold: SessionHold, plan: HoldPlan) -> String {
         if hold.isWaiting {
             return "Waiting on \(hold.waitingName ?? "someone") · check back \(plan.when(hold.until))"
@@ -310,13 +310,21 @@ final class ClosureMenuItem: NSMenuItem {
 /// "Check back with Li", outlined. Goes away when the user opens it.
 struct HoldReturnChip: View {
     let hold: SessionHold
+    /// The floating window: "Back" or the name only, so the pill and chip fit one line.
+    var compact = false
+
+    private var text: String {
+        guard compact else { return hold.returnText }
+        return hold.isWaiting ? (hold.waitingName ?? "Check back") : "Back"
+    }
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: hold.isWaiting ? "person" : "clock")
-                .font(.system(size: 9, weight: .semibold))
-            Text(hold.returnText).font(AppTypography.badge).lineLimit(1)
+                .font(AppTypography.badge.weight(.semibold))
+            Text(text).font(AppTypography.badge).lineLimit(1)
         }
+        .help(hold.returnText)
         .foregroundStyle(.primary)
         .padding(.horizontal, 6)
         .padding(.vertical, 1.5)
@@ -475,7 +483,7 @@ struct HoldDock: View {
     /// what just happened here, with Undo, or else how to use the line.
     private var header: some View {
         HStack(spacing: 5) {
-            Image(systemName: "clock").font(.system(size: 10, weight: .medium))
+            Image(systemName: "clock").font(AppTypography.section)
             Text("On hold").font(AppTypography.section)
             if !held.isEmpty { Text("\(held.count)").font(AppTypography.elapsed) }
             Spacer(minLength: 8)
@@ -490,7 +498,8 @@ struct HoldDock: View {
                         .font(AppTypography.section.weight(.semibold))
                         .foregroundStyle(.primary)
                 }
-            } else if !drag.isActive {
+            } else if held.isEmpty, !drag.isActive {
+                // Once something is held the line explains itself; the hint would be noise.
                 Text(HoldText.hint)
                     .font(AppTypography.section)
                     .lineLimit(1)
@@ -512,13 +521,22 @@ private struct HoldLine: View {
     let compact: Bool
     let waitingTapped: () -> Void
 
-    static let height: CGFloat = 42
+    /// The axis and the day names; a third row only when some day has
+    /// something to say under its name (Today's time, a name, a weekend day).
+    static let twoRows: CGFloat = 32
+    static let threeRows: CGFloat = 47
     /// The floating window needs drop targets at least this wide.
     static let minimumDay: CGFloat = 40
 
     var body: some View {
         let segments = plan.segments
-        let cap: CGFloat = compact ? 44 : 50
+        // Waiting is used less than a day, so it takes no more than one.
+        let cap: CGFloat = compact ? 40 : 44
+        // Not tied to the drag, so the line never changes height under the pointer.
+        let showsSub = segments.contains { segment in
+            !HoldSegmentView.sub(segment, plan: plan,
+                                 items: held.filter { HoldDock.days($0, plan) == segment.daysAhead }).isEmpty
+        }
         GeometryReader { proxy in
             let available = max(1, proxy.size.width - cap - 4)
             let others = CGFloat(segments.count - 1)
@@ -529,23 +547,24 @@ private struct HoldLine: View {
             HStack(spacing: 0) {
                 ForEach(segments) { segment in
                     HoldSegmentView(drag: drag, segment: segment, plan: plan,
-                                    items: held.filter { HoldDock.days($0, plan) == segment.daysAhead })
+                                    items: held.filter { HoldDock.days($0, plan) == segment.daysAhead },
+                                    showsSub: showsSub)
                         .frame(width: segment.isToday ? unit * todayWeight : unit)
                 }
                 Spacer(minLength: 4)
                 waitingCap.frame(width: cap)
             }
         }
-        .frame(height: Self.height)
+        .frame(height: showsSub ? Self.threeRows : Self.twoRows)
     }
 
     private var waitingCap: some View {
         let hot = drag.hovered == .waiting
         let count = held.filter { $0.hold?.isWaiting == true }.count
-        return VStack(spacing: 2) {
-            Image(systemName: count > 0 ? "person.fill" : "person").font(.system(size: 11, weight: .medium))
-                .frame(height: 16)
-            Text("Waiting").font(.system(size: compact ? 10 : 10.5, weight: count > 0 ? .semibold : .regular))
+        return VStack(spacing: 1) {
+            Image(systemName: count > 0 ? "person.fill" : "person").font(AppTypography.section)
+                .frame(height: 14)
+            Text("Waiting").font(AppTypography.badge.weight(count > 0 ? .semibold : .regular))
         }
         .foregroundStyle(drag.isActive || count > 0 ? Color.primary : .secondary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -567,6 +586,7 @@ private struct HoldSegmentView: View {
     let segment: HoldPlan.Segment
     let plan: HoldPlan
     let items: [Session]
+    let showsSub: Bool
 
     private var isOpen: Bool { drag.openSegment == segment.daysAhead && !items.isEmpty }
     private var hot: Bool { drag.hovered == .segment(segment.daysAhead) }
@@ -577,17 +597,21 @@ private struct HoldSegmentView: View {
         VStack(alignment: .leading, spacing: 1) {
             axis.frame(height: 14)
             Text(segment.label)
-                .font(.system(size: 11, weight: items.isEmpty ? .regular : .semibold))
+                .font(AppTypography.section.weight(items.isEmpty ? .regular : .semibold))
                 .foregroundStyle(items.isEmpty ? Color.secondary : Color.primary)
                 .lineLimit(1)
                 .padding(.leading, 4)
-            Text(sub)
-                .font(.system(size: 10).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .padding(.leading, 4)
-                .frame(height: 13)
+                .frame(height: 14)
+            if showsSub {
+                // Blank while the day is open: its tray rows say the same thing.
+                Text(isOpen ? "" : (drag.isActive && closed ? "too late" : Self.sub(segment, plan: plan, items: items)))
+                    .font(AppTypography.badge.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.leading, 4)
+                    .frame(height: 14)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 8).fill(fill))
@@ -619,17 +643,16 @@ private struct HoldSegmentView: View {
         return drag.isActive ? Color.primary.opacity(0.04) : .clear
     }
 
-    /// Under the label, whether or not the tray is open: who it waits on, or
-    /// when the first one is back. A date that isn't this stretch's own day
-    /// (a Saturday before Monday) names its day.
-    private var sub: String {
-        if drag.isActive, closed { return "too late" }
-        let names = items.compactMap(\.hold).filter(\.isWaiting).map { $0.waitingName ?? "someone" }
+    /// Under the label: who it waits on, Today's first return time, or the
+    /// real day of a date that isn't this stretch's own (a Saturday before
+    /// Monday). Empty for an ordinary day: the label already says it.
+    static func sub(_ segment: HoldPlan.Segment, plan: HoldPlan, items: [Session]) -> String {
+        let names = items.compactMap(\.hold).filter(\.isWaiting).compactMap(\.waitingName)
         if !names.isEmpty { return names.joined(separator: ", ") }
         guard let first = items.first?.hold?.until else { return "" }
         if segment.isToday { return plan.time(first) }
-        if !plan.isOnLabelledDay(first) {
-            return plan.isBeyondLine(first) ? "and later" : "from \(plan.dayName(daysAhead: plan.daysAhead(of: first)))"
+        if let other = items.compactMap(\.hold?.until).first(where: { !plan.isOnLabelledDay($0) }) {
+            return plan.isBeyondLine(other) ? "and later" : plan.dayName(daysAhead: plan.daysAhead(of: other))
         }
         return ""
     }
@@ -660,7 +683,7 @@ private struct HoldSegmentView: View {
                 }
                 if items.count > 4 {
                     Text("+\(items.count - 4)")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(AppTypography.badge.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .position(x: width - 8, y: mid - 9)
                 }
@@ -783,7 +806,8 @@ private struct HoldTrayRow: View {
                 .frame(width: 20, height: 20)
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.currentTopicTitle)
-                    .font(compact ? AppTypography.body.weight(.semibold) : AppTypography.rowTitle)
+                    // Quieter than a row that needs the user: it was put aside on purpose.
+                    .font(AppTypography.body)
                     .lineLimit(1)
                 detail(hold)
             }
@@ -815,7 +839,7 @@ private struct HoldTrayRow: View {
         let state = HoldText.sentence(RunText.stateWord(session, now: model.now))
         HStack(spacing: 4) {
             if hold.isWaiting {
-                Image(systemName: "person").font(.system(size: 9, weight: .medium))
+                Image(systemName: "person").font(AppTypography.badge)
                 if editing {
                     TextField("who or what", text: $name)
                         .textFieldStyle(.plain)
@@ -850,7 +874,7 @@ private struct HoldTrayRow: View {
         .foregroundStyle(.secondary)
     }
 
-    /// "3:00 PM ⌄", "Sat 9:00 AM ⌄": when it comes back, and the menu to change that.
+    /// "5:00 PM ⌄", "Thu ⌄", "Sat ⌄": when it comes back, and the menu to change that.
     private func whenMenu(_ hold: SessionHold) -> some View {
         Menu {
             HoldMenuItems(commands: commands, flat: true)
@@ -858,11 +882,15 @@ private struct HoldTrayRow: View {
                 Button("Name Who It Waits On…") { drag.editingWaitingID = session.id }
             }
         } label: {
-            HStack(spacing: 3) {
-                Text(plan.returnText(hold.until)).font(AppTypography.elapsed)
-                Image(systemName: "chevron.down").font(.system(size: 7.5, weight: .semibold))
+            HStack(spacing: 4) {
+                Text(plan.returnText(hold.until)).font(AppTypography.metadata.monospacedDigit())
+                Image(systemName: "chevron.down").font(AppTypography.badge.weight(.semibold))
             }
             .foregroundStyle(.primary)
+            // The row's one control: a target at least 24 pt high.
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(Capsule().fill(Color.primary.opacity(0.06)))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)

@@ -62,11 +62,11 @@ public struct HoldPlan: Sendable {
     public enum Preset: String, CaseIterable, Sendable {
         /// Later today: three hours from now, while that is still this evening.
         case later
-        /// 9:00 tomorrow.
+        /// The next working morning: tomorrow, or Monday after a Friday.
         case tomorrow
         /// 9:00 Friday, or next Monday when Friday is less than two days away.
         case week
-        /// Waiting on someone: check back at 9:00 two days from now.
+        /// Waiting on someone: check back two days from now, Monday if that is a weekend.
         case waiting
     }
 
@@ -81,19 +81,46 @@ public struct HoldPlan: Sendable {
     public func date(for preset: Preset) -> Date {
         switch preset {
         case .later: return laterToday ?? morning(daysAhead: 1)
-        case .tomorrow: return morning(daysAhead: 1)
+        case .tomorrow: return workingMorning(daysAhead: 1)
         case .week:
             let toFriday = 6 - weekday(now) // Friday is 6 in a Gregorian weekday
             return morning(daysAhead: toFriday >= 2 ? toFriday : daysToNextMonday)
-        case .waiting: return morning(daysAhead: 2)
+        case .waiting: return workingMorning(daysAhead: 2)
         }
+    }
+
+    /// Like `morning(daysAhead:)`, but a Saturday or Sunday moves to Monday.
+    /// The line has no weekend, so the dates AI Runs picks itself don't either.
+    public func workingMorning(daysAhead days: Int) -> Date {
+        let today = calendar.startOfDay(for: now)
+        let day = calendar.date(byAdding: .day, value: days, to: today) ?? today
+        let extra: Int
+        switch weekday(day) {
+        case 7: extra = 2 // Saturday
+        case 1: extra = 1 // Sunday
+        default: extra = 0
+        }
+        return morning(daysAhead: days + extra)
+    }
+
+    /// A hold on a day rather than at a time: 9:00 on a later day. Shown as
+    /// the day alone ("Thu"), since "9:00" would be false precision.
+    public func isDayHold(_ date: Date) -> Bool {
+        guard daysAhead(of: date) > 0 else { return false }
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        return parts.hour == Self.morningHour && parts.minute == 0
     }
 
     /// When "Today" brings a session back: three hours from now. In the
     /// evening that would be at night, so it is 21:00 instead while that is at
     /// least an hour away, and after that there is no "Today" any more.
     public var laterToday: Date? {
-        let candidate = now.addingTimeInterval(Self.laterInterval)
+        // On the half hour, so it reads as a time someone chose ("5:00 PM", not "4:47 PM").
+        let raw = now.addingTimeInterval(Self.laterInterval)
+        let candidate = calendar.dateInterval(of: .hour, for: raw).map { hour -> Date in
+            let half = hour.start.addingTimeInterval(1800)
+            return raw <= hour.start ? hour.start : (raw <= half ? half : hour.end)
+        } ?? raw
         let today = calendar.startOfDay(for: now)
         if let latest = calendar.date(bySettingHour: Self.latestHour, minute: 0, second: 0, of: today),
            calendar.isDate(candidate, inSameDayAs: now), candidate <= latest {
@@ -107,7 +134,12 @@ public struct HoldPlan: Sendable {
     }
 
     /// The quick choices on offer right now. "Today" is left out late in the evening.
-    public var presets: [Preset] { laterToday == nil ? [.tomorrow, .week] : [.later, .tomorrow, .week] }
+    /// The same date is offered once (after a Friday, Tomorrow and the week's choice are both Monday).
+    public var presets: [Preset] {
+        var seen: Set<Date> = []
+        return (laterToday == nil ? [Preset.tomorrow, .week] : [.later, .tomorrow, .week])
+            .filter { seen.insert(date(for: $0)).inserted }
+    }
 
     /// 9:00 on the day `days` after today, never in the past.
     public func morning(daysAhead days: Int) -> Date {
@@ -180,17 +212,17 @@ public struct HoldPlan: Sendable {
         max(0, daysAhead(of: date)) == segment(for: date).daysAhead
     }
 
-    /// When a held session comes back, as said under its stretch and in its
-    /// tray: just the time on the stretch's own day ("3:00 PM"), otherwise the
-    /// day too ("Sat 9:00 AM", "Tue 8 Dec 9:00 AM"), so a weekend date is never
-    /// read as Monday.
+    /// When a held session comes back, as its tray row says it: the time today
+    /// ("5:00 PM"), the day for a later day ("Thu", "Sat", "Tue 8 Dec"), and
+    /// the day and time for anything else ("Wed 1:30 AM"). A weekend date is
+    /// never read as Monday.
     public func returnText(_ date: Date) -> String {
-        if isOnLabelledDay(date) { return time(date) }
         let days = daysAhead(of: date)
+        if days <= 0 { return time(date) }
         let day = isBeyondLine(date)
             ? Self.formatter("EEE d MMM", calendar: calendar).string(from: date)
             : dayName(daysAhead: days)
-        return "\(day) \(time(date))"
+        return isDayHold(date) ? day : "\(day) \(time(date))"
     }
 
     // MARK: Words
@@ -211,7 +243,8 @@ public struct HoldPlan: Sendable {
         return formatter.string(from: date)
     }
 
-    /// "today 3:00 PM", "tomorrow 9:00 AM", "Thu 9:00 AM", "Mon 1 Dec 9:00 AM" (past the line).
+    /// "today 3:00 PM", "tomorrow", "Thu", "Tue 8 Dec" (past the line). A
+    /// later day shows its time only when it isn't the usual morning.
     public func when(_ date: Date) -> String {
         let days = daysAhead(of: date)
         let day: String
@@ -223,10 +256,10 @@ public struct HoldPlan: Sendable {
                 ? Self.formatter("EEE d MMM", calendar: calendar).string(from: date)
                 : dayName(daysAhead: days)
         }
-        return "\(day) \(time(date))"
+        return isDayHold(date) ? day : "\(day) \(time(date))"
     }
 
-    /// What a drag chip or menu item says: "Back today 3:00 PM", "Back Thu 9:00 AM".
+    /// What a drag chip or menu item says: "Back today 3:00 PM", "Back Thu".
     public func backText(_ date: Date) -> String { "Back \(when(date))" }
 
     /// A menu item for a preset: "Today", "Tomorrow", "Fri", "Waiting on…", with the time it means.
