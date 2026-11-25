@@ -254,6 +254,20 @@ final class HoldTests: XCTestCase {
 
     // MARK: Dates
 
+    func testTimesOfDayInTheTimeMenu() {
+        let plan = HoldPlan(now: date(2026, 11, 24, 13, 40), calendar: calendar) // Tuesday
+        let thursday = plan.times(onDayOf: date(2026, 11, 26, 9))
+        XCTAssertEqual(thursday.map(\.label), ["Morning · 9:00 AM", "Afternoon · 1:00 PM", "Evening · 5:00 PM"])
+        XCTAssertEqual(thursday.map(\.date), [date(2026, 11, 26, 9), date(2026, 11, 26, 13), date(2026, 11, 26, 17)])
+        XCTAssertEqual(plan.times(onDayOf: date(2026, 11, 24, 17)).map(\.date), [date(2026, 11, 24, 17)],
+                       "Today offers only what is still ahead")
+        XCTAssertEqual(plan.dayLabel(date(2026, 11, 24, 17)), "Today")
+        XCTAssertEqual(plan.dayLabel(date(2026, 11, 26, 13)), "Thu")
+        XCTAssertEqual(plan.dayLabel(date(2026, 12, 8, 9)), "Tue 8 Dec")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 26, 13)), "Thu 1:00 PM", "A half day keeps its time")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 26, 9)), "Thu")
+    }
+
     func testPresetsOnATuesday() {
         let plan = HoldPlan(now: date(2026, 11, 24, 13, 40), calendar: calendar) // Tuesday
         XCTAssertEqual(plan.date(for: .later), date(2026, 11, 24, 17), "4:40 PM rounds up to the half hour")

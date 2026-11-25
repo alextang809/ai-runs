@@ -570,7 +570,7 @@ private struct FloatingRow: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            SessionRowControls(session: session, togglePin: togglePin, details: details)
+            SessionRowControls(session: session, visible: hovering, togglePin: togglePin, details: details)
                 .padding(.trailing, 8)
                 .padding(.top, 4)
         }

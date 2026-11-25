@@ -307,7 +307,7 @@ final class ClosureMenuItem: NSMenuItem {
 // MARK: - Row additions
 
 /// Next to the state pill of a session that came back: "Back from hold" or
-/// "Check back with Li", outlined. Goes away when the user opens it.
+/// "Check back with Li", as a plain label. Goes away when the user opens it.
 struct HoldReturnChip: View {
     let hold: SessionHold
     /// The floating window: "Back" or the name only, so the pill and chip fit one line.
@@ -321,14 +321,12 @@ struct HoldReturnChip: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: hold.isWaiting ? "person" : "clock")
-                .font(AppTypography.badge.weight(.semibold))
-            Text(text).font(AppTypography.badge).lineLimit(1)
+                .font(AppTypography.badge)
+            Text(text).font(AppTypography.section).lineLimit(1)
         }
         .help(hold.returnText)
         .foregroundStyle(.primary)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 1.5)
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.45), lineWidth: 1))
+        // A label like "New reply", not a second box next to the state pill.
         .fixedSize()
         .accessibilityElement(children: .combine)
     }
@@ -878,6 +876,17 @@ private struct HoldTrayRow: View {
     private func whenMenu(_ hold: SessionHold) -> some View {
         Menu {
             HoldMenuItems(commands: commands, flat: true)
+            // A time on the day it is on: the line itself only knows days.
+            let times = plan.times(onDayOf: hold.until)
+            if !times.isEmpty {
+                Divider()
+                Section(plan.dayLabel(hold.until)) {
+                    ForEach(times, id: \.date) { time in
+                        Button(time.label) { commands.hold(time.date) }
+                            .disabled(time.date == hold.until)
+                    }
+                }
+            }
             if hold.isWaiting {
                 Button("Name Who It Waits On…") { drag.editingWaitingID = session.id }
             }

@@ -43,7 +43,7 @@ final class RunActivityTextTests: XCTestCase {
         XCTAssertEqual(RunText.rowActivity(session, now: now),
                        "Waiting on 1 background task · continues by itself")
         session.state = .unknown
-        XCTAssertEqual(RunText.rowActivity(session, now: now), "State unavailable")
+        XCTAssertEqual(RunText.rowActivity(session, now: now), "", "The pill already says STATE UNKNOWN")
     }
 
     func testNativeAndScheduledEvidenceOutranksOldPlan() throws {
@@ -54,6 +54,6 @@ final class RunActivityTextTests: XCTestCase {
                        "Scheduled a wake-up · continues by itself")
         session.native = NativeSighting(state: .working, seenAt: now, stale: true)
         XCTAssertEqual(RunText.rowActivity(session, now: now),
-                       "State unknown · show its Threads list in Claude to refresh")
+                       "Show Threads in Claude to refresh")
     }
 }

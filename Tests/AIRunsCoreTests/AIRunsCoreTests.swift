@@ -187,6 +187,10 @@ final class SessionStoreTests: XCTestCase {
 final class TextUtilsTests: XCTestCase {
     func testTitleCleansPrompt() {
         XCTAssertEqual(TextUtils.title(fromPrompt: "  Fix   the\nbug ```let x = 1``` please "), "Fix the bug please")
+        XCTAssertEqual(TextUtils.plainText("Push `notes.md` so **both** see [it](https://example.com)"),
+                       "Push notes.md so both see it")
+        XCTAssertEqual(TextUtils.plainText("## Done\n> fixed snake_case in *.swift"), "Done\nfixed snake_case in *.swift")
+        XCTAssertEqual(TextUtils.preview(of: "Found **about 12 GB** in `~/Library`"), "Found about 12 GB in ~/Library")
         XCTAssertEqual(TextUtils.title(fromPrompt: "   "), "Untitled session")
         let long = String(repeating: "word ", count: 30)
         XCTAssertTrue(TextUtils.title(fromPrompt: long).hasSuffix("…"))

@@ -510,6 +510,10 @@ struct SessionFlyout: View {
         if session.needsUser, let since = session.waitingSince, since.timeIntervalSince(session.turnStartedAt) >= 60 {
             rows.append(("Last turn took", TextUtils.duration(since.timeIntervalSince(session.turnStartedAt))))
         }
+        // Moved here from the row: one duration per row is enough there.
+        if let worked = model.store.completedWorkDuration(for: session.id) {
+            rows.append(("Observed working", RunText.workDuration(worked)))
+        }
 
         var flyoutActions = [
             FlyoutAction(title: Jumper.openLabel(for: session), shortcut: "↩") {

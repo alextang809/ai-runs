@@ -18,7 +18,11 @@ struct SessionTopic: Codable, Equatable, Sendable {
 }
 
 extension Session {
-    public var currentTopicTitle: String { titleIsCustom == true ? title : topic?.title ?? title }
+    /// A name the user chose is shown as typed; a title taken from a prompt
+    /// loses its Markdown marks ("Push `notes.md`" reads "Push notes.md").
+    public var currentTopicTitle: String {
+        titleIsCustom == true ? title : TextUtils.plainText(topic?.title ?? title)
+    }
     /// Pair this with the stable session identity when saving a point to return to.
     public var currentTopicID: String {
         if let topic, let start = topic.startedAt {

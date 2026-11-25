@@ -48,22 +48,22 @@ struct SessionRow: View {
                         if session.hasUnreadReply { UnreadReplyLabel() }
                         Spacer(minLength: 0)
                     }
+                    // Nothing to add to STATE UNKNOWN when Claude never showed it: no third line.
+                    if !(session.state == .unknown && session.native == nil && session.nativeView == nil) {
                     HStack(spacing: 10) {
                         LiveLine(session: session, now: now)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        if let workDuration {
-                            Text("Worked \(workDuration)")
-                                .font(AppTypography.elapsed)
-                                .foregroundStyle(.secondary)
-                                .fixedSize()
-                                .help("Observed working time in the last completed turn")
-                        } else if !session.isDone && session.state != .needsApproval && session.outcome != .needsInput {
+                        // Only a line with something on it: an empty one says nothing.
+                        // The last turn's working time is in the details.
+                        if !lifeline.isEmpty, session.state != .unknown,
+                           !session.isDone && session.state != .needsApproval && session.outcome != .needsInput {
                             LifelineView(spans: lifeline, now: now, color: Palette.tool(session.tool))
                                 .frame(width: LifelineView.compactWidth, height: 9)
                                 .help("Observed activity over the last hour")
                         }
                     }
                     .padding(.top, 2)
+                    }
                     if let warning = RunText.alsoHere(alsoHere) {
                         Label(warning, systemImage: "arrow.triangle.branch")
                             .font(AppTypography.metadata)
@@ -102,13 +102,14 @@ struct SessionRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
         .accessibilityAction(named: Text(SessionRowControls.pinTitle(session)), togglePin)
+        .accessibilityAction(named: "Details", details)
         .holdAccessibilityActions(hold)
         .accessibilityLabel("\(session.currentTopicTitle), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(workDuration.map { ". Observed working time, \($0)" } ?? "")\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
         .accessibilityValue([session.hasUnreadReply ? "New reply" : nil,
                              session.isBackFromHold ? session.hold?.returnText : nil].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
         .overlay(alignment: .topTrailing) {
-            SessionRowControls(session: session, togglePin: togglePin, details: details)
+            SessionRowControls(session: session, visible: highlighted, togglePin: togglePin, details: details)
                 .padding(.trailing, 8)
                 .padding(.top, 4)
         }
@@ -125,9 +126,12 @@ struct UnreadReplyLabel: View {
     }
 }
 
+/// ··· and the pin. Drawn only while the pointer is on the row (right-click
+/// has the same commands); they stay in the accessibility tree.
 struct SessionRowControls: View {
     static let width: CGFloat = 50
     let session: Session
+    var visible = true
     let togglePin: () -> Void
     let details: () -> Void
 
@@ -136,6 +140,8 @@ struct SessionRowControls: View {
             control("ellipsis", label: "Details", id: "details", action: details)
             control(session.isPinned ? "pin.fill" : "pin", label: Self.pinTitle(session), id: "pin", action: togglePin)
         }
+        .opacity(visible ? 1 : 0)
+        .allowsHitTesting(visible)
     }
 
     private func control(_ image: String, label: String, id: String, action: @escaping () -> Void) -> some View {
@@ -184,8 +190,10 @@ enum RunText {
     }
 
     /// "Seen in Claude just now", "Seen in Claude 3m ago".
-    static func seen(_ native: NativeSighting, now: Date) -> String {
-        let age = now.timeIntervalSince(native.seenAt)
+    static func seen(_ native: NativeSighting, now: Date) -> String { seen(at: native.seenAt, now: now) }
+
+    static func seen(at seenAt: Date, now: Date) -> String {
+        let age = max(0, now.timeIntervalSince(seenAt))
         return age < 60 ? "Seen in Claude just now" : "Seen in Claude \(TextUtils.duration(age)) ago"
     }
 
@@ -231,17 +239,15 @@ enum RunText {
     static func liveText(_ session: Session, now: Date) -> String {
         if let native = session.native {
             if session.nativeView?.isOpen == true {
-                let age = max(0, now.timeIntervalSince(native.seenAt))
-                let when = age < 60 ? "just now" : "\(TextUtils.duration(age)) ago"
-                return "Open in Claude · state \(native.stale == true ? "last seen" : "seen") \(when)"
+                return "Open in Claude"
             }
-            return native.stale == true ? "State unknown · show its Threads list in Claude to refresh" : seen(native, now: now)
+            // The pill already says LAST SEEN or the state; this line says what to do or when.
+            return native.stale == true ? "Show Threads in Claude to refresh" : seen(native, now: now)
         }
         if session.state == .unknown {
-            guard let view = session.nativeView else { return "State unavailable" }
-            let age = max(0, now.timeIntervalSince(view.seenAt))
-            let when = age < 60 ? "just now" : "\(TextUtils.duration(age)) ago"
-            return view.isOpen ? "Open in Claude · seen \(when)" : "Seen in Claude \(when) · state unavailable"
+            // The pill already says STATE UNKNOWN.
+            guard let view = session.nativeView else { return "" }
+            return view.isOpen ? "Open in Claude" : seen(at: view.seenAt, now: now)
         }
         let detail = stateDetail(session, now: now)
         return session.nativeView?.isOpen == true ? "Open in Claude · \(detail)" : detail

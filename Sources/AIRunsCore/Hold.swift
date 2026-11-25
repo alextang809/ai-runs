@@ -225,6 +225,30 @@ public struct HoldPlan: Sendable {
         return isDayHold(date) ? day : "\(day) \(time(date))"
     }
 
+    /// A time of day on the day a hold is on, offered in its time menu.
+    public struct DayTime: Equatable, Sendable {
+        public var label: String
+        public var date: Date
+    }
+
+    /// Morning, Afternoon and Evening on `date`'s day, the ones still ahead.
+    /// The line only knows days; this is how a hold gets a half day.
+    public func times(onDayOf date: Date) -> [DayTime] {
+        let day = calendar.startOfDay(for: date)
+        return [("Morning", Self.morningHour), ("Afternoon", 13), ("Evening", 17)].compactMap { label, hour in
+            guard let at = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: day),
+                  at >= now.addingTimeInterval(Self.minimumLead) else { return nil }
+            return DayTime(label: "\(label) · \(time(at))", date: at)
+        }
+    }
+
+    /// "Today", "Thu", "Tue 8 Dec": the day a date is on, as a menu heading.
+    public func dayLabel(_ date: Date) -> String {
+        let days = daysAhead(of: date)
+        if days <= 0 { return "Today" }
+        return isBeyondLine(date) ? Self.formatter("EEE d MMM", calendar: calendar).string(from: date) : dayName(daysAhead: days)
+    }
+
     // MARK: Words
 
     /// "Mon", "Tue"…
