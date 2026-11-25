@@ -140,7 +140,8 @@ struct SessionRowControls: View {
             control("ellipsis", label: "Details", id: "details", action: details)
             control(session.isPinned ? "pin.fill" : "pin", label: Self.pinTitle(session), id: "pin", action: togglePin)
         }
-        .opacity(visible ? 1 : 0)
+        // Clear glyphs rather than zero opacity: a transparent view would leave
+        // the accessibility tree, and VoiceOver still needs these.
         .allowsHitTesting(visible)
     }
 
@@ -148,7 +149,7 @@ struct SessionRowControls: View {
         Button(action: action) {
             Image(systemName: image)
                 .font(AppTypography.controlIcon)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(visible ? Color.secondary : Color.clear)
                 .frame(width: Self.width / 2, height: 23)
                 .contentShape(Rectangle())
         }
