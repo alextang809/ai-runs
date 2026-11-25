@@ -38,6 +38,18 @@ git checkout --detach origin/claude/hold-timeline
 
 Picture: `dock-round11.png` (Alex has it).
 
+**Rows, after Alex saw round 9 again (`1507d60`)**
+- `···` and the pin are drawn only while the pointer is on a row (panel and float). They stay
+  in the accessibility tree and in the right-click menu.
+- "Back from hold" is a plain label like "New reply", not an outlined chip.
+- The third line no longer repeats the pill: "Show Threads in Claude to refresh", "Open in
+  Claude", "Seen in Claude 3m ago"; no third line for STATE UNKNOWN that Claude never showed.
+- No lifeline when nothing was observed. "Worked 3m" moved to the details ("Observed working").
+- `**`, backticks, `[text](url)`, heading and quote markers are stripped from prompt titles and
+  reply previews. A name the user typed is shown as typed.
+- A held row's time menu has a section for its day: Morning 9:00, Afternoon 1:00 PM,
+  Evening 5:00 PM (only the ones still ahead). The line still only knows days.
+
 ## Test, and report what you saw
 
 1. Hold something for Thu and nothing else: the line is two rows; the tray says "Thu ⌄";
@@ -49,6 +61,9 @@ Picture: `dock-round11.png` (Alex has it).
 4. Is 12 pt in the tray too quiet next to the 13.5 pt rows above? Is the capsule clear as a
    control in light and dark?
 5. Float at its narrowest: day labels, Waiting, the compact chip next to a pill.
+6. Rows: hover in and out quickly; do the controls flicker or steal the click that opens the
+   row? Is a pinned row in Needs you still recognisable without the pin?
+7. Hold for Thu, pick Afternoon: the tray says "Thu 1:00 PM" and the dot moves.
 
 ## Write back
 
