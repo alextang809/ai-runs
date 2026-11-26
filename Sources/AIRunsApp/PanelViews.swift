@@ -341,6 +341,8 @@ struct FlyoutBody: View {
     let subtitle: String
     var chip: (text: String, color: Color?)? = nil
     var rows: [(String, String)] = []
+    /// A run's observed activity over the last hour; nil when nothing was seen.
+    var lifeline: (spans: [ActivitySpan], color: Color, now: Date)? = nil
     var noteLabel: String? = nil
     var note: String? = nil
     var quoteLabel: String? = nil
@@ -377,6 +379,22 @@ struct FlyoutBody: View {
                         }
                     }
                     .padding(.horizontal, 14).padding(.bottom, 8)
+                }
+
+                if let lifeline {
+                    VStack(spacing: 3) {
+                        LifelineView(spans: lifeline.spans, now: lifeline.now, color: lifeline.color)
+                            .frame(height: 9)
+                        HStack {
+                            Text("−\(Int(SessionStore.lifelineWindow / 60))m")
+                            Spacer(minLength: 0)
+                            Text("Now")
+                        }
+                        .font(AppTypography.section)
+                        .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14).padding(.bottom, 8)
+                    .accessibilityHidden(true)
                 }
 
                 if let note {
@@ -549,11 +567,14 @@ struct SessionFlyout: View {
             model.remove(sessionId: session.id)
         })
 
+        // Moved here from the row: a tile has one line for what the run is doing.
+        let spans = session.isDone || session.state == .unknown ? [] : model.store.lifeline(for: session.id, now: now)
         return FlyoutBody(
             title: session.currentTopicTitle,
             subtitle: subtitle,
             chip: chip,
             rows: rows,
+            lifeline: spans.isEmpty ? nil : (spans: spans, color: Palette.tool(session.tool), now: now),
             noteLabel: session.approvalDetail == nil ? nil : "Wants to run",
             note: session.approvalDetail,
             sessionReply: session.currentTopicReply == nil ? nil : SessionReplyView(session: session, model: model),

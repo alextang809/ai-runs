@@ -73,11 +73,13 @@ struct MenuColumn: View {
                 .overlay(alignment: .top) { HoldTopTarget(drag: drag) }
                 VStack(spacing: 0) {
                     // On hold sits below the list, above the footer, and is part
-                    // of the footer's height budget. Moving it under the numbers
-                    // means moving this one view into the header stack.
+                    // of the footer's height budget: one more tile, the quietest.
                     if !model.store.sessions.isEmpty {
-                        SeparatorLine()
                         holdDock
+                            .padding(.vertical, 2)
+                            .glassTile(.quiet)
+                            .padding(.horizontal, 8)
+                            .padding(.top, 5)
                     }
                     SeparatorLine()
                     MenuQuickActions(manager: model.accounts,
@@ -196,7 +198,7 @@ struct MenuColumn: View {
             }
             .onHover { if $0 { ui.cancelHover() } }
             if !menu.working.isEmpty {
-                SectionLabel(title: "In progress", count: menu.working.count, showsTimeScale: true)
+                SectionLabel(title: "In progress", count: menu.working.count)
                 rows(menu.working, overlap: overlap)
             }
             if !menu.hasActiveSessions {
@@ -273,7 +275,6 @@ struct MenuColumn: View {
         VStack(spacing: 0) {
             ForEach(sessions) { session in
                 SessionRow(session: session,
-                           lifeline: session.isDone ? [] : model.store.lifeline(for: session.id, now: model.now),
                            completedWorkDuration: model.store.completedWorkDuration(for: session.id), now: model.now,
                            alsoHere: (overlap[session.id] ?? []).map(\.currentTopicTitle), ui: ui,
                            rename: { actions.renameSession(session.id) },

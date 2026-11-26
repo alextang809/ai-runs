@@ -4,11 +4,15 @@ import SwiftUI
 
 // MARK: - Session row
 
-/// A run's host icon, title, state, readable activity and observed history.
-/// Source/project metadata stays in the details; repository overlap stays visible.
+/// One run as a glass tile: the host icon on the left, the title over one
+/// line of what it is doing, and the state over its time on the right, so the
+/// tile balances on its own. Source/project metadata stays in the details;
+/// repository overlap stays visible as a third line.
 struct SessionRow: View {
+    static let minHeight: CGFloat = 54
+    /// Wide enough for the hover controls, so nothing moves when they appear.
+    static let stateColumn: CGFloat = 72
     let session: Session
-    let lifeline: [ActivitySpan]
     let completedWorkDuration: TimeInterval?
     let now: Date
     /// Titles of other runs working in the same repository right now.
@@ -28,65 +32,52 @@ struct SessionRow: View {
     private var highlighted: Bool { ui.hover == key }
     private var workDuration: String? { completedWorkDuration.map(RunText.workDuration) }
 
+    /// Brighter glass for what is live (needs the user, or working in the
+    /// foreground); thinner for what is finished, parked or unknown.
+    private var level: GlassTile.Level {
+        if session.needsUser { return .raised }
+        if session.state == .working, session.native?.stale != true,
+           !session.isInBackground, !session.isQuiet(now: now) { return .raised }
+        return .quiet
+    }
+
     var body: some View {
         Button(action: open) {
-            HStack(alignment: .top, spacing: 10) {
-                AppIcon(bundleId: Jumper.hostBundle(for: session))
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(session.currentTopicTitle)
-                            .font(AppTypography.rowTitle)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        // Always reserved, so nothing moves when the × appears.
-                        Color.clear.frame(width: RemoveZone.slot + SessionRowControls.width, height: 18)
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        StatePill(session: session, now: now)
-                        if session.isBackFromHold, let hold = session.hold { HoldReturnChip(hold: hold) }
-                        if session.hasUnreadReply { UnreadReplyLabel() }
-                        Spacer(minLength: 0)
-                    }
-                    // Nothing to add to STATE UNKNOWN when Claude never showed it: no third line.
-                    if !(session.state == .unknown && session.native == nil && session.nativeView == nil) {
-                    HStack(spacing: 10) {
-                        LiveLine(session: session, now: now)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        // Only a line with something on it: an empty one says nothing.
-                        // The last turn's working time is in the details.
-                        if !lifeline.isEmpty, session.state != .unknown,
-                           !session.isDone && session.state != .needsApproval && session.outcome != .needsInput {
-                            LifelineView(spans: lifeline, now: now, color: Palette.tool(session.tool))
-                                .frame(width: LifelineView.compactWidth, height: 9)
-                                .help("Observed activity over the last hour")
-                        }
-                    }
-                    .padding(.top, 2)
-                    }
+            HStack(alignment: .top, spacing: 11) {
+                AppIcon(bundleId: Jumper.hostBundle(for: session), size: 30)
+                    .padding(.top, 3)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(session.currentTopicTitle)
+                        .font(AppTypography.rowTitle.weight(.medium))
+                        .lineLimit(1)
+                    secondLine
                     if let warning = RunText.alsoHere(alsoHere) {
                         Label(warning, systemImage: "arrow.triangle.branch")
                             .font(AppTypography.metadata)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                            .padding(.top, 1)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 5) {
+                    StatePill(session: session, now: now, showsTime: false)
+                    // The hover controls take this line's place.
+                    Text(RunText.stateTime(session, now: now))
+                        .font(AppTypography.elapsed)
+                        .foregroundStyle(.secondary)
+                        .frame(height: 14)
+                        .opacity(highlighted ? 0 : 1)
+                }
+                .frame(minWidth: Self.stateColumn, alignment: .trailing)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(minHeight: Self.minHeight)
+            .glassTile(level, hovered: highlighted)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .topTrailing) {
-            if highlighted {
-                RemoveZone(label: "Remove \(session.currentTopicTitle) from the list", action: remove)
-                    .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
-                    .padding(.trailing, SessionRowControls.width + 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
-            }
-        }
         .contextMenu {
             Button("Open", action: open)
             if let hold { HoldMenuItems(commands: hold) }
@@ -108,11 +99,42 @@ struct SessionRow: View {
         .accessibilityValue([session.hasUnreadReply ? "New reply" : nil,
                              session.isBackFromHold ? session.hold?.returnText : nil].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
+        // ×, ··· and the pin, under the state pill where the time was.
         .overlay(alignment: .topTrailing) {
-            SessionRowControls(session: session, visible: highlighted, togglePin: togglePin, details: details)
-                .padding(.trailing, 8)
-                .padding(.top, 4)
+            HStack(spacing: 0) {
+                if highlighted {
+                    RemoveButton(label: "Remove \(session.currentTopicTitle) from the list", action: remove)
+                }
+                SessionRowControls(session: session, visible: highlighted, togglePin: togglePin, details: details)
+            }
+            // A near miss between the controls does nothing instead of opening the session.
+            .background { if highlighted { Color.clear.contentShape(Rectangle()).onTapGesture {} } }
+            .padding(.trailing, 6)
+            .padding(.top, 25)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+    }
+
+    /// "Back from hold · …", "New reply · …", then what it is doing or said.
+    private var secondLine: some View {
+        HStack(spacing: 4) {
+            if session.isBackFromHold, let hold = session.hold {
+                Text(hold.returnText).fontWeight(.medium).lineLimit(1).fixedSize()
+                Text("·").foregroundStyle(.secondary)
+            }
+            if session.hasUnreadReply {
+                Text("New reply").fontWeight(.medium).lineLimit(1).fixedSize()
+                Text("·").foregroundStyle(.secondary)
+            }
+            if RunText.rowActivity(session, now: now).isEmpty {
+                // Nothing known beyond the pill: say where it lives.
+                Text(RunText.place(session)).foregroundStyle(.secondary).lineLimit(1)
+            } else {
+                LiveLine(session: session, now: now)
+            }
+        }
+        .font(AppTypography.body)
     }
 }
 
@@ -307,6 +329,8 @@ enum RunText {
 struct StatePill: View {
     let session: Session
     let now: Date
+    /// False on a tile, where the time sits under the pill.
+    var showsTime = true
 
     var body: some View {
         let tint = Palette.tool(session.tool)
@@ -336,7 +360,7 @@ struct StatePill: View {
             Text(RunText.stateWord(session, now: now))
                 .font(AppTypography.badge)
                 .tracking(0.2)
-            if session.state != .unknown {
+            if showsTime, session.state != .unknown {
                 Text(RunText.stateTime(session, now: now))
                     .font(AppTypography.elapsed)
             }
@@ -435,7 +459,6 @@ struct LifelineView: View {
     /// The tool's colour: solid while working, faded and outlined while it
     /// waits on the user, grey in the background.
     let color: Color
-    static let compactWidth: CGFloat = 104
 
     var body: some View {
         Canvas { context, size in
@@ -475,6 +498,7 @@ struct LifelineView: View {
 /// The icon of the app the session runs in, as the Mac draws it.
 struct AppIcon: View {
     let bundleId: String?
+    var size: CGFloat = 26
 
     @MainActor private static var cache: [String: NSImage] = [:]
 
@@ -498,7 +522,7 @@ struct AppIcon: View {
                     .padding(2)
             }
         }
-        .frame(width: 26, height: 26)
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
 }
@@ -618,41 +642,17 @@ private struct Histogram: View {
 struct SectionLabel: View {
     let title: String
     let count: Int
-    var showsTimeScale = false
 
     var body: some View {
         HStack(spacing: 5) {
             Text(title).font(AppTypography.section)
             Text("\(count)").font(AppTypography.elapsed)
-            if showsTimeScale {
-                Spacer(minLength: 4)
-                LifelineTimeScale()
-            }
         }
         .foregroundStyle(.secondary)
-        .padding(.leading, 14)
+        .padding(.leading, 16)
         .padding(.trailing, 13)
         .padding(.top, 7)
-        .padding(.bottom, 1)
-    }
-}
-
-private struct LifelineTimeScale: View {
-    private let minutes = Int(SessionStore.lifelineWindow / 60)
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Text("−\(minutes)m")
-            Spacer(minLength: 0)
-            Image(systemName: "arrow.right")
-                .accessibilityHidden(true)
-            Spacer(minLength: 0)
-            Text("Now")
-        }
-        .font(AppTypography.section)
-        .frame(width: LifelineView.compactWidth)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Activity timeline, \(minutes) minutes ago to now")
+        .padding(.bottom, 2)
     }
 }
 

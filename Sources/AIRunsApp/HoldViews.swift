@@ -407,7 +407,8 @@ struct HoldTopTarget: View {
 /// session, the Waiting end cap, and a tray for the day that is open. Shared
 /// by the menu panel and the floating window; it sits outside the scrolled
 /// list. It is the quietest part of the panel: a section label and a grey
-/// line, no card. Only what the user arranged (the dots) carries colour.
+/// line (in the menu panel, on the thinnest tile). Only what the user
+/// arranged (the dots) carries colour.
 struct HoldDock: View {
     @ObservedObject var model: AppModel
     @ObservedObject var drag: HoldDragState
@@ -417,7 +418,8 @@ struct HoldDock: View {
     let open: (Session) -> Void
     let drop: (Session, HoldTarget) -> Void
 
-    private var inset: CGFloat { compact ? 10 : 14 }
+    /// In the menu panel the dock is a tile, so both insets count from a tile's edge.
+    private var inset: CGFloat { 10 }
 
     var body: some View {
         let plan = model.holdPlan
