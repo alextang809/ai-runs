@@ -86,9 +86,9 @@ notification when the reply is ready, and a click brings back that exact tab.
 
 ## Can't see the icon?
 
-The icon is an arc over a dot, a musical *fermata*: "hold until the conductor gives
-the cue". Arc alone: nothing running. Arc and dot: runs in progress. Amber dot and a
-number: that many are holding for you.
+The icon is a small toaster: put a run in, do something else, and it pops when it
+is ready for you. Toaster alone: nothing running. A slice down in the slot: runs in
+progress. An amber slice popped up and a number: that many are holding for you.
 
 <p align="center"><img src="docs/menubar.png" width="560" alt="Menu bar icon states and the floating window capsule"></p>
 <p align="center"><sub><i>Illustration.</i></sub></p>
