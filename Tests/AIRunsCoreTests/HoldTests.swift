@@ -1,0 +1,456 @@
+import XCTest
+@testable import AIRunsCore
+
+final class HoldTests: XCTestCase {
+    private var calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        return calendar
+    }()
+
+    private func date(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 12, _ min: Int = 0) -> Date {
+        calendar.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!
+    }
+
+    private func local(_ date: Date) -> DateComponents {
+        calendar.dateComponents([.year, .month, .day, .hour, .minute, .weekday], from: date)
+    }
+
+    private let key = Session.key(tool: .codex, sessionId: "demo")
+
+    private func store(at now: Date, waiting: Bool = true) -> SessionStore {
+        var store = SessionStore()
+        store.apply(AgentEvent(tool: .codex, kind: .promptStart, sessionId: "demo", at: now.addingTimeInterval(-120),
+                               prompt: "Draft the sample report", transcriptPath: "/test/demo.jsonl"))
+        if waiting {
+            store.apply(AgentEvent(tool: .codex, kind: .turnEnd, sessionId: "demo", at: now.addingTimeInterval(-60),
+                                   lastMessage: "Which template should I use?"))
+        }
+        return store
+    }
+
+    // MARK: Store
+
+    func testHoldLeavesNeedsYouAndComesBackWhenDue() throws {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        XCTAssertEqual(store.needsUserCount, 1)
+
+        XCTAssertTrue(store.hold(id: key, until: now.addingTimeInterval(3600), at: now))
+        XCTAssertEqual(store.needsUserCount, 0)
+        XCTAssertEqual(store.held.map(\.id), [key])
+        XCTAssertTrue(try XCTUnwrap(store.sessions[key]).isHeld)
+
+        XCTAssertFalse(store.reconcileHolds(now: now.addingTimeInterval(1800)))
+        XCTAssertEqual(store.needsUserCount, 0)
+
+        XCTAssertTrue(store.reconcileHolds(now: now.addingTimeInterval(3601)))
+        let back = try XCTUnwrap(store.sessions[key])
+        XCTAssertTrue(back.isBackFromHold)
+        XCTAssertTrue(back.needsUser)
+        XCTAssertEqual(store.needsUserCount, 1)
+        XCTAssertTrue(store.held.isEmpty)
+        XCTAssertEqual(back.hold?.returnText, "Back from hold")
+
+        store.acknowledgeReturn(id: key)
+        XCTAssertNil(store.sessions[key]?.hold)
+        XCTAssertEqual(store.needsUserCount, 1, "Its real state still needs the user")
+    }
+
+    func testMissedDeadlineComesBackOnTheNextLook() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.hold(id: key, until: now.addingTimeInterval(600), at: now)
+        // The Mac slept for two days.
+        XCTAssertTrue(store.reconcileHolds(now: now.addingTimeInterval(2 * 86400)))
+        XCTAssertEqual(store.needsUserCount, 1)
+    }
+
+    func testDueHoldCountsEvenWhenTheSessionIsDoneOrWorking() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now, waiting: false)
+        XCTAssertEqual(store.needsUserCount, 0)
+        XCTAssertTrue(store.hold(id: key, until: now.addingTimeInterval(60), at: now))
+        store.reconcileHolds(now: now.addingTimeInterval(61))
+        XCTAssertEqual(store.sessions[key]?.state, .working)
+        XCTAssertEqual(store.needsUserCount, 1)
+    }
+
+    func testOpeningBeforeDueKeepsTheHold() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.hold(id: key, until: now.addingTimeInterval(3600), at: now)
+        store.acknowledgeReturn(id: key)
+        XCTAssertTrue(store.sessions[key]?.isHeld == true)
+    }
+
+    func testApprovalCannotBeHeldAndEndsAHold() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now, waiting: false)
+        store.apply(AgentEvent(tool: .codex, kind: .needsApproval, sessionId: "demo", at: now, approvalDetail: "make test"))
+        XCTAssertFalse(store.hold(id: key, until: now.addingTimeInterval(3600), at: now))
+        XCTAssertNil(store.sessions[key]?.hold)
+
+        store.apply(AgentEvent(tool: .codex, kind: .toolActivity, sessionId: "demo", at: now.addingTimeInterval(5)))
+        XCTAssertTrue(store.hold(id: key, until: now.addingTimeInterval(3600), at: now.addingTimeInterval(6)))
+        store.apply(AgentEvent(tool: .codex, kind: .needsApproval, sessionId: "demo", at: now.addingTimeInterval(10),
+                               approvalDetail: "make release"))
+        XCTAssertNil(store.sessions[key]?.hold)
+        XCTAssertEqual(store.needsUserCount, 1)
+    }
+
+    func testDoneAndNewRepliesStayHeld() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.hold(id: key, until: now.addingTimeInterval(3600), at: now)
+        store.apply(AgentEvent(tool: .codex, kind: .promptStart, sessionId: "demo", at: now.addingTimeInterval(10),
+                               prompt: "continue", transcriptPath: "/test/demo.jsonl", drivenBy: "coordinator"))
+        store.apply(AgentEvent(tool: .codex, kind: .turnEnd, sessionId: "demo", at: now.addingTimeInterval(20),
+                               lastMessage: "All done. Everything is finished."))
+        XCTAssertTrue(store.sessions[key]?.isHeld == true)
+        XCTAssertEqual(store.needsUserCount, 0)
+        store.apply(AgentEvent(tool: .codex, kind: .question, sessionId: "demo", at: now.addingTimeInterval(30)))
+        XCTAssertTrue(store.sessions[key]?.isHeld == true)
+    }
+
+    func testUserPromptEndsAReturnedHoldOnly() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.hold(id: key, until: now.addingTimeInterval(60), at: now)
+        store.reconcileHolds(now: now.addingTimeInterval(61))
+        store.apply(AgentEvent(tool: .codex, kind: .promptStart, sessionId: "demo", at: now.addingTimeInterval(70),
+                               prompt: "Use the short template", transcriptPath: "/test/demo.jsonl"))
+        XCTAssertNil(store.sessions[key]?.hold)
+    }
+
+    func testHoldSurvivesSessionEndPruningAndReload() throws {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.hold(id: key, until: now.addingTimeInterval(3 * 86400), waitingOn: "  Li ", at: now)
+        store.apply(AgentEvent(tool: .codex, kind: .sessionEnd, sessionId: "demo", at: now.addingTimeInterval(5)))
+        XCTAssertNotNil(store.sessions[key]?.hold)
+        store.pruneStale(now: now.addingTimeInterval(2 * 86400))
+        XCTAssertNotNil(store.sessions[key]?.hold)
+        let reloaded = try JSONDecoder().decode(SessionStore.self, from: JSONEncoder().encode(store))
+        let hold = try XCTUnwrap(reloaded.sessions[key]?.hold)
+        XCTAssertEqual(hold.waitingName, "Li")
+        XCTAssertEqual(hold.returnText, "Check back with Li")
+    }
+
+    func testRemoveCancelsAndUndoRestores() throws {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.hold(id: key, until: now.addingTimeInterval(3600), at: now)
+        let removed = try XCTUnwrap(store.sessions[key])
+        store.dismiss(id: key, at: now)
+        XCTAssertNil(store.sessions[key])
+        store.restore(removed)
+        XCTAssertTrue(store.sessions[key]?.isHeld == true)
+    }
+
+    func testRescheduleKeepsWaitingNameAndBringBackEndsIt() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.hold(id: key, until: now.addingTimeInterval(3600), waitingOn: "", at: now)
+        XCTAssertNil(store.sessions[key]?.hold?.waitingName)
+        XCTAssertEqual(store.sessions[key]?.hold?.returnText, "Check back")
+        store.setWaitingName(id: key, "Sam")
+        store.reschedule(id: key, until: now.addingTimeInterval(7200), at: now)
+        XCTAssertEqual(store.sessions[key]?.hold?.waitingName, "Sam")
+        XCTAssertEqual(store.sessions[key]?.hold?.until, now.addingTimeInterval(7200))
+        store.bringBack(id: key, at: now)
+        XCTAssertNil(store.sessions[key]?.hold)
+        XCTAssertEqual(store.needsUserCount, 1)
+    }
+
+    func testRefusesAPastTime() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        XCTAssertFalse(store.hold(id: key, until: now, at: now))
+        XCTAssertFalse(store.hold(id: key, until: now.addingTimeInterval(-60), at: now))
+    }
+
+    func testHoldReplacesLegacyIgnore() throws {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.setIgnored(id: key, true, at: now)
+        XCTAssertTrue(try XCTUnwrap(store.sessions[key]).isIgnored)
+        store.hold(id: key, until: now.addingTimeInterval(3600), at: now)
+        XCTAssertFalse(try XCTUnwrap(store.sessions[key]).isIgnored)
+        XCTAssertNil(store.sessions[key]?.ignored)
+    }
+
+    func testOldSessionsWithoutHoldStillDecode() throws {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.setIgnored(id: key, true, at: now)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(store)) as? [String: Any])
+        var sessions = try XCTUnwrap(json["sessions"] as? [String: Any])
+        var row = try XCTUnwrap(sessions[key] as? [String: Any])
+        row["hold"] = nil
+        sessions[key] = row
+        json["sessions"] = sessions
+        let decoded = try JSONDecoder().decode(SessionStore.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertTrue(try XCTUnwrap(decoded.sessions[key]).isIgnored)
+        XCTAssertNil(decoded.sessions[key]?.hold)
+    }
+
+    func testThreadRowTakesOverTheHoldOfItsExecutor() {
+        let now = date(2026, 11, 24, 10)
+        var store = SessionStore()
+        store.apply(AgentEvent(tool: .claudeCode, kind: .promptStart, sessionId: "local", at: now, prompt: "Check the export"))
+        store.apply(AgentEvent(tool: .claudeCode, kind: .turnEnd, sessionId: "local", at: now.addingTimeInterval(5),
+                               lastMessage: "Which file?"))
+        let own = Session.key(tool: .claudeCode, sessionId: "local")
+        XCTAssertTrue(store.hold(id: own, until: now.addingTimeInterval(3600), at: now.addingTimeInterval(6)))
+        var wake = AgentEvent(tool: .claudeCode, kind: .promptStart, sessionId: "local", at: now.addingTimeInterval(10),
+                              prompt: "continue", drivenBy: "coordinator")
+        wake.thread = ProjectThread(projectId: "chan_demo", threadId: "cmsg_demo")
+        store.apply(wake)
+        let threadKey = Session.key(tool: .claudeCode, thread: ProjectThread(projectId: "chan_demo", threadId: "cmsg_demo"))
+        XCTAssertNil(store.sessions[own])
+        XCTAssertTrue(store.sessions[threadKey]?.isHeld == true)
+    }
+
+    // MARK: Alerts
+
+    func testHoldWithdrawsAndNeverReannouncesTheSameMoment() throws {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        var planner = AlertPlanner()
+        planner.prime([])
+        let all: Set<AlertKind> = Set(AlertKind.allCases)
+        XCTAssertEqual(planner.changes(in: Array(store.sessions.values), enabled: all, now: now).post.map(\.id), [key])
+
+        store.hold(id: key, until: now.addingTimeInterval(60), at: now)
+        let held = planner.changes(in: Array(store.sessions.values), enabled: all, now: now)
+        XCTAssertTrue(held.post.isEmpty)
+        XCTAssertEqual(held.ended, [key], "The notification and reminder are withdrawn")
+
+        store.reconcileHolds(now: now.addingTimeInterval(61))
+        let due = planner.changes(in: Array(store.sessions.values), enabled: all, now: now.addingTimeInterval(61))
+        XCTAssertTrue(due.post.isEmpty, "Coming back is silent")
+        XCTAssertTrue(due.ended.isEmpty)
+
+        store.acknowledgeReturn(id: key)
+        let opened = planner.changes(in: Array(store.sessions.values), enabled: all, now: now.addingTimeInterval(62))
+        XCTAssertTrue(opened.post.isEmpty, "The same wait is not news after the hold")
+
+        store.apply(AgentEvent(tool: .codex, kind: .question, sessionId: "demo", at: now.addingTimeInterval(90)))
+        let next = planner.changes(in: Array(store.sessions.values), enabled: all, now: now.addingTimeInterval(91))
+        XCTAssertEqual(next.post.map(\.id), [key], "A new moment is announced as usual")
+    }
+
+    func testApprovalOnAHeldSessionAlertsAsUsual() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        var planner = AlertPlanner()
+        store.hold(id: key, until: now.addingTimeInterval(3600), at: now)
+        planner.prime(Array(store.sessions.values), now: now)
+        store.apply(AgentEvent(tool: .codex, kind: .needsApproval, sessionId: "demo", at: now.addingTimeInterval(5)))
+        let changes = planner.changes(in: Array(store.sessions.values), enabled: [.approval], now: now.addingTimeInterval(6))
+        XCTAssertEqual(changes.post.map(\.id), [key])
+    }
+
+    // MARK: Dates
+
+    func testTimesOfDayInTheTimeMenu() {
+        let plan = HoldPlan(now: date(2026, 11, 24, 13, 40), calendar: calendar) // Tuesday
+        let thursday = plan.times(onDayOf: date(2026, 11, 26, 9))
+        XCTAssertEqual(thursday.map(\.label), ["Morning · 9:00 AM", "Afternoon · 1:00 PM", "Evening · 5:00 PM"])
+        XCTAssertEqual(thursday.map(\.date), [date(2026, 11, 26, 9), date(2026, 11, 26, 13), date(2026, 11, 26, 17)])
+        XCTAssertEqual(plan.times(onDayOf: date(2026, 11, 24, 17)).map(\.date), [date(2026, 11, 24, 17)],
+                       "Today offers only what is still ahead")
+        XCTAssertEqual(plan.dayLabel(date(2026, 11, 24, 17)), "Today")
+        XCTAssertEqual(plan.dayLabel(date(2026, 11, 26, 13)), "Thu")
+        XCTAssertEqual(plan.dayLabel(date(2026, 12, 8, 9)), "Tue 8 Dec")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 26, 13)), "Thu 1:00 PM", "A half day keeps its time")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 26, 9)), "Thu")
+    }
+
+    func testPresetsOnATuesday() {
+        let plan = HoldPlan(now: date(2026, 11, 24, 13, 40), calendar: calendar) // Tuesday
+        XCTAssertEqual(plan.date(for: .later), date(2026, 11, 24, 17), "4:40 PM rounds up to the half hour")
+        XCTAssertEqual(plan.date(for: .tomorrow), date(2026, 11, 25, 9))
+        XCTAssertEqual(plan.date(for: .week), date(2026, 11, 27, 9))
+        XCTAssertEqual(plan.date(for: .waiting), date(2026, 11, 26, 9))
+        XCTAssertEqual(plan.segments.map(\.label), ["Today", "Wed", "Thu", "Fri", "Mon"])
+        XCTAssertEqual(plan.segments.last?.isNextWeek, true)
+        XCTAssertEqual(plan.segments[2].dropDate, date(2026, 11, 26, 9))
+        XCTAssertEqual(plan.title(for: .later), "Today 5:00 PM")
+        XCTAssertEqual(plan.title(for: .tomorrow), "Tomorrow")
+        XCTAssertEqual(plan.title(for: .week), "Fri")
+        XCTAssertEqual(plan.title(for: .waiting), "Waiting on… · check back Thu")
+        XCTAssertEqual(plan.backText(date(2026, 11, 26, 9)), "Back Thu", "A day, not a false 9:00")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 26, 9)), "Thu")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 24, 17)), "5:00 PM")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 25, 1, 30)), "Wed 1:30 AM", "An unusual time on a later day keeps its time")
+    }
+
+    func testTodayRoundsUpToTheHalfHour() {
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 10), calendar: calendar).laterToday, date(2026, 11, 24, 13))
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 10, 1), calendar: calendar).laterToday, date(2026, 11, 24, 13, 30))
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 10, 30), calendar: calendar).laterToday, date(2026, 11, 24, 13, 30))
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 10, 31), calendar: calendar).laterToday, date(2026, 11, 24, 14))
+    }
+
+    func testComputedDatesSkipTheWeekend() {
+        let friday = HoldPlan(now: date(2026, 11, 27, 10), calendar: calendar)
+        XCTAssertEqual(friday.date(for: .tomorrow), date(2026, 11, 30, 9))
+        XCTAssertEqual(friday.title(for: .tomorrow), "Mon")
+        XCTAssertEqual(friday.presets, [.later, .tomorrow], "Monday is offered once")
+        let thursday = HoldPlan(now: date(2026, 11, 26, 10), calendar: calendar)
+        XCTAssertEqual(thursday.date(for: .waiting), date(2026, 11, 30, 9))
+        XCTAssertEqual(thursday.date(for: .tomorrow), date(2026, 11, 27, 9))
+        XCTAssertEqual(thursday.presets, [.later, .tomorrow, .week])
+        let saturday = HoldPlan(now: date(2026, 11, 28, 10), calendar: calendar)
+        XCTAssertEqual(saturday.date(for: .tomorrow), date(2026, 11, 30, 9))
+        XCTAssertEqual(saturday.presets, [.later, .tomorrow])
+        let sunday = HoldPlan(now: date(2026, 11, 29, 10), calendar: calendar)
+        XCTAssertEqual(sunday.date(for: .tomorrow), date(2026, 11, 30, 9))
+        XCTAssertEqual(sunday.date(for: .week), date(2026, 12, 4, 9))
+    }
+
+    func testThursdayWeekPresetMovesToMonday() {
+        let plan = HoldPlan(now: date(2026, 11, 26, 10), calendar: calendar) // Thursday
+        XCTAssertEqual(plan.date(for: .week), date(2026, 11, 30, 9))
+        XCTAssertEqual(plan.segments.map(\.label), ["Today", "Fri", "Mon"])
+    }
+
+    func testFridayAndWeekendShowTodayAndMonday() {
+        for day in [27, 28, 29] { // Fri, Sat, Sun
+            let plan = HoldPlan(now: date(2026, 11, day, 10), calendar: calendar)
+            XCTAssertEqual(plan.segments.map(\.label), ["Today", "Mon"], "day \(day)")
+            XCTAssertEqual(plan.segments.last?.dropDate, date(2026, 11, 30, 9))
+        }
+        // Sunday: Friday is five days away.
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 29, 10), calendar: calendar).date(for: .week), date(2026, 12, 4, 9))
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 28, 10), calendar: calendar).date(for: .week), date(2026, 11, 30, 9))
+    }
+
+    func testMondayLineHasTheWholeWeek() {
+        let plan = HoldPlan(now: date(2026, 11, 23, 10), calendar: calendar)
+        XCTAssertEqual(plan.segments.map(\.label), ["Today", "Tue", "Wed", "Thu", "Fri", "Mon"])
+        XCTAssertEqual(plan.segments.last?.daysAhead, 7)
+    }
+
+    func testTodayNeverMeansTheMiddleOfTheNight() {
+        // 6:30 PM: three hours later is 9:30 PM, still this evening.
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 18, 30), calendar: calendar).laterToday, date(2026, 11, 24, 21, 30))
+        // 7:30 PM: three hours later is past 10 PM, so it is 9 PM instead.
+        let evening = HoldPlan(now: date(2026, 11, 24, 19, 30), calendar: calendar)
+        XCTAssertEqual(evening.laterToday, date(2026, 11, 24, 21))
+        XCTAssertEqual(evening.title(for: .later), "Today 9:00 PM")
+        XCTAssertEqual(evening.segments.first?.dropDate, date(2026, 11, 24, 21))
+        // 9:40 PM: there is no Today any more; the line and the menu say so.
+        let late = HoldPlan(now: date(2026, 11, 24, 21, 40), calendar: calendar)
+        XCTAssertNil(late.laterToday)
+        XCTAssertEqual(late.presets, [.tomorrow, .week])
+        XCTAssertEqual(late.segments.first?.label, "Today")
+        XCTAssertNil(late.segments.first?.dropDate)
+        XCTAssertEqual(late.date(for: .later), date(2026, 11, 25, 9), "The notification's Hold falls back to tomorrow morning")
+        XCTAssertEqual(HoldPlan(now: date(2026, 11, 24, 13), calendar: calendar).presets, [.later, .tomorrow, .week])
+    }
+
+    func testWeekendDatesAreNeverReadAsMonday() {
+        // Held on a Saturday by an earlier version, or by a rule that later changed.
+        let plan = HoldPlan(now: date(2026, 11, 27, 10), calendar: calendar) // Friday
+        let saturday = date(2026, 11, 28, 9)
+        XCTAssertEqual(plan.segment(for: saturday).label, "Mon")
+        XCTAssertFalse(plan.isOnLabelledDay(saturday))
+        XCTAssertEqual(plan.returnText(saturday), "Sat")
+        let monday = date(2026, 11, 30, 9)
+        XCTAssertTrue(plan.isOnLabelledDay(monday))
+        XCTAssertEqual(plan.returnText(monday), "Mon")
+        XCTAssertEqual(plan.returnText(date(2026, 11, 27, 13)), "1:00 PM")
+        XCTAssertEqual(plan.returnText(date(2026, 12, 8, 9)), "Tue 8 Dec")
+    }
+
+    func testHeldTimeIsNotTimeTheAgentWaitedOnTheUser() {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        XCTAssertEqual(store.history?[key]?.last?.kind, .waiting)
+        store.hold(id: key, until: now.addingTimeInterval(3600), at: now)
+        XCTAssertEqual(store.history?[key]?.last?.kind, .background)
+        store.reconcileHolds(now: now.addingTimeInterval(3601))
+        XCTAssertEqual(store.history?[key]?.last?.kind, .waiting, "Back in Needs you, the clock runs again")
+    }
+
+    func testUndoRestoresTheOldIgnoreAndThePreviousHold() throws {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.setIgnored(id: key, true, at: now)
+        let before = try XCTUnwrap(store.sessions[key])
+        store.hold(id: key, until: now.addingTimeInterval(3600), at: now)
+        XCTAssertEqual(store.needsUserCount, 0)
+        store.restoreHold(id: key, hold: before.hold, ignored: before.ignored, at: now.addingTimeInterval(5))
+        let restored = try XCTUnwrap(store.sessions[key])
+        XCTAssertTrue(restored.isIgnored)
+        XCTAssertNil(restored.hold)
+        XCTAssertEqual(store.needsUserCount, 0, "Still ignored, so still not counted")
+
+        // Undo of "Bring back now" on a hold that came due meanwhile: it is due, not hidden.
+        store.hold(id: key, until: now.addingTimeInterval(60), at: now.addingTimeInterval(6))
+        let held = try XCTUnwrap(store.sessions[key])
+        store.bringBack(id: key, at: now.addingTimeInterval(7))
+        store.restoreHold(id: key, hold: held.hold, ignored: held.ignored, at: now.addingTimeInterval(120))
+        XCTAssertTrue(store.sessions[key]?.isBackFromHold == true)
+    }
+
+    func testASlowOpenCannotClearANewerHold() throws {
+        let now = date(2026, 11, 24, 10)
+        var store = store(at: now)
+        store.hold(id: key, until: now.addingTimeInterval(60), at: now)
+        store.reconcileHolds(now: now.addingTimeInterval(61))
+        let opened = try XCTUnwrap(store.sessions[key]?.hold)
+        // Before the open finishes the user holds it again and that comes due too.
+        store.hold(id: key, until: now.addingTimeInterval(200), at: now.addingTimeInterval(62))
+        store.reconcileHolds(now: now.addingTimeInterval(201))
+        store.acknowledgeReturn(id: key, of: opened)
+        XCTAssertTrue(store.sessions[key]?.isBackFromHold == true)
+        store.acknowledgeReturn(id: key, of: store.sessions[key]?.hold)
+        XCTAssertNil(store.sessions[key]?.hold)
+    }
+
+    func testJustBeforeMidnightNeverSchedulesIntoThePast() {
+        let plan = HoldPlan(now: date(2026, 11, 24, 23, 59), calendar: calendar)
+        XCTAssertGreaterThan(plan.date(for: .tomorrow), plan.now)
+        XCTAssertEqual(plan.date(for: .tomorrow), date(2026, 11, 25, 9))
+    }
+
+    func testSegmentsForDatesPastTheLine() {
+        let plan = HoldPlan(now: date(2026, 11, 26, 10), calendar: calendar) // Thursday
+        // Waiting from Thursday checks back on Monday, not on the Saturday in between.
+        XCTAssertEqual(plan.segment(for: plan.date(for: .waiting)).label, "Mon")
+        XCTAssertTrue(plan.isOnLabelledDay(plan.date(for: .waiting)))
+        XCTAssertEqual(plan.segment(for: plan.now.addingTimeInterval(-3600)).label, "Today")
+        let later = date(2026, 12, 8, 9)
+        XCTAssertTrue(plan.isBeyondLine(later))
+        XCTAssertEqual(plan.when(later), "Tue 8 Dec")
+    }
+
+    func testDaylightSavingChanges() {
+        // US clocks go back on 2026-11-01 and forward on 2026-03-08 (both Sundays).
+        let fallBack = HoldPlan(now: date(2026, 10, 31, 20), calendar: calendar)
+        XCTAssertEqual(local(fallBack.morning(daysAhead: 1)).hour, 9)
+        XCTAssertEqual(local(fallBack.morning(daysAhead: 1)).day, 1)
+        XCTAssertEqual(local(fallBack.date(for: .tomorrow)).day, 2, "Saturday's Tomorrow is Monday")
+        let springForward = HoldPlan(now: date(2026, 3, 7, 20), calendar: calendar)
+        XCTAssertEqual(local(springForward.morning(daysAhead: 1)).hour, 9)
+        XCTAssertEqual(local(springForward.date(for: .waiting)).day, 9)
+        XCTAssertEqual(springForward.daysAhead(of: springForward.date(for: .waiting)), 2)
+        let midday = HoldPlan(now: date(2026, 3, 8, 10, 10), calendar: calendar)
+        XCTAssertEqual(local(midday.laterToday!).hour, 13)
+        XCTAssertEqual(local(midday.laterToday!).minute, 30)
+    }
+
+    func testTimeZoneDecidesTheDay() {
+        var tokyo = Calendar(identifier: .gregorian)
+        tokyo.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        // Tuesday 22:00 in New York is Wednesday 12:00 in Tokyo.
+        let instant = date(2026, 11, 24, 22)
+        XCTAssertEqual(HoldPlan(now: instant, calendar: calendar).segments.first?.label, "Today")
+        XCTAssertEqual(HoldPlan(now: instant, calendar: calendar).segments.count, 5)
+        XCTAssertEqual(HoldPlan(now: instant, calendar: tokyo).segments.map(\.label), ["Today", "Thu", "Fri", "Mon"])
+    }
+}

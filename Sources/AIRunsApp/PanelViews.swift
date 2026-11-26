@@ -341,10 +341,13 @@ struct FlyoutBody: View {
     let subtitle: String
     var chip: (text: String, color: Color?)? = nil
     var rows: [(String, String)] = []
+    /// A run's observed activity over the last hour; nil when nothing was seen.
+    var lifeline: (spans: [ActivitySpan], color: Color, now: Date)? = nil
     var noteLabel: String? = nil
     var note: String? = nil
     var quoteLabel: String? = nil
     var quote: String? = nil
+    var sessionReply: SessionReplyView? = nil
     let actions: [FlyoutAction]
 
     var body: some View {
@@ -378,6 +381,22 @@ struct FlyoutBody: View {
                     .padding(.horizontal, 14).padding(.bottom, 8)
                 }
 
+                if let lifeline {
+                    VStack(spacing: 3) {
+                        LifelineView(spans: lifeline.spans, now: lifeline.now, color: lifeline.color)
+                            .frame(height: 9)
+                        HStack {
+                            Text("−\(Int(SessionStore.lifelineWindow / 60))m")
+                            Spacer(minLength: 0)
+                            Text("Now")
+                        }
+                        .font(AppTypography.section)
+                        .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14).padding(.bottom, 8)
+                    .accessibilityHidden(true)
+                }
+
                 if let note {
                     VStack(alignment: .leading, spacing: 2) {
                         if let noteLabel { Text(noteLabel).font(AppTypography.metadata).foregroundStyle(.secondary) }
@@ -386,7 +405,9 @@ struct FlyoutBody: View {
                     .padding(.horizontal, 14).padding(.bottom, 8)
                 }
 
-                if let quote, !quote.isEmpty {
+                if let sessionReply {
+                    sessionReply.padding(.horizontal, 14).padding(.bottom, 10)
+                } else if let quote, !quote.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
                         if let quoteLabel { Text(quoteLabel).font(AppTypography.metadata).foregroundStyle(.secondary) }
                         // Not selectable: once clicked, selectable text forgets its
@@ -430,11 +451,11 @@ struct SessionFlyout: View {
     }()
 
     var body: some View {
-        let appName = session.terminal.appName
+        let hostName = Jumper.hostName(for: session)
         var subtitle = session.isProjectConversation ? "Claude project" : session.tool.displayName
         if session.projectMainId != nil { subtitle += " · Main conversation" }
         if !session.project.isEmpty { subtitle += " · \(session.project)" }
-        subtitle += " · \(appName)"
+        if let hostName, hostName != session.tool.displayName { subtitle += " · \(hostName)" }
 
         let tint = Palette.tool(session.tool)
         let chip: (text: String, color: Color?)
@@ -476,6 +497,7 @@ struct SessionFlyout: View {
         }
 
         var rows: [(String, String)] = []
+        if session.currentTopicTitle != session.title { rows.append(("Session name", session.title)) }
         if session.nativeView?.isOpen == true { rows.append(("View", "Open in Claude")) }
         if session.state == .working, let progress = session.progress {
             rows.append(("Steps", progress.summary))
@@ -496,27 +518,43 @@ struct SessionFlyout: View {
             rows.append(("Status", "\(verdict) · \(source.explanation.lowercased())"))
         }
         if let others = Overlap.sameRepo(Array(model.store.sessions.values))[session.id] {
-            rows.append(("Also running here", others.map(\.title).sorted().joined(separator: ", ")))
+            rows.append(("Also running here", others.map(\.currentTopicTitle).sorted().joined(separator: ", ")))
+        }
+        if let hold = session.hold {
+            rows.append((hold.returnedAt == nil ? "On hold" : "Was on hold", HoldText.status(hold, plan: model.holdPlan)))
         }
         rows.append(("Started", Self.clock.string(from: session.startedAt)))
         // Only when AI Runs saw the turn start; otherwise the number means nothing.
         if session.needsUser, let since = session.waitingSince, since.timeIntervalSince(session.turnStartedAt) >= 60 {
             rows.append(("Last turn took", TextUtils.duration(since.timeIntervalSince(session.turnStartedAt))))
         }
+        // Moved here from the row: one duration per row is enough there.
+        if let worked = model.store.completedWorkDuration(for: session.id) {
+            rows.append(("Observed working", RunText.workDuration(worked)))
+        }
 
         var flyoutActions = [
-            FlyoutAction(title: "Open in \(appName)", shortcut: "↩") {
+            FlyoutAction(title: Jumper.openLabel(for: session), shortcut: "↩") {
                 actions.closePanel()
                 model.open(sessionId: session.id)
             },
-            FlyoutAction(title: "Pin to Board") { model.pin(sessionId: session.id) },
             FlyoutAction(title: "Rename…") { actions.renameSession(session.id) },
         ]
-        if RunText.canIgnore(session) {
-            flyoutActions.insert(FlyoutAction(title: RunText.ignoreTitle(session)) {
-                model.setIgnored(sessionId: session.id, !session.isIgnored)
-            }, at: 1)
+        // Hold replaces "Ignore for Now"; rows ignored by earlier versions keep "Stop Ignoring".
+        var holdActions: [FlyoutAction] = []
+        let commands = HoldDrop.commands(session, model: model, drag: ui.holdDrag)
+        if session.hold != nil {
+            holdActions.append(FlyoutAction(title: "Bring Back Now") { commands.bringBack() })
         }
+        if session.canHold {
+            holdActions.append(FlyoutAction(title: "Hold Until…") { HoldPopUp.show(commands) })
+        }
+        if session.isIgnored {
+            holdActions.append(FlyoutAction(title: "Stop Ignoring") {
+                model.setIgnored(sessionId: session.id, false)
+            })
+        }
+        flyoutActions.insert(contentsOf: holdActions, at: 1)
         // Only for sessions that live in a terminal; desktop and web users never need a command.
         if let bundle = Jumper.bundleId(for: session.terminal), Jumper.terminalBundles.contains(bundle) {
             flyoutActions.append(FlyoutAction(title: "Copy Resume Command") {
@@ -525,19 +563,21 @@ struct SessionFlyout: View {
             })
         }
         flyoutActions.append(FlyoutAction(title: "Remove from List") {
-            ui.hover = nil
+            ui.cancelHover()
             model.remove(sessionId: session.id)
         })
 
+        // Moved here from the row: a tile has one line for what the run is doing.
+        let spans = session.isDone || session.state == .unknown ? [] : model.store.lifeline(for: session.id, now: now)
         return FlyoutBody(
-            title: session.title,
+            title: session.currentTopicTitle,
             subtitle: subtitle,
             chip: chip,
             rows: rows,
+            lifeline: spans.isEmpty ? nil : (spans: spans, color: Palette.tool(session.tool), now: now),
             noteLabel: session.approvalDetail == nil ? nil : "Wants to run",
             note: session.approvalDetail,
-            quoteLabel: "Last reply",
-            quote: TextUtils.preview(of: session.lastMessage, limit: 400),
+            sessionReply: session.currentTopicReply == nil ? nil : SessionReplyView(session: session, model: model),
             actions: flyoutActions
         )
     }
@@ -570,7 +610,7 @@ struct CardFlyout: View {
         }
         flyoutActions.append(FlyoutAction(title: "Edit…") { actions.editCard(card) })
         flyoutActions.append(FlyoutAction(title: "Remove") {
-            ui.hover = nil
+            ui.cancelHover()
             model.archive(cardId: card.id)
         })
 

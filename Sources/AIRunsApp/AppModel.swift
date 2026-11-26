@@ -11,16 +11,21 @@ final class AppModel: ObservableObject {
     @Published private(set) var now = Date()
     /// A short confirmation shown in the panel header or as a toast.
     @Published private(set) var message: String?
+    /// Where `message` belongs: the header, or next to the On hold line when
+    /// it answers something the user just did there.
+    enum MessagePlace { case header, hold }
+    @Published private(set) var messagePlace: MessagePlace = .header
     /// Offered next to `message` for a few seconds after removing something.
     @Published private(set) var undo: (() -> Void)?
 
-    let paths = AIRunsPaths()
-    let installer = HookInstaller()
+    let paths: AIRunsPaths
+    let installer: HookInstaller
     let usage = UsageMonitor()
     let accounts = AccountManager()
     /// The app that was in front when the panel opened, for "Pin Front AI Window".
     var frontAppAtOpen: NSRunningApplication?
 
+    private let usesSystemServices: Bool
     private let reader: EventLogReader
     private var pollTimer: Timer?
     private var clockTimer: Timer?
@@ -33,19 +38,37 @@ final class AppModel: ObservableObject {
     /// Bartender or the menu bar can leave Finder or Bartender in front.
     private var lastPinnableApp: NSRunningApplication?
     private var activationObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
 
+    /// Isolated state for native UI tests; no hooks, observers, or polling start.
+    init(testingRoot: URL, store: SessionStore = SessionStore(), board: PinBoard = PinBoard()) {
+        usesSystemServices = false
+        paths = AIRunsPaths(root: testingRoot)
+        installer = HookInstaller(home: testingRoot)
+        reader = EventLogReader(url: paths.events, offset: 0)
+        self.store = store
+        self.board = board
+    }
     init() {
+        usesSystemServices = true
+        paths = AIRunsPaths()
+        installer = HookInstaller()
         try? paths.ensureRoot()
         let cursor = JSONFile.load(Cursor.self, from: paths.cursor)
         reader = EventLogReader(url: paths.events, offset: cursor?.offset ?? 0)
         store = JSONFile.load(SessionStore.self, from: paths.sessions) ?? SessionStore()
         store.tidy()
+        store.reconcileHolds(now: Date())
         board = JSONFile.load(PinBoard.self, from: paths.pins) ?? PinBoard()
         recoverCodexConversations()
         installHelper()
         upgradeHooks()
         Notifier.shared.open = { [weak self] id in self?.open(sessionId: id) }
-        Notifier.shared.ignore = { [weak self] id in self?.setIgnored(sessionId: id, true) }
+        Notifier.shared.hold = { [weak self] id in
+            guard let self else { return }
+            // Later today, or tomorrow morning when it is already late.
+            self.hold(sessionId: id, until: HoldPlan(now: Date()).date(for: .later))
+        }
         Notifier.shared.update(sessions: Array(store.sessions.values))
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -54,6 +77,12 @@ final class AppModel: ObservableObject {
             MainActor.assumeIsolated {
                 if FrontWindowCapture.isPinnable(app) { self?.lastPinnableApp = app }
             }
+        }
+        // Holds that came due while the Mac slept come back as soon as it wakes.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
         }
         if let front = NSWorkspace.shared.frontmostApplication, FrontWindowCapture.isPinnable(front) {
             lastPinnableApp = front
@@ -208,6 +237,7 @@ final class AppModel: ObservableObject {
     private func tick() {
         now = Date()
         var updated = store
+        updated.reconcileHolds(now: now)
         updated.pruneStale(now: now)
         updated.expireSightings(now: now)
         if updated != store {
@@ -232,6 +262,7 @@ final class AppModel: ObservableObject {
         }
         try? JSONFile.save(Cursor(offset: reader.offset), to: paths.cursor)
         now = Date()
+        guard usesSystemServices else { return }
         suggestTitles()
         refineOutcomes()
         Notifier.shared.update(sessions: Array(store.sessions.values))
@@ -332,6 +363,7 @@ final class AppModel: ObservableObject {
 
     private func saveSessions() {
         try? JSONFile.save(store, to: paths.sessions)
+        guard usesSystemServices else { return }
         // Removing, restoring or renaming changes what notifications should
         // show even though no event arrived.
         Notifier.shared.update(sessions: Array(store.sessions.values))
@@ -441,8 +473,9 @@ final class AppModel: ObservableObject {
 
     // MARK: - Messages
 
-    func show(_ text: String, undo: (() -> Void)? = nil) {
+    func show(_ text: String, place: MessagePlace = .header, undo: (() -> Void)? = nil) {
         messageWork?.cancel()
+        messagePlace = place
         message = text
         self.undo = undo
         let work = DispatchWorkItem { [weak self] in
@@ -465,13 +498,116 @@ final class AppModel: ObservableObject {
 
     // MARK: - Sessions
 
+    func toggleSessionPin(_ sessionID: String) {
+        guard let session = store.sessions[sessionID] else { return }
+        var updated = store
+        updated.setPinned(id: sessionID, !session.isPinned)
+        do {
+            try JSONFile.save(updated, to: paths.sessions)
+            store = updated
+        } catch {
+            show("Couldn’t update the pin.")
+        }
+    }
+
+    func markSessionRead(_ session: Session) {
+        guard let current = store.sessions[session.id], current.hasUnreadReply,
+              current.lastReplyAt == session.lastReplyAt, current.lastMessage == session.lastMessage,
+              current.currentTopicID == session.currentTopicID else { return }
+        store.markReplyRead(id: session.id)
+        saveSessions()
+    }
+
     func open(sessionId: String) {
         guard let session = store.sessions[sessionId] else { return }
-        Jumper.open(session: session, show: { [weak self] in self?.show($0) })
+        Jumper.open(session: session, opened: { [weak self] in
+            self?.markSessionRead(session)
+            self?.acknowledgeReturn(sessionId, of: session.hold)
+        }, show: { [weak self] in self?.show($0) })
+    }
+
+    // MARK: - Hold
+
+    /// Dates for the line and the menus, from the clock and calendar right now.
+    var holdPlan: HoldPlan { HoldPlan(now: Date()) }
+
+    /// Holds a session until `until`, or moves its hold there. A session that
+    /// waits on someone keeps waiting, with its name. Returns false when it
+    /// can't be held (approval, or a time that has passed).
+    @discardableResult
+    func hold(sessionId: String, until: Date) -> Bool {
+        let before = store.sessions[sessionId]
+        var updated = store
+        guard updated.reschedule(id: sessionId, until: until, at: Date()) else { return refuseHold(sessionId) }
+        commitHold(updated, sessionId: sessionId, before: before)
+        return true
+    }
+
+    /// "Waiting on…": held until the user checks back, by default at 9:00 two
+    /// days from now. A session already waiting keeps its check-back time and
+    /// name; one that came back gets a new time and keeps its name.
+    @discardableResult
+    func holdWaiting(sessionId: String) -> Bool {
+        let before = store.sessions[sessionId]
+        let previous = before?.hold
+        let now = Date()
+        let keepsTime = previous?.isWaiting == true && previous?.returnedAt == nil && (previous?.until ?? now) > now
+        let until = keepsTime ? previous?.until ?? holdPlan.date(for: .waiting) : holdPlan.date(for: .waiting)
+        var updated = store
+        guard updated.hold(id: sessionId, until: until, waitingOn: previous?.waitingOn ?? "", at: now) else {
+            return refuseHold(sessionId)
+        }
+        commitHold(updated, sessionId: sessionId, before: before)
+        return true
+    }
+
+    func setWaitingName(sessionId: String, _ name: String) {
+        guard store.sessions[sessionId]?.hold?.isWaiting == true,
+              store.sessions[sessionId]?.hold?.waitingOn != name else { return }
+        store.setWaitingName(id: sessionId, name)
+        saveSessions()
+    }
+
+    /// "Bring back now".
+    func bringBack(sessionId: String) {
+        guard let before = store.sessions[sessionId], before.hold != nil else { return }
+        store.bringBack(id: sessionId)
+        saveSessions()
+        show("Back in your list", place: .hold) { [weak self] in self?.restoreHold(from: before) }
+    }
+
+    /// Says something next to the On hold line (a hint, or why nothing happened).
+    func showHoldNote(_ text: String) { show(text, place: .hold) }
+
+    private func acknowledgeReturn(_ sessionId: String, of opened: SessionHold?) {
+        guard store.sessions[sessionId]?.isBackFromHold == true else { return }
+        store.acknowledgeReturn(id: sessionId, of: opened)
+        saveSessions()
+    }
+
+    private func commitHold(_ updated: SessionStore, sessionId: String, before: Session?) {
+        store = updated
+        saveSessions()
+        guard let hold = store.sessions[sessionId]?.hold else { return }
+        let when = holdPlan.when(hold.until)
+        show(hold.isWaiting ? "Check back \(when)" : "Back \(when)", place: .hold) { [weak self] in
+            if let before { self?.restoreHold(from: before) }
+        }
+    }
+
+    /// Undo: the hold and the old "Ignore for Now" go back to what they were.
+    private func restoreHold(from before: Session) {
+        store.restoreHold(id: before.id, hold: before.hold, ignored: before.ignored, at: Date())
+        saveSessions()
+    }
+
+    private func refuseHold(_ sessionId: String) -> Bool {
+        if store.sessions[sessionId]?.canHold == false { show("Approvals can’t wait. Answer it first.", place: .hold) }
+        return false
     }
 
     func resolve(sessionId: String) {
-        let title = store.sessions[sessionId]?.title
+        let title = store.sessions[sessionId]?.currentTopicTitle
         store.resolve(id: sessionId)
         saveSessions()
         if let title { show("Resolved: \(title)") }
@@ -482,7 +618,7 @@ final class AppModel: ObservableObject {
         guard let session = store.sessions[sessionId] else { return }
         store.dismiss(id: sessionId, at: Date())
         saveSessions()
-        show("Removed “\(TextUtils.truncate(session.title, limit: 28))”") { [weak self] in
+        show("Removed “\(TextUtils.truncate(session.currentTopicTitle, limit: 28))”") { [weak self] in
             self?.store.restore(session)
             self?.saveSessions()
         }
@@ -502,23 +638,113 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func pin(sessionId: String) {
-        guard let session = store.sessions[sessionId] else { return }
-        let card = board.pin(session: session, now: Date())
-        savePins()
-        show(card.nextIsSuggested ? "Pinned to \(card.group). Next step taken from the last reply." : "Pinned to \(card.group).")
+    func pin(sessionId: String) -> PinCard? {
+        guard let session = store.sessions[sessionId] else { return nil }
+        var updated = board
+        let card = updated.pin(session: session, now: Date())
+        return persistBoard(updated) ? card : nil
+    }
+
+    @discardableResult
+    func saveReply(_ session: Session) -> PinCard? {
+        if let existing = board.savedReply(session: session) { return existing }
+        var updated = board
+        guard let card = updated.saveReply(session: Jumper.sessionForBookmark(session)), persistBoard(updated) else { return nil }
+        markSessionRead(session)
+        return card
+    }
+
+    func openLabel(for attachment: PinAttachment) -> String {
+        Jumper.openLabel(for: attachment.link, in: store)
+    }
+
+    func liveTitle(for attachment: PinAttachment) -> String? {
+        Jumper.currentSession(for: attachment.link, in: store)?.currentTopicTitle
+    }
+
+    private func persistBoard(_ updated: PinBoard) -> Bool {
+        do {
+            try JSONFile.save(updated, to: paths.pins)
+            board = updated
+            return true
+        } catch {
+            show("Couldn’t save the pinned card.")
+            return false
+        }
     }
 
     // MARK: - Cards
 
-    func open(card: PinCard) {
-        board.touch(id: card.id)
+    var pinSessionCandidates: [Session] {
+        store.ordered().filter { session in
+            if AgentTool.hookTools.contains(session.tool) { return true }
+            guard session.tool == .claudeWeb else { return false }
+            if case .url = PinAttachment.session(session).link { return true }
+            return false
+        }
+    }
+
+    @discardableResult
+    func attach(_ attachment: PinAttachment, to cardID: UUID) -> Bool {
+        guard board.attach(attachment, to: cardID) else { return false }
         savePins()
-        guard let link = card.link else {
-            show("This note isn’t linked to a conversation.")
+        return true
+    }
+
+    @discardableResult
+    func detach(_ attachmentID: UUID, from cardID: UUID) -> Bool {
+        guard board.detach(attachmentID, from: cardID) else { return false }
+        savePins()
+        return true
+    }
+
+    @discardableResult
+    func setMenuNext(_ selected: Bool, for cardID: UUID, next: String? = nil) -> Bool {
+        guard let existing = board.card(id: cardID) else { return false }
+        var updated = board
+        if let next {
+            let trimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return false }
+            updated.update(id: cardID, next: trimmed)
+        }
+        if selected != (existing.menuNextAt != nil) {
+            guard updated.setMenuNext(selected, for: cardID) else {
+                if selected, updated.menuNextCards.count >= PinBoard.maximumMenuNextCards {
+                    show("Three cards are kept at the top. Use recent order for one to keep another.")
+                }
+                return false
+            }
+        } else if next == nil {
+            return false
+        }
+        do {
+            try JSONFile.save(updated, to: paths.pins)
+            board = updated
+            return true
+        } catch {
+            show("Couldn’t save the pinned card.")
+            return false
+        }
+    }
+
+    func open(card: PinCard) {
+        guard let attachments = board.card(id: card.id)?.attachments else { return }
+        guard attachments.count == 1, let attachment = attachments.first else {
+            show(attachments.isEmpty ? "This card has no links." : "Choose a link on the pinned card.")
             return
         }
-        Jumper.open(link: link, show: { [weak self] in self?.show($0) })
+        open(card: card, attachment: attachment)
+    }
+
+    func open(card: PinCard, attachment: PinAttachment) {
+        guard let destination = board.card(id: card.id)?.attachments.first(where: { $0.id == attachment.id }) else { return }
+        board.touch(id: card.id)
+        savePins()
+        if let session = Jumper.currentSession(for: destination.link, in: store) {
+            open(sessionId: session.id)
+            return
+        }
+        Jumper.open(link: destination.link, in: store, show: { [weak self] in self?.show($0) })
     }
 
     func addNote(title: String, next: String = "", group: String = PinBoard.inbox) {
@@ -576,7 +802,7 @@ final class AppModel: ObservableObject {
         NSPasteboard.general.setString(handoff, forType: .string)
         board.touch(id: card.id)
         savePins()
-        if case .url(let string) = card.link, let host = URL(string: string)?.host {
+        if card.attachments.count == 1, case .url(let string) = card.link, let host = URL(string: string)?.host {
             let newChat: String?
             if host.hasSuffix("claude.ai") { newChat = "https://claude.ai/new" }
             else if host.hasSuffix("chatgpt.com") || host.hasSuffix("chat.openai.com") { newChat = "https://chatgpt.com/" }
@@ -604,7 +830,7 @@ final class AppModel: ObservableObject {
            let session = store.ordered()
             .filter({ $0.terminal.bundleId == bundle || Jumper.bundleId(for: $0.terminal) == bundle })
             .max(by: { $0.lastEventAt < $1.lastEventAt }) {
-            pin(sessionId: session.id)
+            if let card = pin(sessionId: session.id) { show("Pinned to \(card.group).") }
             return
         }
         if let captured = FrontWindowCapture.capture(app: app) {

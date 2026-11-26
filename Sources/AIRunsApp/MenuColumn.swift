@@ -25,8 +25,17 @@ struct MenuColumn: View {
     @ObservedObject var model: AppModel
     @ObservedObject var ui: PanelUIState
     let actions: PanelActions
+    @ObservedObject private var drag: HoldDragState
     @State private var heights: [MenuPart: CGFloat] = [:]
     @State private var showRecent = false
+    @State private var revealWatchedID: String?
+
+    init(model: AppModel, ui: PanelUIState, actions: PanelActions) {
+        _model = ObservedObject(wrappedValue: model)
+        _ui = ObservedObject(wrappedValue: ui)
+        self.actions = actions
+        _drag = ObservedObject(wrappedValue: ui.holdDrag)
+    }
 
     private var hasActiveSessions: Bool {
         MenuSessionPresentation(sessions: model.store.ordered()).hasActiveSessions
@@ -45,14 +54,33 @@ struct MenuColumn: View {
                     SeparatorLine()
                 }
                 .menuHeight(.header)
-                ScrollView(.vertical) {
-                    activeSection
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .menuHeight(.sessions)
+                ScrollViewReader { scroll in
+                    ScrollView(.vertical) {
+                        activeSection
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .menuHeight(.sessions)
+                    }
+                    .task(id: revealWatchedID) {
+                        guard let id = revealWatchedID else { return }
+                        await Task.yield()
+                        guard !Task.isCancelled else { return }
+                        scroll.scrollTo(id, anchor: .center)
+                    }
                 }
                 .frame(height: sessionHeight)
+                // "Pin to Top" or "Bring back now" while a row is dragged, over the list.
+                .overlay(alignment: .top) { HoldTopTarget(drag: drag) }
                 VStack(spacing: 0) {
+                    // On hold sits below the list, above the footer, and is part
+                    // of the footer's height budget: one more tile, the quietest.
+                    if !model.store.sessions.isEmpty {
+                        holdDock
+                            .padding(.vertical, 2)
+                            .glassTile(.quiet)
+                            .padding(.horizontal, 8)
+                            .padding(.top, 5)
+                    }
                     SeparatorLine()
                     MenuQuickActions(manager: model.accounts,
                                      openAccounts: { actions.showAccounts() },
@@ -68,7 +96,22 @@ struct MenuColumn: View {
             .onPreferenceChange(MenuHeightPreference.self) { updated in
                 if heights != updated { heights = updated }
             }
+            .holdDragSurface(drag, plan: model.holdPlan)
         }
+    }
+
+    private var holdDock: some View {
+        HoldDock(model: model, drag: drag, held: MenuSessionPresentation(sessions: model.store.ordered()).held,
+                 open: { session in
+                     actions.closePanel()
+                     model.open(sessionId: session.id)
+                 },
+                 drop: drop)
+            .onHover { if $0 { ui.hoverOff() } }
+    }
+
+    private func drop(_ session: Session, on target: HoldTarget) {
+        HoldDrop.perform(target, session: session, model: model, drag: drag)
     }
 
     private var header: some View {
@@ -78,7 +121,7 @@ struct MenuColumn: View {
                     .accessibilityHidden(true)
                 Text("AI Runs").font(AppTypography.appTitle)
                 Spacer()
-                if let message = model.message {
+                if let message = model.message, model.messagePlace == .header {
                     Text(message)
                         .font(AppTypography.metadata)
                         .foregroundStyle(Color.secondary)
@@ -119,6 +162,7 @@ struct MenuColumn: View {
         let sessions = model.store.ordered()
         let menu = MenuSessionPresentation(sessions: sessions)
         let overlap = Overlap.sameRepo(sessions)
+        let nextCards = model.board.menuNextCards
         VStack(alignment: .leading, spacing: 0) {
             // Setup notices scroll with content so the fixed header and footer
             // still fit when permissions and both providers need attention.
@@ -135,16 +179,29 @@ struct MenuColumn: View {
                 ThreadsHint(model: model)
             }
             .padding(.horizontal, 14)
-            if menu.hasActiveSessions {
-                if !menu.needs.isEmpty {
-                    SectionLabel(title: "Needs you", count: menu.needs.count)
-                    rows(menu.needs, overlap: overlap)
-                }
-                if !menu.working.isEmpty {
-                    SectionLabel(title: "Working", count: menu.working.count)
-                    rows(menu.working, overlap: overlap)
-                }
-            } else {
+            if !menu.needs.isEmpty {
+                SectionLabel(title: "Needs you", count: menu.needs.count)
+                    .accessibilityIdentifier("sessions.section.needs")
+                rows(menu.needs, overlap: overlap)
+            }
+            if !menu.pinned.isEmpty {
+                SectionLabel(title: "Pinned", count: menu.pinned.count)
+                    .accessibilityIdentifier("sessions.section.pinned")
+                rows(menu.pinned, overlap: overlap)
+            }
+            MenuPinnedNext(cards: nextCards, pinnedCards: model.board.cards, expandedCardID: $ui.expandedNextCardID,
+                           cancelHover: { ui.cancelHover() }, liveTitle: model.liveTitle(for:), openLabel: model.openLabel(for:), updateNext: { card, selected, next in
+                model.setMenuNext(selected, for: card.id, next: next)
+            }, archiveCard: { model.archive(cardId: $0.id) }) { card, attachment in
+                actions.closePanel()
+                model.open(card: card, attachment: attachment)
+            }
+            .onHover { if $0 { ui.cancelHover() } }
+            if !menu.working.isEmpty {
+                SectionLabel(title: "In progress", count: menu.working.count)
+                rows(menu.working, overlap: overlap)
+            }
+            if !menu.hasActiveSessions {
                 idleActions
             }
             if !menu.unknown.isEmpty {
@@ -162,6 +219,7 @@ struct MenuColumn: View {
                 }
             } else if !menu.recent.isEmpty {
                 sessionDisclosure("Recent Sessions", count: menu.recent.count, expanded: $showRecent)
+                    .accessibilityIdentifier("sessions.show-recent")
                 if showRecent {
                     if !menu.done.isEmpty {
                         SectionLabel(title: "Done", count: menu.done.count)
@@ -216,27 +274,40 @@ struct MenuColumn: View {
     private func rows(_ sessions: [Session], overlap: [String: [Session]]) -> some View {
         VStack(spacing: 0) {
             ForEach(sessions) { session in
-                SessionRow(session: session, lifeline: model.store.lifeline(for: session.id, now: model.now), now: model.now,
-                           alsoHere: (overlap[session.id] ?? []).map(\.title), ui: ui,
+                SessionRow(session: session,
+                           completedWorkDuration: model.store.completedWorkDuration(for: session.id), now: model.now,
+                           alsoHere: (overlap[session.id] ?? []).map(\.currentTopicTitle), ui: ui,
                            rename: { actions.renameSession(session.id) },
-                           pin: { model.pin(sessionId: session.id) },
+                           togglePin: {
+                               ui.cancelHover()
+                               model.toggleSessionPin(session.id)
+                               revealWatchedID = session.isPinned ? nil : session.id
+                           },
+                           details: {
+                               if ui.toggleDetails(.session(session.id)) { model.markSessionRead(session) }
+                           },
                            remove: {
-                               ui.hover = nil
+                               ui.cancelHover()
                                model.remove(sessionId: session.id)
                            },
-                           ignore: ignoreAction(for: session)) {
+                           ignore: ignoreAction(for: session),
+                           hold: HoldDrop.commands(session, model: model, drag: drag)) {
+                    guard !drag.consumesClick() else { return }
                     actions.closePanel()
                     model.open(sessionId: session.id)
                 }
+                .holdDraggable(session, drag: drag, drop: drop)
+                .id(session.id)
             }
         }
         .padding(.horizontal, 5)
     }
 
+    /// "Stop Ignoring", for rows ignored by earlier versions. New rows use Hold.
     private func ignoreAction(for session: Session) -> (() -> Void)? {
-        guard RunText.canIgnore(session) else { return nil }
-        let id = session.id, ignored = session.isIgnored
-        return { model.setIgnored(sessionId: id, !ignored) }
+        guard session.isIgnored else { return nil }
+        let id = session.id
+        return { model.setIgnored(sessionId: id, false) }
     }
 
     @ViewBuilder private var bottomMenu: some View {

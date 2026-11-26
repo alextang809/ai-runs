@@ -15,10 +15,16 @@ enum FloatingSettings {
 @MainActor
 final class FloatingState: ObservableObject {
     enum Tab: String { case runs, pinned }
+
+    struct PinReveal: Hashable {
+        let cardID: UUID
+        private let requestID = UUID()
+    }
     @Published var expanded = UserDefaults.standard.bool(forKey: FloatingSettings.expandedKey) {
         didSet { UserDefaults.standard.set(expanded, forKey: FloatingSettings.expandedKey) }
     }
     @Published var tab: Tab = .runs
+    @Published var pinReveal: PinReveal?
     /// Expanded by itself because something needed the user; folds back after a jump.
     var autoExpanded = false
 }
@@ -50,6 +56,13 @@ final class FloatingController: NSObject {
     var isVisible: Bool { panel?.isPresented == true }
 
     func toggle() { isVisible ? hide() : show() }
+
+    func showPinned(cardID: UUID? = nil) {
+        state.pinReveal = cardID.map { FloatingState.PinReveal(cardID: $0) }
+        state.tab = .pinned
+        state.expanded = true
+        show()
+    }
 
     func show() {
         let panel = self.panel ?? makePanel()
@@ -164,6 +177,11 @@ final class FloatingController: NSObject {
     }
 
     func rename(_ id: String) { actions?.renameSession(id) }
+
+    /// The panel never takes the keyboard by itself. Typing a name into the
+    /// Waiting field is the one time the user asks it to. AI Runs is not
+    /// activated, so the app in front stays in front.
+    func takeKeyboard() { panel?.makeKey() }
     func editCard(_ card: PinCard) { actions?.editCard(card) }
 }
 
@@ -277,12 +295,19 @@ struct FloatingCard: View {
     @ObservedObject var model: AppModel
     @ObservedObject var state: FloatingState
     let controller: FloatingController
+    @State private var expandedLaterID: UUID?
+    @State private var detailSessionID: String?
+    @State private var showRecent = false
+    @State private var revealWatchedID: String?
+    @State private var runsHeight: CGFloat = 170
+    /// This window's own drag onto the On hold line.
+    @StateObject private var holdDrag = HoldDragState()
 
     var body: some View {
         FloatingSurface(radius: 20) {
             VStack(spacing: 0) {
                 header
-                if let message = model.message {
+                if let message = model.message, model.messagePlace == .header {
                     Text(message)
                         .font(AppTypography.section).foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -292,11 +317,13 @@ struct FloatingCard: View {
                 switch state.tab {
                 case .runs: runs
                 case .pinned:
-                    BoardView(model: model, editCard: { controller.editCard($0) })
+                    BoardView(model: model, editCard: { controller.editCard($0) }, reveal: state.pinReveal)
                         .frame(height: 360)
                 }
             }
             .frame(width: 310)
+            .holdDragSurface(holdDrag, plan: model.holdPlan)
+            .onAppear { holdDrag.requestKeyboard = { controller.takeKeyboard() } }
         }
     }
 
@@ -331,50 +358,142 @@ struct FloatingCard: View {
         .modifier(WindowDrag(controller: controller))
     }
 
+    /// "Stop Ignoring", for rows ignored by earlier versions. New rows use Hold.
     private func ignoreAction(for session: Session) -> (() -> Void)? {
-        guard RunText.canIgnore(session) else { return nil }
+        guard session.isIgnored else { return nil }
         let id = session.id
-        return { model.setIgnored(sessionId: id, true) }
+        return { model.setIgnored(sessionId: id, false) }
+    }
+
+    private func drop(_ session: Session, on target: HoldTarget) {
+        HoldDrop.perform(target, session: session, model: model, drag: holdDrag)
     }
 
     @ViewBuilder private var runs: some View {
         let sessions = model.store.ordered()
-        // Keep unknown and currently open conversations in the same list.
-        // Other finished and ignored runs fold into one line.
-        let active = sessions.filter { (!$0.isDone || $0.nativeView?.isOpen == true) && !$0.isIgnored }
-        let quiet = sessions.count - active.count
-        ThreadsHint(model: model)
-            .padding(.horizontal, 14).padding(.bottom, 8)
-        if active.isEmpty {
-            Text(sessions.isEmpty ? "Nothing running." : "Nothing needs you; nothing is working right now.")
-                .font(AppTypography.body).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14).padding(.bottom, 12)
-        } else {
-            let list = VStack(spacing: 0) {
-                ForEach(active) { session in
-                    FloatingRow(session: session, now: model.now,
-                                open: { controller.open(session) },
-                                rename: { controller.rename(session.id) },
-                                pin: { model.pin(sessionId: session.id) },
-                                remove: { model.remove(sessionId: session.id) },
-                                ignore: ignoreAction(for: session))
+        let menu = MenuSessionPresentation(sessions: sessions)
+        let openDone = menu.done.filter { $0.nativeView?.isOpen == true }
+        let recentDone = menu.done.filter { $0.nativeView?.isOpen != true }
+        let quiet = recentDone.count + menu.ignored.count
+        ScrollViewReader { scroll in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    sessionGroup("Needs you", sessions: menu.needs, identifier: "sessions.section.needs")
+                    sessionGroup("Pinned", sessions: menu.pinned, identifier: "sessions.section.pinned")
+                    if !model.board.cards.isEmpty {
+                        MenuPinnedNext(cards: model.board.menuNextCards, pinnedCards: model.board.cards,
+                                       expandedCardID: $expandedLaterID, cancelHover: {},
+                                       liveTitle: model.liveTitle(for:), openLabel: model.openLabel(for:),
+                                       updateNext: { model.setMenuNext($1, for: $0.id, next: $2) },
+                                       archiveCard: { model.archive(cardId: $0.id) },
+                                       openLink: { model.open(card: $0, attachment: $1) })
+                    }
+                    sessionGroup("In progress", sessions: menu.working)
+                    sessionGroup("State unknown", sessions: menu.unknown)
+                    sessionGroup("Done", sessions: openDone)
+                    if quiet > 0 {
+                        Button {
+                            showRecent.toggle()
+                        } label: {
+                            Label("Recent Sessions (\(quiet))",
+                                  systemImage: showRecent ? "chevron.down" : "chevron.right")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .font(AppTypography.metadata)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .accessibilityValue(showRecent ? "Expanded" : "Collapsed")
+                        .accessibilityIdentifier("sessions.show-recent")
+                        if showRecent {
+                            sessionGroup("Done", sessions: recentDone)
+                            sessionGroup("Ignored", sessions: menu.ignored)
+                        }
+                    }
+                    if sessions.isEmpty && model.board.cards.isEmpty {
+                        Text("No sessions")
+                            .font(AppTypography.body).foregroundStyle(.secondary)
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                    }
                 }
+                .padding(.horizontal, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { runsHeight = $0 }
             }
-            .padding(.horizontal, 4)
-            // The window sizes itself to its content, so a scroll view only
-            // appears (with a fixed height) once the list is long.
-            if active.count <= 5 {
-                list
-            } else {
-                ScrollView { list }.frame(height: 360)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: min(runsHeight, 340))
+            .overlay(alignment: .top) { HoldTopTarget(drag: holdDrag) }
+            .task(id: revealWatchedID) {
+                guard let id = revealWatchedID else { return }
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                scroll.scrollTo(id, anchor: .center)
             }
         }
-        if quiet > 0 {
-            Text("+ \(quiet) done or ignored")
-                .font(AppTypography.metadata).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14).padding(.bottom, 9).padding(.top, 2)
+        if !sessions.isEmpty {
+            Divider().padding(.horizontal, 10).padding(.top, 4)
+            HoldDock(model: model, drag: holdDrag, held: menu.held, compact: true,
+                     open: { controller.open($0) }, drop: drop)
+        }
+        ThreadsHint(model: model).padding(.horizontal, 14).padding(.bottom, 9)
+    }
+
+    @ViewBuilder private func sessionGroup(_ title: String, sessions: [Session], identifier: String? = nil) -> some View {
+        if !sessions.isEmpty {
+            Text(title).font(AppTypography.section).foregroundStyle(.secondary)
+                .padding(.horizontal, 10).padding(.top, 6)
+                .accessibilityIdentifier(identifier ?? "sessions.section.\(title)")
+                .accessibilityAddTraits(.isHeader)
+            ForEach(sessions) { session in
+                VStack(alignment: .leading, spacing: 2) { runRow(session) }
+                    .id(session.id)
+            }
+        }
+    }
+
+    @ViewBuilder private func runRow(_ session: Session) -> some View {
+        FloatingRow(session: session, now: model.now,
+                    open: {
+                        guard !holdDrag.consumesClick() else { return }
+                        controller.open(session)
+                    },
+                    rename: { controller.rename(session.id) },
+                    togglePin: {
+                        model.toggleSessionPin(session.id)
+                        revealWatchedID = session.isPinned ? nil : session.id
+                    },
+                    details: {
+                        if detailSessionID == session.id {
+                            detailSessionID = nil
+                        } else {
+                            detailSessionID = session.id
+                            model.markSessionRead(session)
+                        }
+                    },
+                    remove: { model.remove(sessionId: session.id) },
+                    ignore: ignoreAction(for: session),
+                    hold: HoldDrop.commands(session, model: model, drag: holdDrag))
+            .holdDraggable(session, drag: holdDrag, drop: drop)
+        if detailSessionID == session.id {
+            VStack(alignment: .leading, spacing: 6) {
+                SessionReplyView(session: session, model: model)
+                HStack(spacing: 12) {
+                    Button(Jumper.openLabel(for: session)) { controller.open(session) }
+                        .buttonStyle(.borderless)
+                    if session.canHold || session.hold != nil {
+                        Menu(session.hold == nil ? "Hold Until" : "On Hold") {
+                            HoldMenuItems(commands: HoldDrop.commands(session, model: model, drag: holdDrag), flat: true)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                    }
+                }
+                .font(AppTypography.body)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
         }
     }
 }
@@ -386,10 +505,13 @@ private struct FloatingRow: View {
     let now: Date
     let open: () -> Void
     let rename: () -> Void
-    let pin: () -> Void
+    let togglePin: () -> Void
+    let details: () -> Void
     let remove: () -> Void
-    /// "Ignore for Now"; nil when this run can't be ignored.
+    /// "Stop Ignoring" for a row ignored by an earlier version; nil otherwise.
     var ignore: (() -> Void)? = nil
+    /// "Hold Until" and "Bring Back Now".
+    var hold: HoldCommands? = nil
     @State private var hovering = false
 
     var body: some View {
@@ -399,15 +521,18 @@ private struct FloatingRow: View {
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(session.title).font(AppTypography.compactTitle).lineLimit(1)
+                        Text(session.currentTopicTitle).font(AppTypography.compactTitle).lineLimit(1)
                         Spacer(minLength: 4)
-                        Color.clear.frame(width: RemoveZone.slot, height: 18)
+                        Color.clear.frame(width: RemoveZone.slot + SessionRowControls.width, height: 18)
                     }
                     HStack {
                         StatePill(session: session, now: now)
+                        if session.isBackFromHold, let hold = session.hold { HoldReturnChip(hold: hold, compact: true) }
                         Spacer(minLength: 0)
                     }
-                    if let detail = CompactRunDetail.resolve(session, now: now) {
+                    if session.isPinned {
+                        LiveLine(session: session, now: now)
+                    } else if let detail = CompactRunDetail.resolve(session, now: now) {
                         CompactRunDetailLine(detail: detail)
                     }
                 }
@@ -419,35 +544,47 @@ private struct FloatingRow: View {
         .buttonStyle(.plain)
         .overlay(alignment: .topTrailing) {
             if hovering {
-                RemoveZone(label: "Remove \(session.title) from the list", action: remove)
+                RemoveZone(label: "Remove \(session.currentTopicTitle) from the list", action: remove)
                     .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
-                    .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
+                    .padding(.trailing, SessionRowControls.width + 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
             }
         }
-        // A waiting run can be set aside right here: it leaves this window and
-        // stays in the panel's Ignored section.
+        // A run that waits on the user can be set aside right here: it moves
+        // to the On hold line and comes back when its time comes.
         .overlay(alignment: .bottomTrailing) {
-            if hovering, let ignore {
-                Button("Ignore", action: ignore)
-                    .buttonStyle(.plain)
-                    .font(AppTypography.section)
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
-                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.3), lineWidth: 1))
-                    .padding(.trailing, 8).padding(.bottom, 5)
-                    .help("Stop counting this until it asks something new")
-                    .accessibilityLabel("Ignore \(session.title) for now")
+            if hovering, let hold, session.needsUser, session.canHold, !session.isBackFromHold {
+                Menu {
+                    HoldMenuItems(commands: hold, flat: true)
+                } label: {
+                    Text("Hold").font(AppTypography.section)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .padding(.horizontal, 8).padding(.vertical, 2)
+                .background(Capsule().fill(Color(nsColor: .windowBackgroundColor)))
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.3), lineWidth: 1))
+                .padding(.trailing, 8).padding(.bottom, 5)
+                .help("Put this aside until a time you choose")
+                .accessibilityLabel("Hold \(session.currentTopicTitle)")
             }
+        }
+        .overlay(alignment: .topTrailing) {
+            SessionRowControls(session: session, visible: hovering, togglePin: togglePin, details: details)
+                .padding(.trailing, 8)
+                .padding(.top, 4)
         }
         .onHover { hovering = $0 }
         .help(RunText.place(session))
         .contextMenu {
             Button("Open", action: open)
-            if let ignore { Button("Ignore for Now", action: ignore) }
+            if let hold { HoldMenuItems(commands: hold) }
+            if let ignore { Button("Stop Ignoring", action: ignore) }
             Button("Rename…", action: rename)
-            Button("Pin to Board", action: pin)
+            Button(SessionRowControls.pinTitle(session), action: togglePin)
             Divider()
             Button("Remove from List", action: remove)
         }
+        .holdAccessibilityActions(hold)
     }
 }

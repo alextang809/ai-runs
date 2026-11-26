@@ -8,6 +8,7 @@ import SwiftUI
 protocol PanelActions: AnyObject {
     func closePanel()
     func toggleBoard()
+    func showPinnedBoard()
     var isBoardVisible: Bool { get }
     func showSettings()
     func showAccounts()
@@ -96,7 +97,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
                 string: " \(needsYou)",
                 attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold),
                              .foregroundColor: Icons.amber])
-            button.setAccessibilityLabel("AI Runs, \(needsYou) holding for you")
+            button.setAccessibilityLabel("AI Runs, \(needsYou) need you")
         } else {
             button.attributedTitle = NSAttributedString(string: "")
             button.setAccessibilityLabel("AI Runs")
@@ -221,7 +222,12 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.keyDown], handler: { [weak self] event in
             if event.keyCode == 53 { // Escape
-                MainActor.assumeIsolated { self?.closePanel() }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    // Escape first cancels a drag, then closes details, then the panel.
+                    if self.ui.holdDrag.cancel() { return }
+                    if !self.ui.closeExplicitDetails() { self.closePanel() }
+                }
                 return nil
             }
             return event
@@ -233,6 +239,11 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
     // MARK: - PanelActions
 
     var isBoardVisible: Bool { floating.isVisible }
+
+    func showPinnedBoard() {
+        closePanel()
+        floating.showPinned()
+    }
 
     /// Shows or hides the floating window (runs and the pinned board).
     func toggleBoard() {
@@ -316,7 +327,7 @@ final class StatusBarController: NSObject, NSWindowDelegate, PanelActions {
     func renameSession(_ id: String) {
         guard let session = model.store.sessions[id] else { return }
         closePanel()
-        let field = NSTextField(string: session.title)
+        let field = NSTextField(string: session.currentTopicTitle)
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
         if runPrompt(title: "Rename session", message: "Give this \(session.tool.displayName) session a name you’ll recognise.",
                      accessory: field, focus: field) {
@@ -381,6 +392,8 @@ final class PanelUIState: ObservableObject {
 
     static let staleGroup = "__stale__"
 
+    @Published var expandedNextCardID: UUID?
+    private var explicitDetails: Target?
     @Published var hover: Target?
     @Published var rowFrames: [String: CGRect] = [:]
     @Published var collapsed: Set<String> = [PanelUIState.staleGroup]
@@ -391,7 +404,19 @@ final class PanelUIState: ObservableObject {
     @Published var addingNote = false
     @Published var draft = ""
     @Published var boardVisible = false
+    /// The drag onto the On hold line in this panel.
+    let holdDrag = HoldDragState()
+    /// Hover details stay put while a row is dragged.
+    private var hoverSuspended = false
     private var clearWork: DispatchWorkItem?
+
+    init() {
+        holdDrag.onActiveChange = { [weak self] active in
+            guard let self else { return }
+            if active { self.cancelHover() }
+            self.hoverSuspended = active
+        }
+    }
 
     private var switchWork: DispatchWorkItem?
 
@@ -399,6 +424,7 @@ final class PanelUIState: ObservableObject {
     /// moment, so passing over rows on the way to a button doesn't flip the
     /// details back and forth.
     func hoverOn(_ target: Target) {
+        guard explicitDetails == nil, !hoverSuspended else { return }
         clearWork?.cancel()
         switchWork?.cancel()
         guard hover != target else { return }
@@ -414,6 +440,7 @@ final class PanelUIState: ObservableObject {
     }
 
     func hoverOff() {
+        guard explicitDetails == nil else { return }
         switchWork?.cancel()
         clearWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -423,16 +450,37 @@ final class PanelUIState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
+    @discardableResult
+    func toggleDetails(_ target: Target) -> Bool {
+        let opening = explicitDetails != target
+        cancelHover()
+        if opening {
+            explicitDetails = target
+            hover = target
+        }
+        return opening
+    }
+
+    func closeExplicitDetails() -> Bool {
+        guard explicitDetails != nil else { return false }
+        cancelHover()
+        return true
+    }
+
     func keepHover() { clearWork?.cancel() }
 
     /// A collapsed section must not receive a previously scheduled flyout.
     func cancelHover() {
+        explicitDetails = nil
         clearWork?.cancel()
         switchWork?.cancel()
         hover = nil
     }
 
     func reset() {
+        expandedNextCardID = nil
+        holdDrag.cancel()
+        holdDrag.editingWaitingID = nil
         cancelHover()
         addingNote = false
         draft = ""
@@ -440,7 +488,7 @@ final class PanelUIState: ObservableObject {
 
     func toggle(group: String) {
         if collapsed.contains(group) { collapsed.remove(group) } else { collapsed.insert(group) }
-        hover = nil
+        cancelHover()
     }
 }
 
@@ -497,11 +545,11 @@ struct ToastView: View {
 enum Icons {
     /// What the menu bar mark is saying.
     enum Status: Equatable {
-        /// Nothing is running: the arc alone.
+        /// Nothing is running: the toaster alone.
         case idle
-        /// Runs are in progress: the arc with its dot.
+        /// Runs are in progress: a slice is down in the toaster.
         case working
-        /// A run is holding for the user: the dot turns amber.
+        /// A run is holding for the user: the slice has popped, in amber.
         case needsYou
 
         init(store: SessionStore) {
@@ -513,25 +561,76 @@ enum Icons {
         }
     }
 
-    /// The logo's amber, used for the dot and the count.
+    /// The logo's amber, used for the popped slice and the count.
     static let amber = NSColor(red: 0.91, green: 0.537, blue: 0.047, alpha: 1)
 
-    /// The app's mark, a fermata: the musical sign for "hold until the
-    /// conductor gives the cue". A run holds; the user gives the cue.
-    /// Template (follows the menu bar's colour) unless the dot is amber.
+    /// The app's mark, a toaster: you put a run in, do something else, and
+    /// it pops when it is ready for you. Template (follows the menu bar's
+    /// colour) unless the slice is amber.
     static func statusImage(_ status: Status) -> NSImage {
         let size = NSSize(width: 18, height: 16)
         let image = NSImage(size: size, flipped: false) { _ in
             let ink = status == .needsYou ? NSColor.labelColor : NSColor.black
-            let arc = NSBezierPath()
-            arc.appendArc(withCenter: NSPoint(x: 9, y: 4.6), radius: 6.6, startAngle: 0, endAngle: 180)
-            arc.lineWidth = 1.9
-            arc.lineCapStyle = .round
-            ink.setStroke()
-            arc.stroke()
+            let bodyTop: CGFloat = 9.1
+
             if status != .idle {
-                (status == .needsYou ? amber : ink).setFill()
-                NSBezierPath(ovalIn: NSRect(x: 9 - 2, y: 5.1 - 2, width: 4, height: 4)).fill()
+                // The slice: low in the slot while working, popped when a
+                // run needs the user.
+                let top: CGFloat = status == .needsYou ? 15.2 : 12.3
+                let slice = NSBezierPath()
+                slice.move(to: NSPoint(x: 5.6, y: bodyTop))
+                slice.line(to: NSPoint(x: 5.6, y: top - 2.1))
+                slice.line(to: NSPoint(x: 4.9, y: top - 1.2))
+                slice.line(to: NSPoint(x: 6.5, y: top - 0.2))
+                slice.line(to: NSPoint(x: 8.3, y: top - 0.7))
+                slice.line(to: NSPoint(x: 10.1, y: top - 0.2))
+                slice.line(to: NSPoint(x: 11.7, y: top - 1.2))
+                slice.line(to: NSPoint(x: 11, y: top - 2.1))
+                slice.line(to: NSPoint(x: 11, y: bodyTop))
+                slice.lineJoinStyle = .round
+                slice.lineCapStyle = .round
+                if status == .needsYou {
+                    slice.close()
+                    amber.setFill()
+                    amber.setStroke()
+                    slice.lineWidth = 1
+                    slice.fill()
+                } else {
+                    ink.setStroke()
+                    slice.lineWidth = 1.3
+                }
+                slice.stroke()
+            }
+
+            ink.setStroke()
+            ink.setFill()
+            let body = NSBezierPath(roundedRect: NSRect(x: 2, y: bodyTop - 6.2, width: 12.6, height: 6.2),
+                                    xRadius: 2, yRadius: 2)
+            body.lineWidth = 1.5
+            body.stroke()
+
+            let feet = NSBezierPath()
+            feet.move(to: NSPoint(x: 4.6, y: 1.4))
+            feet.line(to: NSPoint(x: 6, y: 1.4))
+            feet.move(to: NSPoint(x: 10.6, y: 1.4))
+            feet.line(to: NSPoint(x: 12, y: 1.4))
+            feet.lineWidth = 1.3
+            feet.lineCapStyle = .round
+            feet.stroke()
+
+            // The lever is down while a slice is in.
+            let lever: CGFloat = status == .working ? 5.6 : 7.6
+            NSBezierPath(ovalIn: NSRect(x: 16.4 - 1.15, y: lever - 1.15, width: 2.3, height: 2.3)).fill()
+
+            if status == .idle {
+                // The empty slot, so the idle mark does not read as a battery.
+                let slot = NSBezierPath()
+                slot.move(to: NSPoint(x: 5.8, y: 6.6))
+                slot.line(to: NSPoint(x: 10.8, y: 6.6))
+                slot.lineWidth = 1.2
+                slot.lineCapStyle = .round
+                ink.withAlphaComponent(0.55).setStroke()
+                slot.stroke()
             }
             return true
         }

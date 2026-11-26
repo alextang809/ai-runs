@@ -15,7 +15,8 @@ struct GlassPresentation: Equatable {
     }
 }
 
-/// One glass layer for an outer window surface, never for individual list rows.
+/// One glass layer for an outer window surface, never for individual list rows:
+/// rows that should read as panes on it use `GlassTile`, which is drawn.
 struct GlassSurface<Content: View>: View {
     let cornerRadius: CGFloat
     let fallbackMaterial: NSVisualEffectView.Material
@@ -126,5 +127,51 @@ private struct LegacyGlassBackdrop: NSViewRepresentable {
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
         view.material = material
+    }
+}
+
+/// A pane lying on the panel's glass: a translucent fill that is lighter at
+/// the top, a bright hairline edge and, when raised, a hairline shadow. It is
+/// drawn, not a second system glass layer, so glass never stacks on glass.
+struct GlassTile: ViewModifier {
+    enum Level { case raised, quiet }
+    let level: Level
+    var hovered = false
+    var cornerRadius: CGFloat = 13
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let dark = colorScheme == .dark
+        let raised = level == .raised
+        let top: Double = raised ? (dark ? 0.13 : 0.66) : (dark ? 0.045 : 0.24)
+        let bottom: Double = raised ? (dark ? 0.07 : 0.42) : (dark ? 0.045 : 0.24)
+        let edge: Double = raised ? (dark ? 0.2 : 0.8) : (dark ? 0.08 : 0.5)
+        return content
+            .background {
+                if reduceTransparency {
+                    shape.fill(Color(nsColor: .controlBackgroundColor).opacity(raised ? 1 : 0.55))
+                } else {
+                    shape.fill(LinearGradient(colors: [Color.white.opacity(top), Color.white.opacity(bottom)],
+                                              startPoint: .top, endPoint: .bottom))
+                        .shadow(color: .black.opacity(raised ? (dark ? 0.28 : 0.08) : 0), radius: 1, x: 0, y: 1)
+                }
+            }
+            .overlay { shape.fill(Color.primary.opacity(hovered ? 0.06 : 0)).allowsHitTesting(false) }
+            .overlay {
+                if contrast == .increased {
+                    shape.strokeBorder(Color.primary.opacity(0.4), lineWidth: 1).allowsHitTesting(false)
+                } else {
+                    shape.strokeBorder(Color.white.opacity(edge), lineWidth: 0.5).allowsHitTesting(false)
+                }
+            }
+    }
+}
+
+extension View {
+    func glassTile(_ level: GlassTile.Level, hovered: Bool = false, cornerRadius: CGFloat = 13) -> some View {
+        modifier(GlassTile(level: level, hovered: hovered, cornerRadius: cornerRadius))
     }
 }

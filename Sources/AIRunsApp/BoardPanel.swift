@@ -7,14 +7,31 @@ import UniformTypeIdentifiers
 struct BoardView: View {
     @ObservedObject var model: AppModel
     let editCard: (PinCard) -> Void
+    var reveal: FloatingState.PinReveal? = nil
     @State private var draft = ""
     @State private var dropTargeted = false
     @State private var showStale = false
+    @State private var linkCardID: UUID?
+    @State private var expandedCardID: UUID?
 
     var body: some View {
+        Group {
+            if let linkCardID, let card = model.board.card(id: linkCardID) {
+                BoardLinkEditor(card: card, model: model) { self.linkCardID = nil }
+            } else {
+                board
+            }
+        }
+        .frame(minWidth: 240, minHeight: 220)
+        .onChange(of: reveal) { _, request in
+            if request != nil { linkCardID = nil }
+        }
+    }
+
+    private var board: some View {
         let groups = model.board.groups(now: model.now)
         let stale = model.board.staleCards(now: model.now)
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             HStack(spacing: 6) {
                 TextField("Quick note…", text: $draft)
                     .textFieldStyle(.roundedBorder)
@@ -25,47 +42,65 @@ struct BoardView: View {
             }
             .padding(10)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    if groups.isEmpty && stale.isEmpty {
-                        Text("Nothing pinned yet. Drag text or a link here, or type a quick note above.")
-                            .font(AppTypography.body)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 8)
-                    }
-                    ForEach(groups, id: \.name) { group in
-                        Text(group.name.uppercased())
-                            .font(AppTypography.section)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 8)
-                            .padding(.bottom, 2)
-                        ForEach(group.cards) { card in
-                            BoardCard(card: card, stale: false, now: model.now, model: model, editCard: editCard)
+            ScrollViewReader { scroll in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        if groups.isEmpty && stale.isEmpty {
+                            Text("Nothing pinned yet. Drag text or a link here, or type a quick note above.")
+                                .font(AppTypography.body)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 8)
                         }
-                    }
-                    if !stale.isEmpty {
-                        Button {
-                            showStale.toggle()
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .rotationEffect(.degrees(showStale ? 90 : 0))
-                                Text("MAYBE DONE · \(stale.count)")
-                                    .font(AppTypography.section)
-                            }
-                            .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, 10)
-                        if showStale {
-                            ForEach(stale) { card in
-                                BoardCard(card: card, stale: true, now: model.now, model: model, editCard: editCard)
+                        ForEach(groups, id: \.name) { group in
+                            Text(group.name.uppercased())
+                                .font(AppTypography.section)
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 8)
+                                .padding(.bottom, 2)
+                            ForEach(group.cards) { card in
+                                BoardCard(card: card, stale: false, model: model,
+                                          editCard: editCard, editLinks: { linkCardID = card.id },
+                                          highlighted: reveal?.cardID == card.id,
+                                          expandedCardID: $expandedCardID)
+                                    .id(card.id)
                             }
                         }
+                        if !stale.isEmpty {
+                            Button {
+                                showStale.toggle()
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .rotationEffect(.degrees(showStale ? 90 : 0))
+                                    Text("Older pins · \(stale.count)")
+                                        .font(AppTypography.section)
+                                }
+                                .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 10)
+                            if showStale {
+                                ForEach(stale) { card in
+                                    BoardCard(card: card, stale: true, model: model,
+                                              editCard: editCard, editLinks: { linkCardID = card.id },
+                                          highlighted: reveal?.cardID == card.id,
+                                          expandedCardID: $expandedCardID)
+                                    .id(card.id)
+                                }
+                            }
+                        }
                     }
+                    .padding(.horizontal, 10)
                 }
-                .padding(.horizontal, 10)
+                .task(id: reveal) {
+                    guard let reveal, model.board.card(id: reveal.cardID) != nil else { return }
+                    expandedCardID = reveal.cardID
+                    if stale.contains(where: { $0.id == reveal.cardID }) { showStale = true }
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    scroll.scrollTo(reveal.cardID, anchor: .top)
+                }
             }
 
             Text(dropTargeted ? "Drop to make a card" : "Drag text or a link here to make a card")
@@ -78,7 +113,6 @@ struct BoardView: View {
                     .foregroundStyle(dropTargeted ? Color.primary : Color.secondary.opacity(0.5)))
                 .padding(10)
         }
-        .frame(minWidth: 240, minHeight: 220)
         .onDrop(of: [UTType.url, UTType.plainText], isTargeted: $dropTargeted, perform: handleDrop)
     }
 
@@ -111,51 +145,34 @@ struct BoardView: View {
 struct BoardCard: View {
     let card: PinCard
     let stale: Bool
-    let now: Date
     @ObservedObject var model: AppModel
     let editCard: (PinCard) -> Void
-    @State private var hovering = false
-    @State private var expanded = false
+    let editLinks: () -> Void
+    var highlighted = false
+    @Binding var expandedCardID: UUID?
+
+    private var isSelected: Bool { card.menuNextAt != nil }
+    private var hasNext: Bool { !card.next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(card.title).font(AppTypography.rowTitle).lineLimit(2)
-                Spacer(minLength: 4)
-                Text(TextUtils.age(now.timeIntervalSince(card.touchedAt)))
-                    .font(AppTypography.elapsed)
-                    .foregroundStyle(.secondary)
+        PinnedCardView(card: card, isExpanded: Binding(
+            get: { expandedCardID == card.id },
+            set: { expandedCardID = $0 ? card.id : nil }
+        ), saveNext: { next in
+            model.setMenuNext(isSelected, for: card.id, next: next)
+        }, liveTitle: model.liveTitle(for:), openLabel: model.openLabel(for:), openLink: { model.open(card: card, attachment: $0) }, highlighted: highlighted) {
+            Button("Edit Card…") { editCard(card) }
+            Button(card.attachments.isEmpty ? "Add Links…" : "Manage Links…", action: editLinks)
+            Button(isSelected ? "Use Recent Order" : "Keep at Top") {
+                model.setMenuNext(!isSelected, for: card.id)
             }
-            Text(card.next.isEmpty ? "No next step yet" : "Next: \(card.next)")
-                .font(AppTypography.body)
-                .foregroundStyle(.secondary)
-                .lineLimit(expanded ? nil : 2)
-            if expanded, let excerpt = card.excerpt, !excerpt.isEmpty {
-                Text(excerpt)
-                    .font(AppTypography.body)
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
-            }
-        }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
-        .opacity(stale ? 0.6 : 1)
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .onTapGesture(count: 2) { model.open(card: card) }
-        .onTapGesture { expanded.toggle() }
-        .help(card.link.map { "Double-click to open \($0.label)" } ?? "Click to expand")
-        .contextMenu {
-            if card.link != nil {
-                Button("Open") { model.open(card: card) }
+            .disabled(!isSelected && (!hasNext || model.board.menuNextCards.count >= PinBoard.maximumMenuNextCards))
+            if !card.attachments.isEmpty {
                 Button("Continue in a New Chat") { model.continueInNewChat(card: card) }
             }
-            Button("Edit…") { editCard(card) }
-            if stale { Button("Still Working on It") { model.keep(cardId: card.id) } }
+            if stale { Button("Keep in Recent Pins") { model.keep(cardId: card.id) } }
             Divider()
-            Button("Archive") { model.archive(cardId: card.id) }
+            Button("Unpin") { model.archive(cardId: card.id) }
         }
     }
 }

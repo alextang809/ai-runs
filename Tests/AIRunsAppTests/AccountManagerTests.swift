@@ -13,6 +13,7 @@ private actor MemoryAccountStore: AccountPersisting {
     private var saveContinuation: CheckedContinuation<Void, Never>?
     private(set) var saves = 0
     private(set) var profileRequests = 0
+    private(set) var quotaSamples: [(UUID, Date, [AccountRateWindow])] = []
 
     init(_ rows: [ManagedAccount] = [], loadFails: Bool = false) {
         self.rows = rows
@@ -34,6 +35,9 @@ private actor MemoryAccountStore: AccountPersisting {
     func profileURL(for account: ManagedAccount) -> URL {
         profileRequests += 1
         return URL(fileURLWithPath: "/tmp/airuns-test-profiles").appendingPathComponent(account.id.uuidString)
+    }
+    func recordPlanUsage(for account: ManagedAccount, windows: [AccountRateWindow], at date: Date) {
+        quotaSamples.append((account.id, date, windows))
     }
     func failSaving() { saveFails = true }
     func pauseNextSave() { holdNextSave = true }
@@ -57,7 +61,8 @@ private actor FakeAccountClient: AccountConnecting {
 
     init(account: ManagedAccount, percent: Double = 25, refreshFails: Bool = false, holdConnect: Bool = false) {
         self.account = account
-        self.windows = [AccountRateWindow(id: "primary", title: "Session", usedPercent: percent)!]
+        self.windows = [AccountRateWindow(id: "primary", title: "Session", usedPercent: percent,
+                                          resetsAt: Date().addingTimeInterval(3_600))!]
         self.refreshFails = refreshFails
         self.holdConnect = holdConnect
     }
@@ -123,6 +128,41 @@ final class AccountManagerTests: XCTestCase {
         XCTAssertNil(try keys.load(for: account))
     }
 
+
+    @MainActor
+    func testPlanUsageSamplesOnlyAcceptedChatGPTReadings() async throws {
+        let account = ManagedAccount(provider: .codex, label: "Personal")
+        let claude = ManagedAccount(provider: .claude, label: "Claude")
+        let codexClient = FakeAccountClient(account: account)
+        let claudeClient = FakeAccountClient(account: claude)
+        let store = MemoryAccountStore([account, claude])
+        let manager = AccountManager(store: store, makeClient: { account, _ in
+            account.provider == .codex ? codexClient : claudeClient
+        }, openAuthorization: { _ in })
+        manager.start()
+        defer { manager.stop() }
+        try await eventually { manager.states[claude.id]?.status == .connected && manager.states[account.id]?.status == .connected }
+
+        let first = await store.quotaSamples
+        XCTAssertEqual(first.map { $0.0 }, [account.id])
+        XCTAssertEqual(first.first?.1, manager.states[account.id]?.updatedAt)
+        XCTAssertEqual(first.first?.2.first?.usedPercent, 25)
+
+        await manager.reconnect(id: account.id)
+        let afterReconnect = await store.quotaSamples
+        XCTAssertEqual(afterReconnect.count, 2)
+        XCTAssertEqual(afterReconnect.last?.1, manager.states[account.id]?.updatedAt)
+
+        await codexClient.failQuotaOnly()
+        await manager.refresh(id: account.id)
+        XCTAssertEqual(manager.states[account.id]?.status, .stale)
+        XCTAssertEqual(manager.states[account.id]?.updatedAt, afterReconnect.last?.1)
+        await codexClient.reportNoWindows()
+        await manager.refresh(id: account.id)
+        XCTAssertNil(manager.states[account.id]?.updatedAt)
+        let afterFailures = await store.quotaSamples
+        XCTAssertEqual(afterFailures.count, 2)
+    }
 
     @MainActor
     private func eventually(_ condition: @MainActor () async -> Bool,

@@ -33,6 +33,12 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var waitingSince: Date?
     public var lastEventAt: Date
     public var lastMessage: String?
+    /// The time of the reply itself. Tool activity and opening the conversation do not move it.
+    public internal(set) var lastReplyAt: Date?
+    public internal(set) var pinnedAt: Date?
+    var unreadPinnedReply: Bool?
+    public var isPinned: Bool { pinnedAt != nil }
+    public var hasUnreadReply: Bool { isPinned && unreadPinnedReply == true }
     public var approvalDetail: String?
     public var transcriptPath: String?
     public var terminal: TerminalContext
@@ -53,6 +59,8 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// True once the automatic name was chosen; it then stays put instead of
     /// following every reply, so it keeps matching what the user remembers.
     public var titleSettled: Bool?
+    /// Locally observed user prompts can change the displayed topic independently of the tool title.
+    var topic: SessionTopic?
     /// What it is doing right now, in words. Cleared when the turn ends.
     public var activity: String?
     /// Its own step list, when it keeps one.
@@ -69,8 +77,11 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// Set while the row's state comes from Claude's own Threads list rather
     /// than from hooks (a thread working in the cloud).
     public var native: NativeSighting?
-    /// Set by "Ignore for Now"; see `isIgnored`.
+    /// Set by "Ignore for Now" in earlier versions; see `isIgnored`. New
+    /// actions use `hold`; rows already ignored keep this until they move on.
     public var ignored: Bool?
+    /// Set by "Hold until…"; see `isHeld` and `isBackFromHold`.
+    public internal(set) var hold: SessionHold?
     /// The project's main conversation has its own identity, separate from child threads.
     public var projectMainId: String?
     /// Identity evidence from an open page; this never refreshes native state evidence.
@@ -87,7 +98,13 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     /// Finished its work: shown, but not counted as needing the user.
     public var isDone: Bool { state == .yourTurn && outcome == .done }
     /// Waiting on the user: approval, a question, or a reply AI Runs can't classify.
-    public var needsUser: Bool { waitsOnUser && !isIgnored }
+    public var needsUser: Bool {
+        // A hold decides on its own: hidden until due, then back until opened.
+        if hold != nil { return isBackFromHold || state == .needsApproval }
+        guard waitsOnUser, !isIgnored else { return false }
+        if isPinned, state == .yourTurn, outcome == .replied, native?.state != .readyForReview { return false }
+        return true
+    }
     /// The same, whether or not the user chose to ignore it.
     public var waitsOnUser: Bool { state.needsUser && !isDone }
     /// The user said "I know" to this wait: it stays in sight but no longer
@@ -230,7 +247,14 @@ public struct SessionStore: Codable, Equatable, Sendable {
             return
         }
         if event.kind == .sessionEnd {
-            sessions[key] = nil
+            if var pinned = session, pinned.isPinned || pinned.hold != nil {
+                guard event.at >= pinned.lastEventAt else { return }
+                pinned.lastEventAt = event.at
+                if !pinned.isDone { pinned.clearObservedState() }
+                sessions[key] = pinned
+            } else {
+                sessions[key] = nil
+            }
             dismissed?.remove(key)
             executors?[executor] = nil
             record(nil, for: key, at: event.at)
@@ -243,11 +267,13 @@ public struct SessionStore: Codable, Equatable, Sendable {
             guard userPrompt || event.kind == .needsApproval else { return }
             dismissed?.remove(key)
         }
+        let userPrompt = event.kind == .promptStart && event.drivenBy == nil
+            ? event.prompt.flatMap(UserTopicPrompt.init) : nil
         if session == nil {
             // Any event creates the session, so sessions that started before
             // the hooks were installed still show up. The app replaces the
             // generic title from the transcript when it can.
-            let title = event.prompt.flatMap { TextUtils.cleanPrompt($0) }.map { TextUtils.truncate($0, limit: 48) }
+            let title = userPrompt.map { TextUtils.truncate($0.cleaned, limit: 48) }
                 ?? Session.genericTitle(for: event.tool)
             session = Session(tool: event.tool, sessionId: event.sessionId, title: title, cwd: event.cwd,
                               state: .working, startedAt: event.at, turnStartedAt: event.at,
@@ -258,12 +284,19 @@ public struct SessionStore: Codable, Equatable, Sendable {
         }
         guard var current = session else { return }
 
+        // Preserve a stable best-known date for replies from older versions before a new turn moves it.
+        if current.lastMessage != nil, current.lastReplyAt == nil {
+            current.lastReplyAt = current.waitingSince ?? current.lastEventAt
+        }
+        if event.kind == .turnEnd, let replyAt = current.lastReplyAt, event.at < replyAt { return }
         current.lastEventAt = max(current.lastEventAt, event.at)
         // A hook knows more than a look at Claude's window.
         current.lastHookAt = event.at
         current.native = nil
         // Whatever it reports next is a new moment.
         current.ignored = nil
+        // Approval never waits. A returned hold is over once the user talks to it.
+        if event.kind == .needsApproval || (userPrompt != nil && current.isBackFromHold) { current.hold = nil }
         if let cwd = event.cwd { current.cwd = cwd }
         if let path = event.transcriptPath { current.transcriptPath = path }
         if event.terminal != TerminalContext() { current.terminal = event.terminal }
@@ -273,8 +306,17 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.title = TextUtils.truncate(title, limit: 60)
             current.titleSettled = true
         }
+        // A delayed event from a previous topic must not supply the new topic's saved excerpt.
+        if let topicStart = current.topic?.startedAt, event.at < topicStart { return }
         switch event.kind {
         case .promptStart:
+            if let userPrompt {
+                current.observeTopic(prompt: userPrompt, at: event.at)
+                if current.lastMessage == nil {
+                    current.lastReplyAt = nil
+                    current.unreadPinnedReply = nil
+                }
+            }
             current.state = .working
             current.turnStartedAt = event.at
             current.waitingSince = nil
@@ -285,7 +327,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
             current.outcomeSource = nil
             current.activity = event.tool.isWeb ? "Writing a reply" : "Thinking"
             if let driver = event.drivenBy { current.drivenBy = driver }
-            if current.firstPrompt == nil, let prompt = event.prompt, let cleaned = TextUtils.cleanPrompt(prompt) {
+            if current.firstPrompt == nil, let cleaned = userPrompt?.cleaned {
                 current.firstPrompt = TextUtils.truncate(cleaned, limit: 600)
                 if current.hasGenericTitle || current.title == "Untitled session" {
                     current.title = TextUtils.truncate(cleaned, limit: 48)
@@ -332,7 +374,13 @@ public struct SessionStore: Codable, Equatable, Sendable {
         case .turnEnd:
             current.approvalDetail = nil
             current.activity = nil
-            if let message = event.lastMessage, !message.isEmpty { current.lastMessage = message }
+            if let message = event.lastMessage, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if current.isPinned, current.lastReplyAt != event.at || current.lastMessage != message {
+                    current.unreadPinnedReply = true
+                }
+                current.lastReplyAt = event.at
+                current.lastMessage = message
+            }
             if event.backgroundTasks > 0 || event.scheduled > 0 {
                 // Still busy: it resumes on its own when its background tasks
                 // finish or its scheduled wake-up fires.
@@ -385,6 +433,12 @@ public struct SessionStore: Codable, Equatable, Sendable {
                 if history?[key] == nil, let spans = history?[executor] { history?[key] = spans }
                 history?[executor] = nil
             } else {
+                if own.isPinned, sessions[key]?.isPinned == false {
+                    sessions[key]?.pinnedAt = own.pinnedAt
+                }
+                if let hold = own.hold, sessions[key]?.hold == nil {
+                    sessions[key]?.hold = hold
+                }
                 record(nil, for: executor, at: event.at)
             }
         }
@@ -643,6 +697,101 @@ public struct SessionStore: Codable, Equatable, Sendable {
         record(SpanKind(session), for: id, at: at)
     }
 
+    // MARK: - Hold
+
+    /// "Hold until…": out of Needs you and the count until `until`, or, with
+    /// `waitingOn`, until the user checks back. Refused for a session waiting
+    /// for approval, and for a time that has already passed. Replaces an old
+    /// "Ignore for Now" on the same row.
+    @discardableResult
+    public mutating func hold(id: String, until: Date, waitingOn: String? = nil, at now: Date) -> Bool {
+        guard var session = sessions[id], session.canHold, until > now else { return false }
+        session.hold = SessionHold(until: until, waitingOn: waitingOn.map(Self.cleanName), heldAt: now)
+        session.ignored = nil
+        sessions[id] = session
+        record(SpanKind(session), for: id, at: now)
+        return true
+    }
+
+    /// Moves a hold to another time and keeps whether it waits on someone and their name.
+    @discardableResult
+    public mutating func reschedule(id: String, until: Date, at now: Date) -> Bool {
+        guard let current = sessions[id]?.hold else { return hold(id: id, until: until, at: now) }
+        return hold(id: id, until: until, waitingOn: current.waitingOn, at: now)
+    }
+
+    /// Names who the user waits on; an empty name means nobody in particular.
+    public mutating func setWaitingName(id: String, _ name: String) {
+        guard sessions[id]?.hold?.isWaiting == true else { return }
+        sessions[id]?.hold?.waitingOn = Self.cleanName(name)
+    }
+
+    /// "Bring back now": the hold ends and the session shows as it really is.
+    public mutating func bringBack(id: String, at now: Date = Date()) {
+        guard sessions[id]?.hold != nil else { return }
+        sessions[id]?.hold = nil
+        if let session = sessions[id] { record(SpanKind(session), for: id, at: now) }
+    }
+
+    /// The user opened a session that came back: its "Back from hold" is done.
+    /// Opening before it is due keeps the hold. Pass the hold that was showing
+    /// when the user clicked, so a slow open can't clear a newer hold.
+    public mutating func acknowledgeReturn(id: String, of opened: SessionHold? = nil) {
+        guard let hold = sessions[id]?.hold, hold.returnedAt != nil else { return }
+        if let opened, opened != hold { return }
+        sessions[id]?.hold = nil
+    }
+
+    /// Undo of a hold command: puts back the hold and the old "Ignore for Now"
+    /// exactly as they were. A hold that came due in the meantime stays due.
+    public mutating func restoreHold(id: String, hold: SessionHold?, ignored: Bool?, at now: Date) {
+        guard var session = sessions[id] else { return }
+        session.hold = hold
+        session.ignored = ignored
+        sessions[id] = session
+        reconcileHolds(now: now)
+        if let session = sessions[id] { record(SpanKind(session), for: id, at: now) }
+    }
+
+    /// Brings back every hold whose time has come, including ones missed while
+    /// the Mac slept or the app was closed. Returns true when anything changed.
+    @discardableResult
+    public mutating func reconcileHolds(now: Date) -> Bool {
+        var changed = false
+        for (key, session) in sessions {
+            guard let hold = session.hold, hold.returnedAt == nil, hold.until <= now else { continue }
+            sessions[key]?.hold?.returnedAt = now
+            // From here on the agent waits on the user again.
+            if let back = sessions[key] { record(SpanKind(back), for: key, at: now) }
+            changed = true
+        }
+        return changed
+    }
+
+    /// Held sessions, soonest back first.
+    public var held: [Session] {
+        sessions.values.filter(\.isHeld).sorted {
+            let a = $0.hold?.until ?? .distantFuture, b = $1.hold?.until ?? .distantFuture
+            return a == b ? $0.id < $1.id : a < b
+        }
+    }
+
+    private static func cleanName(_ name: String) -> String {
+        TextUtils.truncate(name.trimmingCharacters(in: .whitespacesAndNewlines), limit: 40)
+    }
+
+    public mutating func setPinned(id: String, _ pinned: Bool, at date: Date = Date()) {
+        guard var session = sessions[id], session.isPinned != pinned else { return }
+        session.pinnedAt = pinned ? date : nil
+        session.unreadPinnedReply = nil
+        sessions[id] = session
+    }
+
+    public mutating func markReplyRead(id: String) {
+        guard sessions[id]?.hasUnreadReply == true else { return }
+        sessions[id]?.unreadPinnedReply = nil
+    }
+
     /// The user's own name for the session. Automatic names never replace it.
     public mutating func rename(id: String, to title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -669,12 +818,17 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// Drops sessions nobody has touched for a long time (closed windows that
     /// never sent SessionEnd).
     public mutating func pruneStale(now: Date, olderThan age: TimeInterval = 24 * 3600) {
-        let kept = sessions.filter {
-            now.timeIntervalSince(max($0.value.lastEventAt, $0.value.nativeView?.seenAt ?? .distantPast)) < age
+        for (key, session) in sessions {
+            let lastSeen = max(session.lastEventAt, session.nativeView?.seenAt ?? .distantPast)
+            guard now.timeIntervalSince(lastSeen) >= age else { continue }
+            if session.isPinned || session.hold != nil {
+                guard session.state == .working else { continue }
+                sessions[key]?.clearObservedState()
+            } else {
+                sessions[key] = nil
+            }
+            record(nil, for: key, at: now)
         }
-        let gone = Set(sessions.keys).subtracting(kept.keys)
-        sessions = kept
-        for key in gone { record(nil, for: key, at: now) }
         if let links = executors {
             let kept = links.filter { now.timeIntervalSince($0.value.linkedAt) < age || sessions[$0.value.conversation] != nil }
             executors = kept.isEmpty ? nil : kept
@@ -689,6 +843,7 @@ public struct SessionStore: Codable, Equatable, Sendable {
     /// sessions, most recently started first.
     public func ordered() -> [Session] {
         func rank(_ session: Session) -> Int {
+            if session.isBackFromHold, session.state != .needsApproval { return 1 }
             switch session.state {
             case .needsApproval: return 0
             case .yourTurn:

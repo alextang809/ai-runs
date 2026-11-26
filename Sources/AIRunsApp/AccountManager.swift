@@ -2,6 +2,7 @@ import AIRunsCore
 import AppKit
 import Combine
 import Foundation
+import OSLog
 
 protocol AccountConnecting: Actor {
     func connect(onAuthorization: @escaping @Sendable (URL) -> Void) async throws -> AccountConnectionResult
@@ -28,6 +29,7 @@ protocol AccountPersisting: Actor {
     func load() async throws -> [ManagedAccount]
     func save(_ accounts: [ManagedAccount]) async throws
     func profileURL(for account: ManagedAccount) async throws -> URL
+    func recordPlanUsage(for account: ManagedAccount, windows: [AccountRateWindow], at date: Date) async throws
 }
 
 actor AccountPersistence: AccountPersisting {
@@ -36,6 +38,9 @@ actor AccountPersistence: AccountPersisting {
     func load() throws -> [ManagedAccount] { try registry.load() }
     func save(_ accounts: [ManagedAccount]) throws { try registry.save(accounts) }
     func profileURL(for account: ManagedAccount) throws -> URL { try registry.profileURL(for: account) }
+    func recordPlanUsage(for account: ManagedAccount, windows: [AccountRateWindow], at date: Date) throws {
+        try registry.recordPlanUsage(for: account, windows: windows, at: date)
+    }
 }
 
 enum AccountStatus: Equatable {
@@ -69,6 +74,7 @@ final class AccountManager: ObservableObject {
     @Published private(set) var submittingCode = false
     var onProfilesChanged: (([UsageSourceRoot]) -> Void)?
 
+    private static let logger = Logger(subsystem: "io.github.alextang809.airuns", category: "PlanUsage")
     private let store: any AccountPersisting
     private let makeClient: ClientFactory
     private let openAuthorization: @MainActor (URL) -> Void
@@ -181,12 +187,14 @@ final class AccountManager: ObservableObject {
         do {
             let client = try await client(for: account)
             let result = try await client.refresh()
+            let sampledAt = Date()
             guard active(id: id, operation: operation, generation: current), !Task.isCancelled else { return }
             try await accept(result, id: id, generation: current) {
                 self.active(id: id, operation: operation, generation: current)
             }
             guard active(id: id, operation: operation, generation: current) else { return }
-            setState(id, refreshedState(result, previous: previous, priorAccount: account))
+            setState(id, refreshedState(result, previous: previous, priorAccount: account, sampledAt: sampledAt))
+            await recordPlanUsage(result, at: sampledAt)
         } catch {
             guard active(id: id, operation: operation, generation: current) else { return }
             if error as? ManagedAccountClientError == .notSignedIn || error as? APIAccountError == .missingKey {
@@ -264,12 +272,14 @@ final class AccountManager: ObservableObject {
                 }
             }
             guard loginAttempt == attempt, generation == current, !Task.isCancelled else { return }
+            let sampledAt = Date()
             try await accept(result, id: account.id, generation: current) { self.loginAttempt == attempt }
             guard loginAttempt == attempt, generation == current else { return }
             finishSignIn(account.id, state: .init(status: .connected,
                          windows: result.quotaRefreshed ? result.windows : [],
-                         updatedAt: result.quotaRefreshed ? Date() : nil,
+                         updatedAt: quotaUpdatedAt(result, sampledAt: sampledAt),
                          note: result.note ?? (result.quotaRefreshed ? nil : "Usage limits could not be refreshed.")))
+            await recordPlanUsage(result, at: sampledAt)
         } catch {
             guard loginAttempt == attempt, generation == current else { return }
             finishSignIn(account.id, state: .init(status: .failed, note: safeSignInError(error)))
@@ -446,9 +456,10 @@ final class AccountManager: ObservableObject {
     }
 
     private func refreshedState(_ result: AccountConnectionResult, previous: AccountRowState?,
-                                priorAccount: ManagedAccount) -> AccountRowState {
+                                priorAccount: ManagedAccount, sampledAt: Date) -> AccountRowState {
         if result.quotaRefreshed {
-            return .init(status: .connected, windows: result.windows, updatedAt: Date(), note: result.note)
+            return .init(status: .connected, windows: result.windows,
+                         updatedAt: quotaUpdatedAt(result, sampledAt: sampledAt), note: result.note)
         }
         let sameIdentity = priorAccount.email == result.account.email && priorAccount.plan == result.account.plan
         if sameIdentity, let previous, previous.updatedAt != nil {
@@ -456,6 +467,17 @@ final class AccountManager: ObservableObject {
                          note: "Couldn’t refresh usage. Showing the last successful reading.")
         }
         return .init(status: .connected, note: result.note ?? "Usage limits could not be refreshed.")
+    }
+
+    private func quotaUpdatedAt(_ result: AccountConnectionResult, sampledAt: Date) -> Date? {
+        guard result.quotaRefreshed, result.account.provider != .codex || !result.windows.isEmpty else { return nil }
+        return sampledAt
+    }
+
+    private func recordPlanUsage(_ result: AccountConnectionResult, at date: Date) async {
+        guard result.account.provider == .codex, result.quotaRefreshed, !result.windows.isEmpty else { return }
+        do { try await store.recordPlanUsage(for: result.account, windows: result.windows, at: date) }
+        catch { Self.logger.error("Could not save the local plan usage reading.") }
     }
 
     private func setState(_ id: UUID, _ state: AccountRowState) { states = states.merging([id: state]) { _, new in new } }

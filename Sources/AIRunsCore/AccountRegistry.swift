@@ -13,18 +13,11 @@ public struct AccountRegistry: Sendable {
     public func load() throws -> [ManagedAccount] {
         guard let directory = try rootDescriptor(create: false) else { return [] }
         defer { close(directory) }
-        guard let descriptor = try metadataDescriptor(in: directory) else { return [] }
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-        defer { try? handle.close() }
+        guard let data = try readData(named: metadataName, in: directory) else { return [] }
         do {
-            let data = try handle.read(upToCount: maximumMetadataBytes + 1) ?? Data()
-            guard data.count <= maximumMetadataBytes else { throw AccountRegistryError.invalidMetadata }
-            let decoder = JSONDecoder()
-            let accounts = try decoder.decode([ManagedAccount].self, from: data)
+            let accounts = try JSONDecoder().decode([ManagedAccount].self, from: data)
             try validate(accounts)
             return accounts
-        } catch let error as AccountRegistryError {
-            throw error
         } catch {
             throw AccountRegistryError.invalidMetadata
         }
@@ -34,10 +27,60 @@ public struct AccountRegistry: Sendable {
         try validate(accounts)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(accounts), data.count <= maximumMetadataBytes,
-              let directory = try rootDescriptor(create: true) else { throw AccountRegistryError.writeFailed }
+        let data = try encoder.encode(accounts)
+        guard let directory = try rootDescriptor(create: true) else { throw AccountRegistryError.writeFailed }
         defer { close(directory) }
-        if let existing = try metadataDescriptor(in: directory) { close(existing) }
+        try writeData(data, named: metadataName, in: directory)
+    }
+
+    public func recordPlanUsage(for account: ManagedAccount, windows: [AccountRateWindow], at date: Date) throws {
+        guard let identity = PlanUsageHistory.identity(of: account) else { return }
+        let observations = PlanUsageHistory.observations(identity: identity, windows: windows, at: date)
+        guard !observations.isEmpty else { return }
+        guard let directory = try rootDescriptor(create: true) else { throw AccountRegistryError.writeFailed }
+        defer { close(directory) }
+
+        let name = planUsageFile(for: account)
+        let history = try readPlanUsage(named: name, in: directory)
+        let updated = history.recording(observations, at: date)
+        guard updated != history else { return }
+        try writeData(JSONEncoder().encode(updated), named: name, in: directory)
+    }
+
+    func loadPlanUsage(for account: ManagedAccount) throws -> PlanUsageHistory {
+        guard let identity = PlanUsageHistory.identity(of: account),
+              let directory = try rootDescriptor(create: false) else { return .init(cycles: []) }
+        defer { close(directory) }
+        let history = try readPlanUsage(named: planUsageFile(for: account), in: directory)
+        return .init(cycles: history.cycles.filter { $0.identity == identity })
+    }
+
+    private func planUsageFile(for account: ManagedAccount) -> String {
+        "plan-usage-\(account.id.uuidString.lowercased()).json"
+    }
+
+    private func readPlanUsage(named name: String, in directory: Int32) throws -> PlanUsageHistory {
+        guard let data = try readData(named: name, in: directory) else { return .init(cycles: []) }
+        do { return try JSONDecoder().decode(PlanUsageHistory.self, from: data) }
+        catch { throw AccountRegistryError.invalidMetadata }
+    }
+
+    private func readData(named name: String, in directory: Int32) throws -> Data? {
+        guard let descriptor = try fileDescriptor(named: name, in: directory) else { return nil }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        do {
+            let data = try handle.read(upToCount: maximumMetadataBytes + 1) ?? Data()
+            guard data.count <= maximumMetadataBytes else { throw AccountRegistryError.invalidMetadata }
+            return data
+        } catch {
+            throw AccountRegistryError.invalidMetadata
+        }
+    }
+
+    private func writeData(_ data: Data, named name: String, in directory: Int32) throws {
+        guard data.count <= maximumMetadataBytes else { throw AccountRegistryError.writeFailed }
+        if let existing = try fileDescriptor(named: name, in: directory) { close(existing) }
         let temporary = ".accounts-\(UUID().uuidString).tmp"
         let descriptor = openat(directory, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))
         guard descriptor >= 0 else { throw AccountRegistryError.writeFailed }
@@ -51,7 +94,7 @@ public struct AccountRegistry: Sendable {
             try handle.write(contentsOf: data)
             try handle.synchronize()
             try handle.close()
-            guard renameat(directory, temporary, directory, metadataName) == 0,
+            guard renameat(directory, temporary, directory, name) == 0,
                   fsync(directory) == 0 else { throw AccountRegistryError.writeFailed }
         } catch {
             throw AccountRegistryError.writeFailed
@@ -144,8 +187,8 @@ public struct AccountRegistry: Sendable {
         }
     }
 
-    private func metadataDescriptor(in directory: Int32) throws -> Int32? {
-        let descriptor = openat(directory, metadataName, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    private func fileDescriptor(named name: String, in directory: Int32) throws -> Int32? {
+        let descriptor = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         if descriptor < 0, errno == ENOENT { return nil }
         guard descriptor >= 0 else { throw AccountRegistryError.unsafePath }
         var status = stat()

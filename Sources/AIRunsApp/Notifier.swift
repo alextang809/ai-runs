@@ -29,8 +29,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Opens a session by its ID (set by the app model).
     var open: ((String) -> Void)?
-    /// Ignores a session's current wait by its ID (set by the app model).
-    var ignore: ((String) -> Void)?
+    /// Holds a session until later today by its ID (set by the app model).
+    var hold: ((String) -> Void)?
 
     private var planner = AlertPlanner()
     private var primed = false
@@ -40,9 +40,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private var recheckTimer: Timer?
     private static let recheckEvery: TimeInterval = 60
     private static let category = "session"
-    /// Questions and replies, which can be ignored; approvals can't.
+    /// Questions and replies, which can be held; approvals can't.
     private static let waitingCategory = "session-waiting"
-    private static let ignoreAction = "ignore"
+    private static let holdAction = "hold"
+    /// Delivered by earlier versions as "Ignore"; now holds like the new button.
+    private static let legacyIgnoreAction = "ignore"
     private static let openAction = "open"
     private static let snoozeAction = "snooze"
     private static let remindAfter: TimeInterval = 15 * 60
@@ -58,10 +60,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.delegate = self
         let open = UNNotificationAction(identifier: Self.openAction, title: "Open", options: [.foreground])
         let snooze = UNNotificationAction(identifier: Self.snoozeAction, title: "Snooze 15m", options: [])
-        let ignore = UNNotificationAction(identifier: Self.ignoreAction, title: "Ignore", options: [])
+        let hold = UNNotificationAction(identifier: Self.holdAction, title: "Hold", options: [])
         center.setNotificationCategories([
             UNNotificationCategory(identifier: Self.category, actions: [open, snooze], intentIdentifiers: []),
-            UNNotificationCategory(identifier: Self.waitingCategory, actions: [open, snooze, ignore], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Self.waitingCategory, actions: [open, snooze, hold], intentIdentifiers: []),
         ])
     }
 
@@ -206,8 +208,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Self.remindAfter, repeats: false)
                 UNUserNotificationCenter.current()
                     .add(UNNotificationRequest(identifier: "snooze-\(id)", content: snoozed, trigger: trigger))
-            case Self.ignoreAction:
-                Notifier.shared.ignore?(id)
+            case Self.holdAction, Self.legacyIgnoreAction:
+                Notifier.shared.hold?(id)
             case UNNotificationDismissActionIdentifier:
                 break
             default:

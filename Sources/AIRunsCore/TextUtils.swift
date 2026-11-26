@@ -48,10 +48,22 @@ public enum TextUtils {
         return truncate(question, limit: limit)
     }
 
-    /// The last line of a reply worth showing as a preview.
+    /// Markdown marks that a one-line list can't render: `**bold**`, `` `code` ``,
+    /// `[link](url)`, heading and quote markers. Single `*` and `_` are left
+    /// alone, since they are often part of a name (`snake_case`, `*.swift`).
+    public static func plainText(_ text: String) -> String {
+        var text = text
+        text = text.replacingOccurrences(of: #"\[([^\]]+)\]\([^)\s]+\)"#, with: "$1", options: .regularExpression)
+        text = text.replacingOccurrences(of: "**", with: "")
+        text = text.replacingOccurrences(of: "`", with: "")
+        text = text.replacingOccurrences(of: #"(?m)^\s{0,3}(#{1,6}|>)\s+"#, with: "", options: .regularExpression)
+        return text
+    }
+
+    /// The last line of a reply worth showing as a preview, without Markdown marks.
     public static func preview(of text: String?, limit: Int = 220) -> String? {
         guard let text else { return nil }
-        let collapsed = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        let collapsed = plainText(text).replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !collapsed.isEmpty else { return nil }
         return truncate(collapsed, limit: limit)

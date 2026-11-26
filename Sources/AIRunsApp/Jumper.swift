@@ -6,6 +6,7 @@ import AppKit
 enum Jumper {
     static func bundleId(for terminal: TerminalContext) -> String? {
         if let bundle = terminal.bundleId, !bundle.isEmpty { return bundle }
+        if terminal.itermSessionId?.isEmpty == false { return "com.googlecode.iterm2" }
         switch terminal.termProgram {
         case "iTerm.app": return "com.googlecode.iterm2"
         case "Apple_Terminal": return "com.apple.Terminal"
@@ -13,20 +14,64 @@ enum Jumper {
         case "ghostty": return "com.mitchellh.ghostty"
         case "WarpTerminal": return "dev.warp.Warp-Stable"
         case "WezTerm": return "com.github.wez.wezterm"
-        default: return nil
+        default: return terminal.termSessionId?.isEmpty == false ? "com.apple.Terminal" : nil
         }
     }
 
-    /// The app a session runs in. A Codex session that reports no terminal at
-    /// all comes from the Codex (ChatGPT) desktop app.
+    /// A provider project's own address outranks the terminal that executed its hooks.
     static func hostBundle(for session: Session) -> String? {
+        if session.claudeAppLink != nil { return "com.anthropic.claudefordesktop" }
         if let bundle = bundleId(for: session.terminal) { return bundle }
-        if session.tool == .codex, session.terminal.termProgram == nil, session.terminal.tty == nil {
-            return ["com.openai.codex", "com.openai.chat"].first {
-                NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
-            }
+        guard session.tool == .codex, session.terminal.tty == nil, session.terminal.termProgram == nil,
+              let path = session.transcriptPath,
+              CodexDesktopOrigin.matches(path: path, sessionID: session.sessionId) else { return nil }
+        return "com.openai.codex"
+    }
+
+    static func hostName(for session: Session) -> String? {
+        hostName(bundle: hostBundle(for: session)) ?? (session.tool.isWeb ? "Browser" : nil)
+    }
+
+    private static func hostName(bundle: String?) -> String? {
+        guard let bundle else { return nil }
+        switch bundle {
+        case "com.openai.chat": return "ChatGPT"
+        case "com.microsoft.VSCodeInsiders": return "VS Code Insiders"
+        case "com.vscodium": return "VSCodium"
+        case "dev.zed.Zed": return "Zed"
+        case "com.github.wez.wezterm": return "WezTerm"
+        case "net.kovidgoyal.kitty": return "kitty"
+        case "org.alacritty": return "Alacritty"
+        case "co.zeit.hyper": return "Hyper"
+        case "com.google.Chrome.canary": return "Chrome Canary"
+        default:
+            let name = TerminalContext(bundleId: bundle).appName
+            if name != "Terminal" || bundle == "com.apple.Terminal" { return name }
+            return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle)?
+                .deletingPathExtension().lastPathComponent
         }
-        return nil
+    }
+
+    static func sessionForBookmark(_ session: Session) -> Session {
+        guard session.terminal.bundleId == nil, let bundle = hostBundle(for: session) else { return session }
+        var captured = session
+        captured.terminal.bundleId = bundle
+        return captured
+    }
+
+    static func openLabel(for session: Session) -> String {
+        hostName(for: session).map { "Open in \($0)" } ?? "Open Conversation"
+    }
+
+    static func openLabel(for link: PinLink, in store: SessionStore) -> String {
+        if let session = currentSession(for: link, in: store) { return openLabel(for: session) }
+        switch link {
+        case .session(_, _, _, let terminal):
+            return hostName(bundle: bundleId(for: terminal)).map { "Open in \($0)" } ?? "Open Conversation"
+        case .url(let address):
+            return URL(string: address)?.scheme?.lowercased() == "claude" ? "Open in Claude" : "Open in Browser"
+        case .app(_, let name): return "Open \(name)"
+        }
     }
 
     /// Apps where a session is a shell tab, so the resume command is a useful fallback.
@@ -35,81 +80,135 @@ enum Jumper {
         "com.github.wez.wezterm", "net.kovidgoyal.kitty", "org.alacritty", "co.zeit.hyper",
     ]
 
-    static func open(session: Session, show: @escaping (String) -> Void) {
+    static func open(session: Session, opened: @escaping () -> Void = {}, show: @escaping (String) -> Void) {
         if session.tool.isWeb {
-            openWebChat(url: session.webURL, browser: session.terminal.bundleId, show: show)
+            openWebChat(url: session.webURL, browser: session.terminal.bundleId, opened: opened, show: show)
             return
         }
         // Open a project main conversation or child thread at its own address.
-        if let url = session.claudeAppLink, NSWorkspace.shared.urlForApplication(toOpen: url) != nil,
-           NSWorkspace.shared.open(url) {
+        if let url = session.claudeAppLink {
+            guard NSWorkspace.shared.urlForApplication(toOpen: url) != nil, NSWorkspace.shared.open(url) else {
+                show("Couldn’t open this conversation in Claude.")
+                return
+            }
+            opened()
             return
         }
         focus(tool: session.tool, sessionId: session.sessionId, cwd: session.cwd,
-              terminal: session.terminal, title: session.title, isWorking: session.state == .working, show: show)
+              terminal: session.terminal, bundle: hostBundle(for: session), title: session.title,
+              isWorking: session.state == .working, opened: opened, show: show)
     }
 
-    static func open(link: PinLink, show: @escaping (String) -> Void) {
+    static func currentSession(for link: PinLink, in store: SessionStore) -> Session? {
+        switch link {
+        case .session(let tool, let sessionID, _, _):
+            return store.sessions[Session.key(tool: tool, sessionId: sessionID)]
+        case .url(let address):
+            return store.sessions.values.first { session in
+                session.claudeAppLink?.absoluteString == address || (session.tool.isWeb && session.webURL == address)
+            }
+        case .app:
+            return nil
+        }
+    }
+
+    static func open(link: PinLink, in store: SessionStore, show: @escaping (String) -> Void) {
+        if let session = currentSession(for: link, in: store) {
+            open(session: session, show: show)
+            return
+        }
         switch link {
         case .url(let string):
-            guard let url = URL(string: string) else { return }
-            NSWorkspace.shared.open(url)
-        case .app(let bundleId, let name):
-            if !activate(bundleId: bundleId) { show("Couldn’t open \(name).") }
+            guard let url = URL(string: string), NSWorkspace.shared.open(url) else {
+                show("Couldn’t open this link.")
+                return
+            }
+        case .app(let bundleId, _):
+            activate(bundleId: bundleId, opened: {}, show: show)
         case .session(let tool, let sessionId, let cwd, let terminal):
-            focus(tool: tool, sessionId: sessionId, cwd: cwd, terminal: terminal, title: nil, isWorking: false, show: show)
+            guard !tool.isWeb else {
+                show("Reopen the original browser conversation to reconnect this saved link.")
+                return
+            }
+            focus(tool: tool, sessionId: sessionId, cwd: cwd, terminal: terminal,
+                  bundle: bundleId(for: terminal), title: nil, isWorking: false, show: show)
         }
     }
 
     private static func focus(tool: AgentTool, sessionId: String, cwd: String?, terminal: TerminalContext,
-                              title: String?, isWorking: Bool, show: @escaping (String) -> Void) {
-        let bundle = bundleId(for: terminal)
+                              bundle: String?, title: String?, isWorking: Bool, opened: @escaping () -> Void = {},
+                              show: @escaping (String) -> Void) {
         let bundleName = bundle ?? ""
         switch bundleName {
         case "com.googlecode.iterm2":
             if let uuid = terminal.itermSessionId?.split(separator: ":").last,
-               runScript(iTermScript(sessionUUID: String(uuid))) { return }
+               runScript(iTermScript(sessionUUID: String(uuid))) { opened(); return }
         case "com.apple.Terminal":
-            if let tty = terminal.tty, runScript(terminalScript(tty: tty)) { return }
-        case "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92", "com.vscodium":
-            if let cwd, openEditor(bundleId: bundleName, folder: cwd) { return }
+            if let tty = terminal.tty, runScript(terminalScript(tty: tty)) { opened(); return }
+        case "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92", "com.vscodium", "dev.zed.Zed":
+            if let cwd, let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleName) {
+                openURL(URL(fileURLWithPath: cwd), in: app, opened: opened, show: show)
+                return
+            }
         default:
             break
         }
-        // Desktop apps: open the exact thread when the app has a link for it.
         let inTerminal = bundle.map { terminalBundles.contains($0) } ?? false
-        if tool == .codex, !inTerminal, openCodexThread(sessionId) { return }
-        if tool == .claudeCode, bundleName == "com.anthropic.claudefordesktop" {
-            let desktop = ClaudeDesktopIndex.session(forCLI: sessionId,
-                                                     in: ClaudeDesktopIndex.load(root: ClaudeDesktopIndex.root()))
-            if let desktop, openClaudeSession(desktop) { return }
-            if activate(bundleId: bundleName) {
-                selectInSidebar(name: desktop?.title ?? title, bundleId: bundleName, appName: "Claude", show: show)
+        if !inTerminal {
+            if tool == .codex, bundleName == "com.openai.codex" || (bundle == nil && terminal.tty == nil && terminal.termProgram == nil),
+               openCodexThread(sessionId) { opened(); return }
+            if tool == .claudeCode, bundleName == "com.anthropic.claudefordesktop" || bundle == nil {
+                let claudeBundle = "com.anthropic.claudefordesktop"
+                let desktop = ClaudeDesktopIndex.session(forCLI: sessionId,
+                    in: ClaudeDesktopIndex.load(root: ClaudeDesktopIndex.root()))
+                if let desktop, openClaudeSession(desktop) { opened(); return }
+                if bundle == claudeBundle || desktop != nil {
+                    activate(bundleId: claudeBundle, opened: {
+                        opened()
+                        selectInSidebar(name: desktop?.title ?? title, bundleId: claudeBundle, appName: "Claude", show: show)
+                    }, show: show)
+                    return
+                }
+            }
+            if let bundle {
+                activate(bundleId: bundle, opened: {
+                    opened()
+                    if bundle == "com.openai.codex" { show("Codex is open. Select this conversation in its sidebar.") }
+                }, show: show)
                 return
             }
+            show("Couldn’t identify the app for this conversation.")
+            return
         }
-        // Otherwise bringing the app back is the best we can do.
-        if let bundle, !inTerminal, activate(bundleId: bundle) { return }
 
+        if bundle != "com.apple.Terminal", bundle != "com.googlecode.iterm2" {
+            activate(bundleId: bundleName, opened: opened, show: show)
+            return
+        }
         // A terminal session whose tab we couldn't find. Never hand the user a
         // command to paste: reopen the session in a new tab of the same
         // terminal, in its folder. Not while it may still be running in a tab
         // we failed to match, which would start a second copy.
         let terminalName = terminal.appName
         if isWorking {
-            if let bundle { _ = activate(bundleId: bundle) }
-            show("It’s still running in \(terminalName), but AI Runs couldn’t find the tab.")
+            activate(bundleId: bundleName, opened: {
+                opened()
+                show("It’s still running in \(terminalName), but AI Runs couldn’t find the tab.")
+            }, show: show)
             return
         }
-        if reopenInTerminal(bundle: bundle, command: tool.resumeCommand(sessionId: sessionId), cwd: cwd) {
+        if sessionId.range(of: #"\A[A-Za-z0-9_-]{1,160}\z"#, options: .regularExpression) != nil,
+           reopenInTerminal(bundle: bundle, command: tool.resumeCommand(sessionId: sessionId), cwd: cwd) {
+            opened()
             show("The original tab was closed, so the session reopened in a new tab.")
             return
         }
         if tool == .codex, openCodexThread(sessionId) {
+            opened()
             show("The terminal tab was closed, so the thread opened in Codex.")
             return
         }
-        show("Couldn’t reopen this session. Use “Copy Resume Command” in its details.")
+        show("Couldn’t reopen this session in its terminal.")
     }
 
     /// Opens a new tab running `command` in `cwd`: iTerm2 when the session came
@@ -149,16 +248,19 @@ enum Jumper {
 
     /// A ChatGPT or Claude chat: selects its tab if it is still open in the
     /// browser that reported it, otherwise opens the page there.
-    private static func openWebChat(url text: String?, browser: String?, show: @escaping (String) -> Void) {
+    private static func openWebChat(url text: String?, browser: String?, opened: @escaping () -> Void,
+                                    show: @escaping (String) -> Void) {
         guard let text, let url = URL(string: text) else {
             show("This chat’s address isn’t known yet.")
             return
         }
-        if let browser, selectTab(prefix: text, browser: browser) { return }
+        if let browser, selectTab(prefix: text, browser: browser) { opened(); return }
         if let browser, let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: browser) {
-            NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+            openURL(url, in: app, opened: opened, show: show)
+        } else if NSWorkspace.shared.open(url) {
+            opened()
         } else {
-            NSWorkspace.shared.open(url)
+            show("Couldn’t open this chat in a browser.")
         }
     }
 
@@ -205,7 +307,8 @@ enum Jumper {
 
     /// `codex://threads/<id>` opens a thread in the Codex (ChatGPT) desktop app.
     private static func openCodexThread(_ threadId: String) -> Bool {
-        guard let url = URL(string: "codex://threads/\(threadId)"),
+        guard threadId.range(of: #"\A[A-Za-z0-9_-]{1,160}\z"#, options: .regularExpression) != nil,
+              let url = URL(string: "codex://threads/\(threadId)"),
               NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { return false }
         return NSWorkspace.shared.open(url)
     }
@@ -260,21 +363,30 @@ enum Jumper {
         }
     }
 
-    static func activate(bundleId: String) -> Bool {
+    private static func activate(bundleId: String, opened: @escaping () -> Void, show: @escaping (String) -> Void) {
         if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first {
-            return running.activate()
+            if running.activate() { opened() } else { show("Couldn’t activate the original app.") }
+        } else if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration()) { running, error in
+                let success = running != nil && error == nil
+                Task { @MainActor in
+                    if success { opened() } else { show("Couldn’t open the original app.") }
+                }
+            }
+        } else {
+            show("Couldn’t find the original app on this Mac.")
         }
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return false }
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-        return true
     }
 
-    private static func openEditor(bundleId: String, folder: String) -> Bool {
-        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return false }
+    private static func openURL(_ url: URL, in app: URL, opened: @escaping () -> Void, show: @escaping (String) -> Void) {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
-        NSWorkspace.shared.open([URL(fileURLWithPath: folder)], withApplicationAt: appURL, configuration: configuration)
-        return true
+        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration) { running, error in
+            let success = running != nil && error == nil
+            Task { @MainActor in
+                if success { opened() } else { show("Couldn’t open this item in the original app.") }
+            }
+        }
     }
 
     private static func copy(_ text: String) {

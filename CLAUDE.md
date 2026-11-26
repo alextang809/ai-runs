@@ -109,17 +109,19 @@ not conversation messages.
   (APPROVE, NEEDS INPUT, REPLIED, WORKING, SCHEDULED, BACKGROUND, DONE) and by how
   the colour is applied: solid = needs you, outline = working, light = replied,
   grey = done or background.
-- Logo: a **fermata** (arc over a dot), "hold until the conductor gives the cue".
-  Menu bar: arc alone = idle, arc + dot = working, amber dot + count = holding
-  for you. Amber `#E8890C` belongs to the logo only. No traditional Chinese
-  cultural motifs in branding.
+- Logo: a hand-drawn **toaster** with a slice popping up: put a run in, do
+  something else, it pops when it is ready for you. Ink line on warm paper, one
+  icon for light and dark (no navy, no glow, no gradients that read as "AI").
+  Drawn by `Resources/AppIcon.svg`; 16 and 32 px use the plainer
+  `AppIconSmall.svg`. Menu bar: toaster alone = idle, slice down in the slot =
+  working, amber slice popped + count = holding for you. Amber `#E8890C`
+  belongs to the logo only. No traditional Chinese cultural motifs in branding.
 - When unsure, say so rather than guess: REPLIED instead of a wrong DONE.
 - Interface text is English. Alex talks to agents in Chinese.
 
 ## Behaviour decisions worth keeping
 
-- A session's name is chosen once (user rename > tool's own title > on-device
-  model > first real request) and does not follow every reply.
+- Keep the provider title for navigation. Display the current topic from user prompts in session lists. A name chosen by the user in AI Runs takes precedence. Pinning follows the live session. Save Reply captures the visible reply independently of later turns.
 - "Remove" hides a session until the user prompts it again or it asks for
   approval; Undo for 6 s.
 - Notifications: APPROVE and NEEDS INPUT on by default; REPLIED and DONE off;
@@ -130,8 +132,14 @@ not conversation messages.
   `airuns-hook`; each config file is backed up once as `*.airuns-backup`.
   Codex hook changes need the user's approval again, so don't change them lightly.
 
-- "Ignore for Now" on a run that waits on you (not on APPROVE): the row stays,
-  in an Ignored section, without counting or reminding, until the run moves on.
+- "Hold until…" (replaces "Ignore for Now" for new actions): a held run leaves
+  Needs you and the count and sits on the On hold line until its time (Today +3 h,
+  on the half hour, never past 22:00 and gone after 20:00; a day at 9:00, shown
+  as the day alone; or Waiting: check back in two days; dates AI Runs picks skip weekends). Its tray row always says when it is back, and held time is not
+  "waited on you". When due it comes back to
+  Needs you with "Back from hold" and counts until opened; no notification. APPROVE
+  can't be held, and an approval ends a hold. Rows ignored by earlier versions keep
+  their Ignored section and "Stop Ignoring".
 
 ## Privacy
 

@@ -4,82 +4,86 @@ import SwiftUI
 
 // MARK: - Session row
 
-/// A run's host icon, title, state, readable activity and observed history.
-/// Source/project metadata stays in the details; repository overlap stays visible.
+/// One run as a glass tile: the host icon on the left, the title over one
+/// line of what it is doing, and the state over its time on the right, so the
+/// tile balances on its own. Source/project metadata stays in the details;
+/// repository overlap stays visible as a third line.
 struct SessionRow: View {
+    static let minHeight: CGFloat = 54
+    /// Wide enough for the hover controls, so nothing moves when they appear.
+    static let stateColumn: CGFloat = 72
     let session: Session
-    let lifeline: [ActivitySpan]
+    let completedWorkDuration: TimeInterval?
     let now: Date
     /// Titles of other runs working in the same repository right now.
     var alsoHere: [String] = []
     @ObservedObject var ui: PanelUIState
     let rename: () -> Void
-    let pin: () -> Void
+    let togglePin: () -> Void
+    let details: () -> Void
     let remove: () -> Void
-    /// "Ignore for Now" or "Stop Ignoring"; nil when this run can't be ignored.
+    /// "Stop Ignoring" for a row ignored by an earlier version; nil otherwise.
     var ignore: (() -> Void)? = nil
+    /// "Hold Until" and "Bring Back Now".
+    var hold: HoldCommands? = nil
     let open: () -> Void
 
     private var key: PanelUIState.Target { .session(session.id) }
     private var highlighted: Bool { ui.hover == key }
+    private var workDuration: String? { completedWorkDuration.map(RunText.workDuration) }
+
+    /// Brighter glass for what is live (needs the user, or working in the
+    /// foreground); thinner for what is finished, parked or unknown.
+    private var level: GlassTile.Level {
+        if session.needsUser { return .raised }
+        if session.state == .working, session.native?.stale != true,
+           !session.isInBackground, !session.isQuiet(now: now) { return .raised }
+        return .quiet
+    }
 
     var body: some View {
         Button(action: open) {
-            HStack(alignment: .top, spacing: 10) {
-                AppIcon(bundleId: Jumper.hostBundle(for: session))
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(session.title)
-                            .font(AppTypography.rowTitle)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        // Always reserved, so nothing moves when the × appears.
-                        Color.clear.frame(width: RemoveZone.slot, height: 18)
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        StatePill(session: session, now: now)
-                        Spacer(minLength: 0)
-                    }
-                    HStack(spacing: 10) {
-                        LiveLine(session: session, now: now)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        // Requests get the full line; history must not squeeze their target.
-                        if session.state != .needsApproval && session.outcome != .needsInput {
-                            LifelineView(spans: lifeline, now: now, color: Palette.tool(session.tool))
-                                .frame(width: 104, height: 9)
-                                .help("Observed activity over the last hour")
-                        }
-                    }
-                    .padding(.top, 2)
+            HStack(alignment: .top, spacing: 11) {
+                AppIcon(bundleId: Jumper.hostBundle(for: session), size: 30)
+                    .padding(.top, 3)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(session.currentTopicTitle)
+                        .font(AppTypography.rowTitle.weight(.medium))
+                        .lineLimit(1)
+                    secondLine
                     if let warning = RunText.alsoHere(alsoHere) {
                         Label(warning, systemImage: "arrow.triangle.branch")
                             .font(AppTypography.metadata)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                            .padding(.top, 1)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 5) {
+                    StatePill(session: session, now: now, showsTime: false)
+                    // The hover controls take this line's place.
+                    Text(RunText.stateTime(session, now: now))
+                        .font(AppTypography.elapsed)
+                        .foregroundStyle(.secondary)
+                        .frame(height: 14)
+                        .opacity(highlighted ? 0 : 1)
+                }
+                .frame(minWidth: Self.stateColumn, alignment: .trailing)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(highlighted ? 0.08 : 0)))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(minHeight: Self.minHeight)
+            .glassTile(level, hovered: highlighted)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .topTrailing) {
-            if highlighted {
-                RemoveZone(label: "Remove \(session.title) from the list", action: remove)
-                    .padding(.top, 6 + 9 - RemoveZone.size.height / 2)
-                    .padding(.trailing, 8 + RemoveZone.slot / 2 - RemoveZone.size.width / 2)
-            }
-        }
         .contextMenu {
             Button("Open", action: open)
+            if let hold { HoldMenuItems(commands: hold) }
             if let ignore { Button(RunText.ignoreTitle(session), action: ignore) }
             Button("Rename…", action: rename)
-            Button("Pin to Board", action: pin)
+            Button(SessionRowControls.pinTitle(session), action: togglePin)
             Divider()
             Button("Remove from List", action: remove)
         }
@@ -88,29 +92,103 @@ struct SessionRow: View {
         .reportFrame(key.key)
         .accessibilityElement(children: .ignore)
         .accessibilityAction(named: "Remove from List", remove)
-        .accessibilityLabel("\(session.title), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
+        .accessibilityAction(named: Text(SessionRowControls.pinTitle(session)), togglePin)
+        .accessibilityAction(named: "Details", details)
+        .holdAccessibilityActions(hold)
+        .accessibilityLabel("\(session.currentTopicTitle), \(RunText.place(session)), \(RunText.stateWord(session, now: now)), \(RunText.stateTime(session, now: now)). \(RunText.rowActivity(session, now: now))\(workDuration.map { ". Observed working time, \($0)" } ?? "")\(RunText.alsoHere(alsoHere).map { ". \($0)" } ?? "")")
+        .accessibilityValue([session.hasUnreadReply ? "New reply" : nil,
+                             session.isBackFromHold ? session.hold?.returnText : nil].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
+        // ×, ··· and the pin, under the state pill where the time was.
+        .overlay(alignment: .topTrailing) {
+            HStack(spacing: 0) {
+                if highlighted {
+                    RemoveButton(label: "Remove \(session.currentTopicTitle) from the list", action: remove)
+                }
+                SessionRowControls(session: session, visible: highlighted, togglePin: togglePin, details: details)
+            }
+            // A near miss between the controls does nothing instead of opening the session.
+            .background { if highlighted { Color.clear.contentShape(Rectangle()).onTapGesture {} } }
+            .padding(.trailing, 6)
+            .padding(.top, 25)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
     }
+
+    /// "Back from hold · …", "New reply · …", then what it is doing or said.
+    private var secondLine: some View {
+        HStack(spacing: 4) {
+            if session.isBackFromHold, let hold = session.hold {
+                Text(hold.returnText).fontWeight(.medium).lineLimit(1).fixedSize()
+                Text("·").foregroundStyle(.secondary)
+            }
+            if session.hasUnreadReply {
+                Text("New reply").fontWeight(.medium).lineLimit(1).fixedSize()
+                Text("·").foregroundStyle(.secondary)
+            }
+            if RunText.rowActivity(session, now: now).isEmpty {
+                // Nothing known beyond the pill: say where it lives.
+                Text(RunText.place(session)).foregroundStyle(.secondary).lineLimit(1)
+            } else {
+                LiveLine(session: session, now: now)
+            }
+        }
+        .font(AppTypography.body)
+    }
+}
+
+/// ··· and the pin. Drawn only while the pointer is on the row (right-click
+/// has the same commands); they stay in the accessibility tree.
+struct SessionRowControls: View {
+    static let width: CGFloat = 50
+    let session: Session
+    var visible = true
+    let togglePin: () -> Void
+    let details: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            control("ellipsis", label: "Details", id: "details", action: details)
+            control(session.isPinned ? "pin.fill" : "pin", label: Self.pinTitle(session), id: "pin", action: togglePin)
+        }
+        // Clear glyphs rather than zero opacity: a transparent view would leave
+        // the accessibility tree, and VoiceOver still needs these.
+        .allowsHitTesting(visible)
+    }
+
+    private func control(_ image: String, label: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: image)
+                .font(AppTypography.controlIcon)
+                .foregroundStyle(visible ? Color.secondary : Color.clear)
+                .frame(width: Self.width / 2, height: 23)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("session.\(session.id).\(id)")
+    }
+
+    static func pinTitle(_ session: Session) -> String { session.isPinned ? "Unpin" : "Pin to Top" }
 }
 
 /// Words shared by the row, the flyout and VoiceOver.
 enum RunText {
-    static func place(_ session: Session) -> String {
-        var host = session.terminal.appName
-        if session.tool == .codex, session.terminal.bundleId == nil, session.terminal.termProgram == nil,
-           session.terminal.tty == nil {
-            host = "Codex"
-        }
+    @MainActor static func place(_ session: Session) -> String {
         var parts: [String]
         if session.isProjectConversation {
             parts = ["Claude project"]
             if session.projectMainId != nil { parts.append("Main conversation") }
-        } else if session.tool.isWeb {
-            parts = [session.tool.displayName, host]
-        } else if (session.tool == .claudeCode && host == "Claude") || (session.tool == .codex && host == "Codex") {
-            parts = ["\(host) app"]
+        } else if let host = Jumper.hostName(for: session) {
+            if (session.tool == .claudeCode && host == "Claude") || (session.tool == .codex && host == "Codex") {
+                parts = ["\(host) app"]
+            } else {
+                parts = [session.tool.displayName, host]
+            }
         } else {
-            parts = [session.tool.displayName, host]
+            parts = [session.tool.displayName]
         }
         if !session.project.isEmpty { parts.append(session.project) }
         if let driver = session.drivenBy { parts.append("via \(driver)") }
@@ -125,8 +203,10 @@ enum RunText {
     }
 
     /// "Seen in Claude just now", "Seen in Claude 3m ago".
-    static func seen(_ native: NativeSighting, now: Date) -> String {
-        let age = now.timeIntervalSince(native.seenAt)
+    static func seen(_ native: NativeSighting, now: Date) -> String { seen(at: native.seenAt, now: now) }
+
+    static func seen(at seenAt: Date, now: Date) -> String {
+        let age = max(0, now.timeIntervalSince(seenAt))
         return age < 60 ? "Seen in Claude just now" : "Seen in Claude \(TextUtils.duration(age)) ago"
     }
 
@@ -154,6 +234,12 @@ enum RunText {
         }
     }
 
+    static func workDuration(_ seconds: TimeInterval) -> String {
+        if seconds < 1 { return "<1s" }
+        if seconds < 60 { return "\(Int(seconds))s" }
+        return TextUtils.duration(seconds)
+    }
+
     static func stateTime(_ session: Session, now: Date) -> String {
         guard session.state != .unknown else { return "" }
         if session.state.needsUser {
@@ -166,17 +252,15 @@ enum RunText {
     static func liveText(_ session: Session, now: Date) -> String {
         if let native = session.native {
             if session.nativeView?.isOpen == true {
-                let age = max(0, now.timeIntervalSince(native.seenAt))
-                let when = age < 60 ? "just now" : "\(TextUtils.duration(age)) ago"
-                return "Open in Claude · state \(native.stale == true ? "last seen" : "seen") \(when)"
+                return "Open in Claude"
             }
-            return native.stale == true ? "State unknown · show its Threads list in Claude to refresh" : seen(native, now: now)
+            // The pill already says LAST SEEN or the state; this line says what to do or when.
+            return native.stale == true ? "Show Threads in Claude to refresh" : seen(native, now: now)
         }
         if session.state == .unknown {
-            guard let view = session.nativeView else { return "State unavailable" }
-            let age = max(0, now.timeIntervalSince(view.seenAt))
-            let when = age < 60 ? "just now" : "\(TextUtils.duration(age)) ago"
-            return view.isOpen ? "Open in Claude · seen \(when)" : "Seen in Claude \(when) · state unavailable"
+            // The pill already says STATE UNKNOWN.
+            guard let view = session.nativeView else { return "" }
+            return view.isOpen ? "Open in Claude" : seen(at: view.seenAt, now: now)
         }
         let detail = stateDetail(session, now: now)
         return session.nativeView?.isOpen == true ? "Open in Claude · \(detail)" : detail
@@ -235,6 +319,8 @@ enum RunText {
 struct StatePill: View {
     let session: Session
     let now: Date
+    /// False on a tile, where the time sits under the pill.
+    var showsTime = true
 
     var body: some View {
         let tint = Palette.tool(session.tool)
@@ -264,7 +350,7 @@ struct StatePill: View {
             Text(RunText.stateWord(session, now: now))
                 .font(AppTypography.badge)
                 .tracking(0.2)
-            if session.state != .unknown {
+            if showsTime, session.state != .unknown {
                 Text(RunText.stateTime(session, now: now))
                     .font(AppTypography.elapsed)
             }
@@ -363,7 +449,6 @@ struct LifelineView: View {
     /// The tool's colour: solid while working, faded and outlined while it
     /// waits on the user, grey in the background.
     let color: Color
-    var window: TimeInterval = 3600
 
     var body: some View {
         Canvas { context, size in
@@ -373,6 +458,7 @@ struct LifelineView: View {
             line.addLine(to: CGPoint(x: size.width, y: mid))
             context.stroke(line, with: .color(.secondary.opacity(0.45)), style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
 
+            let window = SessionStore.lifelineWindow
             let start = now.addingTimeInterval(-window)
             for span in spans {
                 let from = max(span.start, start), to = min(span.end(or: now), now)
@@ -402,6 +488,7 @@ struct LifelineView: View {
 /// The icon of the app the session runs in, as the Mac draws it.
 struct AppIcon: View {
     let bundleId: String?
+    var size: CGFloat = 26
 
     @MainActor private static var cache: [String: NSImage] = [:]
 
@@ -425,7 +512,7 @@ struct AppIcon: View {
                     .padding(2)
             }
         }
-        .frame(width: 26, height: 26)
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
 }
@@ -454,20 +541,16 @@ struct HeaderDashboard: View {
 
     @ViewBuilder private var todayLine: some View {
         let waited = TextUtils.duration(stats.waitedToday)
-        HStack(spacing: 0) {
-            Text("Agents waited on you ")
-            Text(waited == "now" ? "0m" : waited)
-                .font(AppTypography.elapsed)
-                .foregroundStyle(stats.waitedToday >= 60 ? Color.primary : .secondary)
-            Text(" today")
-            if let average = stats.averageReply {
-                Text(" · you replied in ")
-                Text(Self.short(average))
-                    .font(AppTypography.elapsed)
-                    .foregroundStyle(.primary)
-                Text(" on average")
-            }
-        }
+        // One text, so the spaces between the words and the numbers are kept.
+        let waitedText = Text(waited == "now" ? "0m" : waited)
+            .font(AppTypography.elapsed)
+            .foregroundStyle(stats.waitedToday >= 60 ? Color.primary : .secondary)
+        let replied = stats.averageReply.map { average in
+            Text(" · you replied in ")
+                + Text(Self.short(average)).font(AppTypography.elapsed).foregroundStyle(.primary)
+                + Text(" on average")
+        } ?? Text("")
+        (Text("Agents waited on you ") + waitedText + Text(" today") + replied)
         .font(AppTypography.metadata)
         .foregroundStyle(.secondary)
         .lineLimit(1)
@@ -556,46 +639,10 @@ struct SectionLabel: View {
             Text("\(count)").font(AppTypography.elapsed)
         }
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 14)
+        .padding(.leading, 16)
+        .padding(.trailing, 13)
         .padding(.top, 7)
-        .padding(.bottom, 1)
-    }
-}
-
-struct LifelineLegend: View {
-    var body: some View {
-        HStack(spacing: 7) {
-            swatch(Palette.claude, "Claude")
-            swatch(Palette.codex, "Codex")
-            Text("·")
-            bar(filled: true, "working")
-            bar(filled: false, "waiting on you")
-            Spacer(minLength: 4)
-            Text("last 60 min")
-        }
-        .font(AppTypography.metadata)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .padding(.horizontal, 14)
-        .padding(.top, 2)
-        .padding(.bottom, 6)
-    }
-
-    private func swatch(_ color: Color, _ label: String) -> some View {
-        HStack(spacing: 4) {
-            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 6)
-            Text(label)
-        }
-    }
-
-    private func bar(filled: Bool, _ label: String) -> some View {
-        HStack(spacing: 4) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color.secondary.opacity(filled ? 0.9 : 0.25))
-                .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Color.secondary, lineWidth: filled ? 0 : 1))
-                .frame(width: 10, height: 6)
-            Text(label)
-        }
+        .padding(.bottom, 2)
     }
 }
 

@@ -86,9 +86,9 @@ notification when the reply is ready, and a click brings back that exact tab.
 
 ## Can't see the icon?
 
-The icon is an arc over a dot, a musical *fermata*: "hold until the conductor gives
-the cue". Arc alone: nothing running. Arc and dot: runs in progress. Amber dot and a
-number: that many are holding for you.
+The icon is a small toaster: put a run in, do something else, and it pops when it
+is ready for you. Toaster alone: nothing running. A slice down in the slot: runs in
+progress. An amber slice popped up and a number: that many are holding for you.
 
 <p align="center"><img src="docs/menubar.png" width="560" alt="Menu bar icon states and the floating window capsule"></p>
 <p align="center"><sub><i>Illustration.</i></sub></p>
@@ -106,14 +106,13 @@ If you don't see it:
 **The overview** shows Needs you, Working and Today counts, a two-hour activity
 chart and today's waiting time.
 
-**Each row** shows the app's real icon, the session name (the same one Claude or
-Codex shows in its sidebar), state and elapsed time, plus readable activity or
+**Each row** shows the app's real icon, the current topic, state and elapsed time, plus readable activity or
 current plan progress and a small history bar. Approval requests and input
 questions use the full activity line. A branch symbol warns when other sessions
 are working in the same repository. Hover for source, project and full details.
 Done starts expanded and can be folded; Ignored starts collapsed. Long lists scroll
-while Settings and the floating-window control stay visible. The pinned board
-lives in the floating window, leaving the main menu for sessions.
+while Settings and the floating-window control stay visible. Saved items appear under
+**Later** in both windows. The floating window also has the full pinned board.
 
 | You see | Means |
 |---|---|
@@ -175,7 +174,8 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 
   <p align="center"><img src="docs/flyout.png" width="560" alt="Hovering a row shows its details and Ignore for Now"></p>
   <p align="center"><sub><i>Illustration: hover a row for its details and actions.</i></sub></p>
-- **Rename**, **Pin to Board** and more: right-click a row, or hover it for details.
+- The displayed topic follows changes in your requests. **Rename** keeps a name of your choice.
+- Click the pin at the end of a session row to follow its latest progress in **Pinned**. When it asks for input or approval, the row moves to **Needs you** and returns to **Pinned** after you respond. Open **Details** and choose **Save Reply** beside a message to keep that version under **Later** in either window.
 - **Floating window:** click **Floating Window** at the bottom of the panel. A small capsule stays on
   top of every app, Space and full-screen window, including Stage Manager sets,
   showing how many sessions need you. Switching apps or waking your Mac restores
@@ -235,7 +235,7 @@ profile to verify the account and shows the plan when Qwen provides it.
 
 Choose **DeepSeek** or **Qwen API** to connect with an API key. DeepSeek shows the
 API balance. Qwen uses a standard pay-as-you-go key from Qwen AI Platform
-(China) or QwenCloud (Singapore) and shows the Qwen models returned by that
+(Mainland China) or QwenCloud (Singapore) and shows the Qwen models returned by that
 platform. These connections query read-only endpoints and do not generate
 inference requests or track consumer chat subscriptions.
 

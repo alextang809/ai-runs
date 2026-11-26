@@ -187,6 +187,10 @@ final class SessionStoreTests: XCTestCase {
 final class TextUtilsTests: XCTestCase {
     func testTitleCleansPrompt() {
         XCTAssertEqual(TextUtils.title(fromPrompt: "  Fix   the\nbug ```let x = 1``` please "), "Fix the bug please")
+        XCTAssertEqual(TextUtils.plainText("Push `notes.md` so **both** see [it](https://example.com)"),
+                       "Push notes.md so both see it")
+        XCTAssertEqual(TextUtils.plainText("## Done\n> fixed snake_case in *.swift"), "Done\nfixed snake_case in *.swift")
+        XCTAssertEqual(TextUtils.preview(of: "Found **about 12 GB** in `~/Library`"), "Found about 12 GB in ~/Library")
         XCTAssertEqual(TextUtils.title(fromPrompt: "   "), "Untitled session")
         let long = String(repeating: "word ", count: 30)
         XCTAssertTrue(TextUtils.title(fromPrompt: long).hasSuffix("…"))
@@ -700,6 +704,51 @@ final class TimelineTests: XCTestCase {
         store.resolve(id: "claude-code:s1", at: t(13))
         XCTAssertTrue(store.sessions.isEmpty)
         XCTAssertEqual(store.history?["claude-code:s1"]?.last?.end, t(13))
+    }
+
+    func testCompletedWorkDurationUsesObservedWorkFromTheLatestTurn() {
+        let id = "claude-code:s1"
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 0))
+        store.apply(AgentEvent(tool: .claudeCode, kind: .turnEnd, sessionId: "s1",
+                               at: t(10), lastMessage: "All done."))
+        store.apply(ev(.promptStart, 14))
+        store.apply(ev(.needsApproval, 17))
+        store.apply(ev(.toolActivity, 20))
+        store.apply(ev(.turnEnd, 25, tasks: 1))
+        XCTAssertNil(store.completedWorkDuration(for: id))
+
+        store.apply(AgentEvent(tool: .claudeCode, kind: .turnEnd, sessionId: "s1",
+                               at: t(42), lastMessage: "All done."))
+        XCTAssertTrue(store.sessions[id]?.isDone == true)
+        XCTAssertFalse(store.lifeline(for: id, now: t(200)).contains { $0.kind == .working })
+        XCTAssertEqual(store.completedWorkDuration(for: id), 8 * 60)
+    }
+
+    func testCompletedWorkDurationClipsAndDeduplicatesOverlappingSpans() {
+        let id = "claude-code:s1"
+        var store = SessionStore()
+        store.apply(ev(.promptStart, 10))
+        store.apply(AgentEvent(tool: .claudeCode, kind: .turnEnd, sessionId: "s1",
+                               at: t(20), lastMessage: "All done."))
+        store.history = [id: [
+            ActivitySpan(kind: .working, start: t(16), end: t(21)),
+            ActivitySpan(kind: .working, start: t(9), end: t(17)),
+            ActivitySpan(kind: .working, start: t(13), end: t(14)),
+            ActivitySpan(kind: .working, start: t(22))
+        ]]
+
+        XCTAssertEqual(store.completedWorkDuration(for: id), 10 * 60)
+    }
+
+    func testCompletedWorkDurationRequiresObservedWorkDuringTheTurn() {
+        let id = "claude-code:s1"
+        var store = SessionStore()
+        store.apply(AgentEvent(tool: .claudeCode, kind: .turnEnd, sessionId: "s1",
+                               at: t(42), lastMessage: "All done."))
+        XCTAssertTrue(store.sessions[id]?.isDone == true)
+        XCTAssertNil(store.completedWorkDuration(for: id))
+        XCTAssertNil(store.completedWorkDuration(for: "missing"))
     }
 
     func testStats() {
