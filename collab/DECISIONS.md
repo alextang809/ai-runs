@@ -2,6 +2,7 @@
 
 Newest first. One line each: date — decision — who decided — link to the note.
 
+- 2026-11-26 — One folder builds and installs for every agent (`~/ai-runs-build` → `/Applications/AI Runs.app`); editing folders stay separate; no other folder keeps a built app — Alex — [13-codex-brief.md](rounds/13-codex-brief.md)
 - 2026-11-19 — Add recorded local token usage (default rolling 24h), a usage-first inactive menu, and separate multi-account provider sign-ins; push the feature for review without merging — Alex — [07-codex.md](rounds/07-codex.md)
 - 2026-11-19 — Restore overview statistics, readable activities and small history bars; start Done expanded while retaining regular type, host icons, repository-branch warnings, no repeated subtitles and no Pinned section in the menu — Alex — [06-codex.md](rounds/06-codex.md)
 - 2026-11-19 — Use regular-weight compact menu rows with host icons, titles and state/time; omit source/project subtitles and default statistics/history, collapse Done/Ignored, and keep Pinned only in the floating window — Alex — [06-codex.md](rounds/06-codex.md)
