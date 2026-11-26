@@ -50,6 +50,18 @@ Picture: `dock-round11.png` (Alex has it).
 - A held row's time menu has a section for its day: Morning 9:00, Afternoon 1:00 PM,
   Evening 5:00 PM (only the ones still ahead). The line still only knows days.
 
+**Rows as glass tiles (`de856aa` and later; Alex picked this from a real-size mock)**
+- In the menu panel each run is a tile (`SessionRow`, 54 pt): host icon 30 pt, title over one
+  line of activity, and on the right the state pill over its time. "Back from hold" and
+  "New reply" lead the second line. A repository overlap warning adds a third line.
+- `GlassTile` is drawn (translucent white gradient, hairline edge, hairline shadow), not a
+  second Liquid Glass layer. Raised for runs that need the user or work in the foreground,
+  quiet for done, background, stale and unknown. Reduce Transparency and Increase Contrast
+  have their own fills and border.
+- On hover the time gives its place to ×, ··· and the pin.
+- The lifeline and its time scale left the list; the details flyout shows the last hour.
+- On hold in the menu panel is a quiet tile. The floating window is unchanged.
+
 ## Test, and report what you saw
 
 1. Hold something for Thu and nothing else: the line is two rows; the tray says "Thu ⌄";
@@ -64,6 +76,11 @@ Picture: `dock-round11.png` (Alex has it).
 6. Rows: hover in and out quickly; do the controls flicker or steal the click that opens the
    row? Is a pinned row in Needs you still recognisable without the pin?
 7. Hold for Thu, pick Afternoon: the tray says "Thu 1:00 PM" and the dot moves.
+8. Tiles on macOS 26 Liquid Glass and on the frosted fallback, light and dark, over a busy
+   and a plain wallpaper: do they read as panes on the panel, or as grey boxes? Screenshots
+   please. Is the raised/quiet difference visible? Any text that loses contrast?
+9. Tiles: long titles next to NEEDS INPUT; the hover controls against the pill; dragging a
+   tile to a day still starts from anywhere on it.
 
 ## Write back
 

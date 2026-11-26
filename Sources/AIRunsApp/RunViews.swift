@@ -138,16 +138,6 @@ struct SessionRow: View {
     }
 }
 
-struct UnreadReplyLabel: View {
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle().fill(Color.primary).frame(width: 5, height: 5)
-            Text("New reply").font(AppTypography.section)
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
 /// ··· and the pin. Drawn only while the pointer is on the row (right-click
 /// has the same commands); they stay in the accessibility tree.
 struct SessionRowControls: View {
