@@ -545,11 +545,11 @@ struct ToastView: View {
 enum Icons {
     /// What the menu bar mark is saying.
     enum Status: Equatable {
-        /// Nothing is running: the arc alone.
+        /// Nothing is running: the toaster alone.
         case idle
-        /// Runs are in progress: the arc with its dot.
+        /// Runs are in progress: a slice is down in the toaster.
         case working
-        /// A run is holding for the user: the dot turns amber.
+        /// A run is holding for the user: the slice has popped, in amber.
         case needsYou
 
         init(store: SessionStore) {
@@ -561,25 +561,76 @@ enum Icons {
         }
     }
 
-    /// The logo's amber, used for the dot and the count.
+    /// The logo's amber, used for the popped slice and the count.
     static let amber = NSColor(red: 0.91, green: 0.537, blue: 0.047, alpha: 1)
 
-    /// The app's mark, a fermata: the musical sign for "hold until the
-    /// conductor gives the cue". A run holds; the user gives the cue.
-    /// Template (follows the menu bar's colour) unless the dot is amber.
+    /// The app's mark, a toaster: you put a run in, do something else, and
+    /// it pops when it is ready for you. Template (follows the menu bar's
+    /// colour) unless the slice is amber.
     static func statusImage(_ status: Status) -> NSImage {
         let size = NSSize(width: 18, height: 16)
         let image = NSImage(size: size, flipped: false) { _ in
             let ink = status == .needsYou ? NSColor.labelColor : NSColor.black
-            let arc = NSBezierPath()
-            arc.appendArc(withCenter: NSPoint(x: 9, y: 4.6), radius: 6.6, startAngle: 0, endAngle: 180)
-            arc.lineWidth = 1.9
-            arc.lineCapStyle = .round
-            ink.setStroke()
-            arc.stroke()
+            let bodyTop: CGFloat = 9.1
+
             if status != .idle {
-                (status == .needsYou ? amber : ink).setFill()
-                NSBezierPath(ovalIn: NSRect(x: 9 - 2, y: 5.1 - 2, width: 4, height: 4)).fill()
+                // The slice: low in the slot while working, popped when a
+                // run needs the user.
+                let top: CGFloat = status == .needsYou ? 15.2 : 12.3
+                let slice = NSBezierPath()
+                slice.move(to: NSPoint(x: 5.6, y: bodyTop))
+                slice.line(to: NSPoint(x: 5.6, y: top - 2.1))
+                slice.line(to: NSPoint(x: 4.9, y: top - 1.2))
+                slice.line(to: NSPoint(x: 6.5, y: top - 0.2))
+                slice.line(to: NSPoint(x: 8.3, y: top - 0.7))
+                slice.line(to: NSPoint(x: 10.1, y: top - 0.2))
+                slice.line(to: NSPoint(x: 11.7, y: top - 1.2))
+                slice.line(to: NSPoint(x: 11, y: top - 2.1))
+                slice.line(to: NSPoint(x: 11, y: bodyTop))
+                slice.lineJoinStyle = .round
+                slice.lineCapStyle = .round
+                if status == .needsYou {
+                    slice.close()
+                    amber.setFill()
+                    amber.setStroke()
+                    slice.lineWidth = 1
+                    slice.fill()
+                } else {
+                    ink.setStroke()
+                    slice.lineWidth = 1.3
+                }
+                slice.stroke()
+            }
+
+            ink.setStroke()
+            ink.setFill()
+            let body = NSBezierPath(roundedRect: NSRect(x: 2, y: bodyTop - 6.2, width: 12.6, height: 6.2),
+                                    xRadius: 2, yRadius: 2)
+            body.lineWidth = 1.5
+            body.stroke()
+
+            let feet = NSBezierPath()
+            feet.move(to: NSPoint(x: 4.6, y: 1.4))
+            feet.line(to: NSPoint(x: 6, y: 1.4))
+            feet.move(to: NSPoint(x: 10.6, y: 1.4))
+            feet.line(to: NSPoint(x: 12, y: 1.4))
+            feet.lineWidth = 1.3
+            feet.lineCapStyle = .round
+            feet.stroke()
+
+            // The lever is down while a slice is in.
+            let lever: CGFloat = status == .working ? 5.6 : 7.6
+            NSBezierPath(ovalIn: NSRect(x: 16.4 - 1.15, y: lever - 1.15, width: 2.3, height: 2.3)).fill()
+
+            if status == .idle {
+                // The empty slot, so the idle mark does not read as a battery.
+                let slot = NSBezierPath()
+                slot.move(to: NSPoint(x: 5.8, y: 6.6))
+                slot.line(to: NSPoint(x: 10.8, y: 6.6))
+                slot.lineWidth = 1.2
+                slot.lineCapStyle = .round
+                ink.withAlphaComponent(0.55).setStroke()
+                slot.stroke()
             }
             return true
         }

@@ -109,10 +109,13 @@ not conversation messages.
   (APPROVE, NEEDS INPUT, REPLIED, WORKING, SCHEDULED, BACKGROUND, DONE) and by how
   the colour is applied: solid = needs you, outline = working, light = replied,
   grey = done or background.
-- Logo: a **fermata** (arc over a dot), "hold until the conductor gives the cue".
-  Menu bar: arc alone = idle, arc + dot = working, amber dot + count = holding
-  for you. Amber `#E8890C` belongs to the logo only. No traditional Chinese
-  cultural motifs in branding.
+- Logo: a hand-drawn **toaster** with a slice popping up: put a run in, do
+  something else, it pops when it is ready for you. Ink line on warm paper, one
+  icon for light and dark (no navy, no glow, no gradients that read as "AI").
+  Drawn by `Resources/AppIcon.svg`; 16 and 32 px use the plainer
+  `AppIconSmall.svg`. Menu bar: toaster alone = idle, slice down in the slot =
+  working, amber slice popped + count = holding for you. Amber `#E8890C`
+  belongs to the logo only. No traditional Chinese cultural motifs in branding.
 - When unsure, say so rather than guess: REPLIED instead of a wrong DONE.
 - Interface text is English. Alex talks to agents in Chinese.
 
