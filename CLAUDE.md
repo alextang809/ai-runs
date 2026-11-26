@@ -88,10 +88,16 @@ not conversation messages.
   Pushing tags is refused from Claude cloud sessions; Alex pushes them from his Mac.
 - `gh` GraphQL is blocked in Claude cloud sessions: open PRs with the REST API
   (`gh api repos/alextang809/ai-runs/pulls -f title=… -f head=… -f base=main -f body=…`).
-- On Alex's Mac, `~/ai-runs` is Codex's working copy; builds happen in the
-  worktree `~/ai-runs-build` (`git fetch && git checkout --detach origin/main &&
-  ./Scripts/install_local.sh`). Keep one copy only, `/Applications/AI Runs.app`:
-  several copies with the same bundle ID confuse macOS permissions.
+- On Alex's Mac one folder builds and installs, for every agent: the worktree
+  `~/ai-runs-build` (`git fetch && git checkout --detach origin/main &&
+  ./Scripts/install_local.sh`; any branch in place of `main`). Claude reaches it
+  through Remote Control, Codex uses it directly. Never edit or commit there.
+  Editing folders are not shared: `~/ai-runs` is Codex's working copy, and two
+  agents switching branches in one folder overwrite each other's work.
+- Keep one copy only, `/Applications/AI Runs.app`: several copies with the same
+  bundle ID confuse macOS permissions and can leave an old icon on screen. No
+  other folder keeps a built `AI Runs.app`; a `build/` made anywhere else for a
+  check is deleted before the round ends and is never launched.
 - Signing: `./Scripts/make_signing_identity.sh` creates or reuses the self-signed
   "AI Runs Local Signing" identity and signs a temporary probe to check key access.
   If macOS asks, enter the login keychain password in its dialog and choose
