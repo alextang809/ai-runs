@@ -130,7 +130,7 @@ Windows 11 用户可从 [Windows 预发行页](https://github.com/alextang809/ai
 - **Hold Until（先搁置）：**在等你回答或回复的会话（APPROVE 不行）可以先搁置：把这一行拖到面板底部 **On hold** 时间线上的某一天，或者在悬停卡片、右键菜单、悬浮窗里选 **Hold Until**，可以选今天晚些时候、某一天，或者 **Waiting on…**（在等某个人）。通知上也有 **Hold** 按钮。搁置的会话离开 Needs you，不计数，搁置的时间也不算作"等了你多久"。到时间后它回到 Needs you，标着 **Back from hold**，不发通知。点 **Bring Back Now** 可以提前取回；它请求批准时也会自动结束搁置。AI Runs 自动选的日期会跳过周末。
 
   <p align="center"><img src="docs/flyout.png" width="560" alt="鼠标停在某一行上会显示详情和操作"></p>
-  <p align="center"><sub><i>1.1 版的示意图：鼠标停在某一行上看详情和操作。现在 Hold Until 取代了 Ignore for Now。</i></sub></p>
+  <p align="center"><sub><i>示意图：鼠标停在某一行上看详情和操作。</i></sub></p>
 - **改名、置顶到钉板**等：右键某一行，或者把鼠标停在上面看详情。
 - **悬浮窗：**在面板最下面点 **Floating Window**。一个小胶囊会停在所有 App、所有桌面、全屏窗口的上面，也支持台前调度（Stage Manager），显示有几个会话在等你。切换 App 或唤醒 Mac 后会恢复显示，不抢走键盘焦点。点一下展开，能看到会话列表和钉板；可以拖到任何地方，靠近屏幕边缘会自动吸附。点 **Floating Window** 后会保持隐藏，直到你再次显示它。有会话等你时自动展开的功能默认关闭，可在设置里打开，只对已经显示的悬浮窗生效。
 - **钉板：**在悬浮窗的 Pinned 标签里，按项目分组，记下不想丢的线程和随手的笔记。往里拖文字或链接就会生成卡片。

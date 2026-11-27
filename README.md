@@ -177,7 +177,7 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
   weekends.
 
   <p align="center"><img src="docs/flyout.png" width="560" alt="Hovering a row shows its details and actions"></p>
-  <p align="center"><sub><i>Illustration from 1.1: hover a row for its details and actions. Hold Until now takes the place of Ignore for Now.</i></sub></p>
+  <p align="center"><sub><i>Illustration: hover a row for its details and actions.</i></sub></p>
 - The displayed topic follows changes in your requests. **Rename** keeps a name of your choice.
 - Click the pin at the end of a session row to follow its latest progress in **Pinned**. When it asks for input or approval, the row moves to **Needs you** and returns to **Pinned** after you respond. Open **Details** and choose **Save Reply** beside a message to keep that version under **Later** in either window.
 - **Floating window:** click **Floating Window** at the bottom of the panel. A small capsule stays on
