@@ -391,6 +391,51 @@ final class EventLogTests: XCTestCase {
         XCTAssertEqual(restarted.resumeOffset, restarted.offset)
     }
 
+    func testCompactionEmptiesAFullyReadLog() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try EventLogWriter.append(Data("one".utf8), to: url)
+        let reader = EventLogReader(url: url)
+        XCTAssertEqual(reader.readNewLines(), [Data("one".utf8)])
+
+        // Under the limit the log is kept.
+        reader.compactIfNeeded(limit: 100)
+        XCTAssertEqual(try Data(contentsOf: url), Data("one\n".utf8))
+        XCTAssertEqual(reader.offset, 4)
+
+        reader.compactIfNeeded(limit: 4)
+        XCTAssertEqual(try Data(contentsOf: url), Data())
+        XCTAssertEqual(reader.offset, 0)
+
+        try EventLogWriter.append(Data("two".utf8), to: url)
+        XCTAssertEqual(reader.readNewLines(), [Data("two".utf8)])
+    }
+
+    /// Compaction throws the whole file away, so it must not run while the
+    /// file holds anything the reader has not handed on.
+    func testCompactionWaitsForUnreadAndUnfinishedLines() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try EventLogWriter.append(Data("one".utf8), to: url)
+        let reader = EventLogReader(url: url)
+        XCTAssertEqual(reader.readNewLines(), [Data("one".utf8)])
+
+        // A hook wrote a line after the last read.
+        try EventLogWriter.append(Data("two".utf8), to: url)
+        reader.compactIfNeeded(limit: 1)
+        XCTAssertEqual(reader.readNewLines(), [Data("two".utf8)])
+
+        // A line is still being written.
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("thr".utf8))
+        XCTAssertEqual(reader.readNewLines(), [])
+        reader.compactIfNeeded(limit: 1)
+        try handle.write(contentsOf: Data("ee\n".utf8))
+        try handle.close()
+        XCTAssertEqual(reader.readNewLines(), [Data("three".utf8)])
+    }
+
     func testPathsHonourEnvironment() {
         let paths = AIRunsPaths(environment: ["AIRUNS_HOME": "/tmp/airuns-test"])
         XCTAssertEqual(paths.events.path, "/tmp/airuns-test/events.jsonl")
