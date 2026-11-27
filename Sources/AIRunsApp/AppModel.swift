@@ -260,7 +260,7 @@ final class AppModel: ObservableObject {
             store = updated
             saveSessions()
         }
-        try? JSONFile.save(Cursor(offset: reader.offset), to: paths.cursor)
+        try? JSONFile.save(Cursor(offset: reader.resumeOffset), to: paths.cursor)
         now = Date()
         guard usesSystemServices else { return }
         suggestTitles()
