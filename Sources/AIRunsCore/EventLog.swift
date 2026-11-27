@@ -56,6 +56,14 @@ public final class EventLogReader {
         self.offset = offset
     }
 
+    /// Where a new reader has to start so that no line is lost: `offset`, less
+    /// the bytes of a trailing line that was read before it was finished.
+    /// This, not `offset`, is what belongs in a saved cursor.
+    public var resumeOffset: UInt64 {
+        let pending = UInt64(partial.count)
+        return offset >= pending ? offset - pending : 0
+    }
+
     /// Complete lines written since the last call. A trailing line without a
     /// newline is kept until it is finished.
     /// A bounded recovery read leaves the unread tail to the live reader. If

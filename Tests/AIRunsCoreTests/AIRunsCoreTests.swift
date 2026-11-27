@@ -370,6 +370,27 @@ final class EventLogTests: XCTestCase {
         XCTAssertEqual(reader.readNewLines().map { String(decoding: $0, as: UTF8.self) }, ["three"])
     }
 
+    /// The app saves its cursor after every read. If it quits while a hook is
+    /// half way through a line, the next launch must still get that line whole.
+    func testCursorResumesBeforeAnUnfinishedLine() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("one\ntw".utf8).write(to: url)
+        let reader = EventLogReader(url: url)
+        XCTAssertEqual(reader.readNewLines(), [Data("one".utf8)])
+        XCTAssertEqual(reader.offset, 6)
+        XCTAssertEqual(reader.resumeOffset, 4)
+
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("o\n".utf8))
+        try handle.close()
+
+        let restarted = EventLogReader(url: url, offset: reader.resumeOffset)
+        XCTAssertEqual(restarted.readNewLines(), [Data("two".utf8)])
+        XCTAssertEqual(restarted.resumeOffset, restarted.offset)
+    }
+
     func testPathsHonourEnvironment() {
         let paths = AIRunsPaths(environment: ["AIRUNS_HOME": "/tmp/airuns-test"])
         XCTAssertEqual(paths.events.path, "/tmp/airuns-test/events.jsonl")
