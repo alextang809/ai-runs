@@ -23,7 +23,7 @@ them all in one list in your menu bar:
 Session tracking and token statistics stay on your Mac. Optional account
 connections communicate directly with providers. AI Runs has no server.
 
-> **Latest Mac release: 1.1.0.** The download includes local token usage and optional account connections.
+> **Latest Mac release: 1.2.0.** New: hold a session until later on the On hold line, simpler session rows, and a new icon.
 > For bugs and feature requests, see [Feedback](#feedback).
 
 ## Install
@@ -110,7 +110,7 @@ chart and today's waiting time.
 current plan progress and a small history bar. Approval requests and input
 questions use the full activity line. A branch symbol warns when other sessions
 are working in the same repository. Hover for source, project and full details.
-Done starts expanded and can be folded; Ignored starts collapsed. Long lists scroll
+Done starts expanded and can be folded. Long lists scroll
 while Settings and the floating-window control stay visible. Saved items appear under
 **Later** in both windows. The floating window also has the full pinned board.
 
@@ -166,14 +166,18 @@ tell, it says **REPLIED** rather than guess. Hover a row to see how it decided.
 - **Remove** a session: hover and click **×**, or right-click → Remove from List.
   **Undo** (⌘Z) for a few seconds. It comes back when you message it again, or
   when it asks for approval.
-- **Ignore for Now:** a session waiting for your input or reply (not APPROVE)
-  can be set aside from its hover card, right-click menu, notification (**Ignore**)
-  or the floating window. It moves to an **Ignored** group, isn't counted and
-  doesn't remind you, and comes back by itself when it does something new.
-  **Stop Ignoring** undoes it.
+- **Hold Until:** a session waiting for your input or reply (not APPROVE) can be
+  put on hold. Drag its row onto a day on the **On hold** line at the bottom of
+  the panel, or choose **Hold Until** from its hover card, right-click menu or
+  the floating window: later today, a day, or **Waiting on…** someone. A
+  notification has a **Hold** button too. A held session leaves Needs you and the count, and its time on hold
+  is not counted as time it waited on you. When its time comes it returns to
+  Needs you marked **Back from hold**, without a notification. **Bring Back Now**
+  ends a hold early; a request for approval ends it too. Days AI Runs picks skip
+  weekends.
 
-  <p align="center"><img src="docs/flyout.png" width="560" alt="Hovering a row shows its details and Ignore for Now"></p>
-  <p align="center"><sub><i>Illustration: hover a row for its details and actions.</i></sub></p>
+  <p align="center"><img src="docs/flyout.png" width="560" alt="Hovering a row shows its details and actions"></p>
+  <p align="center"><sub><i>Illustration from 1.1: hover a row for its details and actions. Hold Until now takes the place of Ignore for Now.</i></sub></p>
 - The displayed topic follows changes in your requests. **Rename** keeps a name of your choice.
 - Click the pin at the end of a session row to follow its latest progress in **Pinned**. When it asks for input or approval, the row moves to **Needs you** and returns to **Pinned** after you respond. Open **Details** and choose **Save Reply** beside a message to keep that version under **Later** in either window.
 - **Floating window:** click **Floating Window** at the bottom of the panel. A small capsule stays on
@@ -218,7 +222,7 @@ local usage records is outside these totals. Removing a session from the menu
 does not remove its recorded usage.
 
 **Add Account…** and **Usage Dashboard** are always available
-from the main menu. When no sessions are active, completed and ignored sessions
+from the main menu. When no sessions are active, completed sessions
 are available under **Recent Sessions**. Unknown states stay visible without
 being counted as active.
 
