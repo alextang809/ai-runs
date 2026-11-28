@@ -204,6 +204,32 @@ final class TextUtilsTests: XCTestCase {
         XCTAssertEqual(TextUtils.title(fromPrompt: "<command-name>/clear</command-name>"), "Untitled session")
     }
 
+    func testPlainTextKeepsCodeSpansAsWritten() {
+        XCTAssertEqual(TextUtils.plainText("Run `a**b` and **go**"), "Run a**b and go")
+        XCTAssertEqual(TextUtils.plainText("Opened [`Foo.swift`](/x/Foo.swift) for **you**"), "Opened Foo.swift for you")
+        XCTAssertEqual(TextUtils.plainText("it`s **ok**"), "its ok")
+        XCTAssertEqual(TextUtils.plainText("`**` then **bold** then `x**`"), "** then bold then x**")
+    }
+
+    func testTruncateCutsAtAWordWhenOneIsNearTheLimit() {
+        XCTAssertEqual(TextUtils.truncate("short", limit: 10), "short")
+        XCTAssertEqual(TextUtils.truncate("exactly10!", limit: 10), "exactly10!")
+        XCTAssertEqual(TextUtils.truncate("alpha beta gamma delta", limit: 12), "alpha beta…")
+        // No space in the second half of the cut: cut mid-word instead of losing most of it.
+        XCTAssertEqual(TextUtils.truncate("ab cdefghijkl", limit: 8), "ab cdefg…")
+        XCTAssertEqual(TextUtils.truncate("abcdefghijklmnop", limit: 5), "abcde…")
+        // Counts characters, not bytes.
+        XCTAssertEqual(TextUtils.truncate("改好了要不要加测试", limit: 9), "改好了要不要加测试")
+        XCTAssertEqual(TextUtils.truncate("改好了要不要加测试", limit: 3), "改好了…")
+    }
+
+    func testProjectNameIsTheLastFolder() {
+        XCTAssertEqual(TextUtils.projectName(fromPath: nil), "")
+        XCTAssertEqual(TextUtils.projectName(fromPath: ""), "")
+        XCTAssertEqual(TextUtils.projectName(fromPath: "/Users/someone/ai-runs"), "ai-runs")
+        XCTAssertEqual(TextUtils.projectName(fromPath: "/Users/someone/ai-runs/"), "ai-runs")
+    }
+
     func testGenericTitleIsReplacedByLaterPrompt() throws {
         var store = SessionStore()
         let t = Date(timeIntervalSince1970: 1_800_000_000)

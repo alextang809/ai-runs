@@ -51,13 +51,23 @@ public enum TextUtils {
     /// Markdown marks that a one-line list can't render: `**bold**`, `` `code` ``,
     /// `[link](url)`, heading and quote markers. Single `*` and `_` are left
     /// alone, since they are often part of a name (`snake_case`, `*.swift`).
+    /// Text inside a code span is kept as written (`a**b` stays `a**b`).
     public static func plainText(_ text: String) -> String {
         var text = text
         text = text.replacingOccurrences(of: #"\[([^\]]+)\]\([^)\s]+\)"#, with: "$1", options: .regularExpression)
-        text = text.replacingOccurrences(of: "**", with: "")
-        text = text.replacingOccurrences(of: "`", with: "")
         text = text.replacingOccurrences(of: #"(?m)^\s{0,3}(#{1,6}|>)\s+"#, with: "", options: .regularExpression)
-        return text
+        var result = ""
+        var rest = Substring(text)
+        var inCode = false
+        // Backticks alternate prose and code; a backtick with no partner is dropped.
+        while let tick = rest.firstIndex(of: "`") {
+            let part = rest[..<tick]
+            result += inCode ? String(part) : part.replacingOccurrences(of: "**", with: "")
+            rest = rest[rest.index(after: tick)...]
+            inCode = !inCode && rest.firstIndex(of: "`") != nil
+        }
+        result += rest.replacingOccurrences(of: "**", with: "")
+        return result
     }
 
     /// The last line of a reply worth showing as a preview, without Markdown marks.
