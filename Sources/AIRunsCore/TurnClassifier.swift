@@ -69,8 +69,7 @@ public enum TurnClassifier {
         let text = clean(message ?? "")
         let sentences = tail(of: text)
             .components(separatedBy: CharacterSet(charactersIn: "\n"))
-            .flatMap { splitSentences($0) }
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { TextUtils.splitSentences($0) }
         return sentences.last { $0.hasSuffix("?") || $0.hasSuffix("？") }.map { TextUtils.truncate($0, limit: 120) }
     }
 
@@ -91,20 +90,6 @@ public enum TurnClassifier {
             .filter { !$0.isEmpty && !$0.hasPrefix("Sources:") }
         let tail = paragraphs.suffix(2).joined(separator: "\n")
         return tail.count > 400 ? String(tail.suffix(400)) : tail
-    }
-
-    private static func splitSentences(_ line: String) -> [String] {
-        var sentences: [String] = []
-        var current = ""
-        for character in line {
-            current.append(character)
-            if ".!?。！？".contains(character) {
-                sentences.append(current)
-                current = ""
-            }
-        }
-        if !current.trimmingCharacters(in: .whitespaces).isEmpty { sentences.append(current) }
-        return sentences
     }
 
     private static func contains(_ text: String, _ phrases: [String]) -> Bool {

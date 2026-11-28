@@ -101,19 +101,32 @@ public enum TextUtils {
         return String(cut) + "…"
     }
 
+    /// The sentences of `text`, each trimmed. A line break ends a sentence, and
+    /// so does `.`, `?` or `!`, unless a letter or digit follows it directly:
+    /// that is the inside of a file name, a version or an address
+    /// (`README.md`, `1.2.0`, `example.com/a?b=1`), not the end of a sentence.
     static func splitSentences(_ text: String) -> [String] {
         var sentences: [String] = []
         var current = ""
-        for character in text {
+        var index = text.startIndex
+        while index < text.endIndex {
+            let character = text[index]
+            index = text.index(after: index)
             current.append(character)
-            if ".?!。？！\n".contains(character) {
-                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { sentences.append(trimmed) }
-                current = ""
-            }
+            guard endsSentence(character, before: index < text.endIndex ? text[index] : nil) else { continue }
+            let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { sentences.append(trimmed) }
+            current = ""
         }
         let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { sentences.append(trimmed) }
         return sentences
+    }
+
+    private static func endsSentence(_ character: Character, before next: Character?) -> Bool {
+        if "。？！\n".contains(character) { return true }
+        guard ".?!".contains(character) else { return false }
+        guard let next else { return true }
+        return !(next.isASCII && (next.isLetter || next.isNumber))
     }
 }
