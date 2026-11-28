@@ -237,6 +237,24 @@ final class TextUtilsTests: XCTestCase {
         XCTAssertEqual(TextUtils.lastQuestion(in: "改好了。要不要加测试？"), "要不要加测试？")
     }
 
+    func testLastQuestionKeepsFileNamesVersionsAndLinksWhole() {
+        XCTAssertEqual(TextUtils.lastQuestion(in: "Tests pass. Should I update README.md?"),
+                       "Should I update README.md?")
+        XCTAssertEqual(TextUtils.lastQuestion(in: "Built it. Tag this as v1.2.0 or wait?"),
+                       "Tag this as v1.2.0 or wait?")
+        XCTAssertEqual(TextUtils.lastQuestion(in: "Is https://example.com/a?b=1 the right page? I can open it."),
+                       "Is https://example.com/a?b=1 the right page?")
+        // Half-width marks in Chinese text still end a sentence.
+        XCTAssertEqual(TextUtils.lastQuestion(in: "改好了.要不要加测试?好的"), "要不要加测试?")
+    }
+
+    func testSentencesEndAtMarksLineBreaksAndClosingBrackets() {
+        XCTAssertEqual(TextUtils.splitSentences("One. Two!  Three?\nFour"), ["One.", "Two!", "Three?", "Four"])
+        XCTAssertEqual(TextUtils.splitSentences("Ready (push?) Yes."), ["Ready (push?", ") Yes."])
+        XCTAssertEqual(TextUtils.splitSentences("Node.js 22.1 runs main.swift."), ["Node.js 22.1 runs main.swift."])
+        XCTAssertEqual(TextUtils.splitSentences(" \n "), [])
+    }
+
     func testDurations() {
         XCTAssertEqual(TextUtils.duration(20), "now")
         XCTAssertEqual(TextUtils.duration(9 * 60), "9m")
@@ -947,6 +965,9 @@ final class TurnOutcomeTests: XCTestCase {
 
     func testLastQuestion() {
         XCTAssertEqual(TurnClassifier.lastQuestion(in: "Fixed it. Should I push? Thanks."), "Should I push?")
+        XCTAssertEqual(TurnClassifier.lastQuestion(in: "Tests pass on 1.2.0.\nShould I update README.md?"),
+                       "Should I update README.md?")
+        XCTAssertNil(TurnClassifier.lastQuestion(in: "Renamed it to notes.md."))
     }
 
     private func ev(_ kind: EventKind, _ s: Double, message: String? = nil, question: String? = nil,
